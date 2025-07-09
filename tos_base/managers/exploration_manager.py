@@ -16,13 +16,6 @@ from ..actions import (
 )
 from ..core.room import Room
 
-"""
-TODO:
-1. Evaluation tasks
-2. exploration efficiency for Observe()
-"""
-
-
 class ExplorationManager:
     """Manages spatial exploration with agent movement and queries.
     
@@ -107,7 +100,6 @@ class ExplorationManager:
         else:
             relationships = {self.exp_graph.get_direction(obj_idx, agent_idx) 
                            for obj_idx, agent_idx in agent_unknown_pairs}
-            print(f"relationships: {relationships}")
             
             is_redundant = (len(relationships) == 1 and 
                           list(relationships)[0].horiz == Dir.UNKNOWN and 
@@ -129,7 +121,6 @@ class ExplorationManager:
                 back_dir_pair = DirPair(Dir.UNKNOWN, Dir.BACKWARD)
                 self.exp_graph.add_partial_edge(obj_idx, self.agent_idx, back_dir_pair)
 
-        print(f"exp_graph: {self.exp_graph.to_dict()}")
         return is_redundant
 
     def _execute_and_update(self, action: BaseAction) -> Tuple[bool, str, Dict[str, Any]]:
@@ -177,7 +168,7 @@ class ExplorationManager:
     def execute_action_sequence(self, action_sequence: ActionSequence) -> Tuple[str, Dict[str, Any]]:
         """Execute action sequence with validation."""
         # TODO improve returned info
-        
+
         if not action_sequence.final_action:
             return "Action sequence requires a final action.", {}
         

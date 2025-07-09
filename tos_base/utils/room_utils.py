@@ -70,7 +70,6 @@ def generate_random_objects(
         if not any(np.array_equal(pos, existing_pos) for existing_pos in positions):
             positions.append(pos)
     positions = np.array(positions[1:])
-    print(f'[DEBUG] positions: {positions}')
     orientations = random_generator.integers(0, 4, n)
     
     # Map orientation values to vectors

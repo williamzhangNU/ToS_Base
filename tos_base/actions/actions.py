@@ -178,7 +178,7 @@ class ObserveAction(BaseAction):
         visible_objects = [obj for obj in room.objects if self._is_visible(room.agent, obj) and obj.name not in neglect_objects]
         
         if not visible_objects:
-            answer = "Nothing to observe in the current field of view."
+            answer = "Nothing to observe in the current field of view"
             return ActionResult(True, self.get_feedback(True, answer=answer), {
                 'answer': answer, 'visible_objects': [], 'relationships': []
             })
