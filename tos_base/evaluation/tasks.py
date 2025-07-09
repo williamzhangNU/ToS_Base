@@ -437,15 +437,19 @@ class RotEvaluationTask(BaseEvaluationTask):
     """
 
     QUESTION_TEMPLATE = (
-        "As you turn {turn_direction} 360 degrees, which objects appear directly in front of you DURING the rotation?\n"
-        "During your rotation, you will encounter objects in a specific sequence as they come into your direct line of sight.\n"
+        "You will turn {turn_direction} 360 degrees. "
+        "During your rotation, you will encounter objects in a specific sequence as they come into your direct line of sight. "
         "List them in the order you encounter them during the rotation: object1, object2, object3"
+    )
+    MOVEMENT_TEMPLATE = (
+        "You moved to the same position as {move_obj_name}.\n"
+    )
+    TURN_TEMPLATE = (
+        "You turned clockwise {degree} degrees.\n"
     )
     
     def generate_question(self, room: Room) -> str:
-        room = room.copy()
-        turn_direction = self.config.get('turn_direction', 'clockwise')
-        
+
         def get_angle(pos: np.ndarray) -> float:
             """Get angle from positive y-axis"""
             angle = np.arctan2(pos[0], pos[1])
@@ -453,11 +457,29 @@ class RotEvaluationTask(BaseEvaluationTask):
                 angle += 2 * np.pi  
             return angle
         
+        room = room.copy()
+        turn_direction = self.config.get('turn_direction', 'clockwise')
+        if_move = self.config.get('if_move', False)
+        if_turn = self.config.get('if_turn', False)
+        
+        movement_prompt = ""
+        turn_prompt = ""
+        neglect_objects = []
+        if if_move:
+            move_obj = self.np_random.choice(room.objects)
+            movement_prompt = self.MOVEMENT_TEMPLATE.format(move_obj_name=move_obj.name)
+            neglect_objects.append(move_obj.name)
+            MoveAction(move_obj.name).execute(room)
+        if if_turn:
+            degree = self.np_random.choice([90, 180, 270])
+            turn_prompt = self.TURN_TEMPLATE.format(degree=degree)
+            RotateAction(degree).execute(room)
+
         objects = room.objects
         objects.sort(key=lambda x: get_angle(x.pos), reverse=(turn_direction == 'counterclockwise'))
 
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(turn_direction=turn_direction)
-        self.eval_data.answer = [obj.name for obj in objects]
+        self.eval_data.question = movement_prompt + turn_prompt + self.QUESTION_TEMPLATE.format(turn_direction=turn_direction)
+        self.eval_data.answer = [obj.name for obj in objects if obj.name not in neglect_objects]
         self.eval_data.reasoning = self._generate_reasoning(room)
         return self.eval_data.question
     
@@ -609,14 +631,19 @@ if __name__ == "__main__":
     # print(reverse_dir_question)
     # print(f"Expected answer: {reverse_dir_task.answer}")
 
-    # # Test rotation evaluation task
-    # print("\n" + "="*50)
-    # print("Testing RotEvaluationTask:")
-    # print("="*50)
-    # rot_task = RotEvaluationTask(np_random=np_random, config={'turn_direction': 'counterclockwise'})
-    # rot_question = rot_task.generate_question(room)
-    # print(rot_question)
-    # print(f"Expected answer: {rot_task.answer}")
+    # Test rotation evaluation task
+    print("\n" + "="*50)
+    print("Testing RotEvaluationTask:")
+    print("="*50)
+    rotation_config = {
+        'turn_direction': 'counterclockwise',
+        'if_move': True,
+        'if_turn': True
+    }
+    rot_task = RotEvaluationTask(np_random=np_random, config=rotation_config)
+    rot_question = rot_task.generate_question(room)
+    print(rot_question)
+    print(f"Expected answer: {rot_task.answer}")
 
     # # Test pov evaluation task
     # print("\n" + "="*50)
@@ -627,34 +654,34 @@ if __name__ == "__main__":
     # print(pov_question)
     # print(f"Expected answer: {pov_task.answer}")
 
-    # Test object presence evaluation task
-    print("\n" + "="*50)
-    print("Testing ObjectPresenceEvaluationTask:")
-    print("="*50)
-    obj_presence_task = ObjectPresenceEvaluationTask(np_random=np_random)
-    obj_presence_question = obj_presence_task.generate_question(room)
-    print(obj_presence_question)
-    print(f"Expected answer: {obj_presence_task.answer}")
+    # # Test object presence evaluation task
+    # print("\n" + "="*50)
+    # print("Testing ObjectPresenceEvaluationTask:")
+    # print("="*50)
+    # obj_presence_task = ObjectPresenceEvaluationTask(np_random=np_random)
+    # obj_presence_question = obj_presence_task.generate_question(room)
+    # print(obj_presence_question)
+    # print(f"Expected answer: {obj_presence_task.answer}")
     
-    # Test with a correct answer
-    pred_answer = ", ".join(obj_presence_task.answer)
-    correct, info = obj_presence_task.evaluate(pred_answer)
-    print(f"Test with correct answer: {correct}, Info: {info}")
+    # # Test with a correct answer
+    # pred_answer = ", ".join(obj_presence_task.answer)
+    # correct, info = obj_presence_task.evaluate(pred_answer)
+    # print(f"Test with correct answer: {correct}, Info: {info}")
     
-    # Test with a partial answer
-    partial_answer = ", ".join(obj_presence_task.answer[:2])  # Only first 2 objects
-    correct, info = obj_presence_task.evaluate(partial_answer)
-    print(f"Test with partial answer: {correct}, Info: {info}")
+    # # Test with a partial answer
+    # partial_answer = ", ".join(obj_presence_task.answer[:2])  # Only first 2 objects
+    # correct, info = obj_presence_task.evaluate(partial_answer)
+    # print(f"Test with partial answer: {correct}, Info: {info}")
 
-    # Test e2a evaluation task
-    print("\n" + "="*50)
-    print("Testing E2AEvaluationTask:")
-    print("="*50)
-    e2a_task = E2AEvaluationTask(np_random=np_random)
-    e2a_question = e2a_task.generate_question(room)
-    print(e2a_question)
-    print(f"Expected answer: {e2a_task.answer}")
-    pred_answer = "[(1, 8), (0, 0), (6, -4), (3, -5)]"
-    correct, info = e2a_task.evaluate(pred_answer)
-    print(correct)
-    print(info)
+    # # Test e2a evaluation task
+    # print("\n" + "="*50)
+    # print("Testing E2AEvaluationTask:")
+    # print("="*50)
+    # e2a_task = E2AEvaluationTask(np_random=np_random)
+    # e2a_question = e2a_task.generate_question(room)
+    # print(e2a_question)
+    # print(f"Expected answer: {e2a_task.answer}")
+    # pred_answer = "[(1, 8), (0, 0), (6, -4), (3, -5)]"
+    # correct, info = e2a_task.evaluate(pred_answer)
+    # print(correct)
+    # print(info)

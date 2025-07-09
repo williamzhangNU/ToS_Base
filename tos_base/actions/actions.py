@@ -102,7 +102,7 @@ class RotateAction(BaseAction):
             obj.ori = obj.ori @ rotation_matrix
     
     def success_message(self, **kwargs) -> str:
-        return f"You rotated by {self.degrees}°."
+        return f"You rotated clockwise {self.degrees}°."
     
     def error_message(self, error_type: str) -> str:
         if error_type == "invalid_degree":
