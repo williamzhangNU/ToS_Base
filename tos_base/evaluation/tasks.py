@@ -16,6 +16,8 @@ from ..utils.eval_utilities import (
     deg_seq_eval_fn,
     list_dir_eval_fn,
     e2a_eval_fn,
+    obj_presence_eval_fn,
+    multi_choice_eval_fn,
 )
 from ..core.constant import CANDIDATE_OBJECTS
 from ..core.graph import DirectionalGraph
@@ -63,45 +65,13 @@ class EvaluationData:
             return obj_seq_eval_fn(pred, self.answer), {}
         
         elif self.task_type == 'ReverseDirEvaluationTask':
-            return pred.strip().lower() in [ans.strip().lower() for ans in self.answer], {}
+            return multi_choice_eval_fn(pred, self.answer), {}
         
         elif self.task_type == 'E2AEvaluationTask':
             return e2a_eval_fn(pred, self.answer)
         
         elif self.task_type == 'ObjectPresenceEvaluationTask':
-            # Parse predicted objects from text
-            pred_objects = []
-            if isinstance(pred, str):
-                # Simple parsing - extract words that could be object names
-                import re
-                # Remove common words and extract potential object names
-                words = re.findall(r'\b[a-zA-Z]+\b', pred.lower())
-                pred_objects = [word for word in words if len(word) > 2]
-            elif isinstance(pred, list):
-                pred_objects = [str(obj).lower().strip() for obj in pred]
-            
-            # Ground truth objects (already lowercase)
-            gt_objects = set(obj.lower() for obj in self.answer)
-            pred_objects_set = set(pred_objects)
-            
-            # Calculate metrics
-            correct_count = len(gt_objects.intersection(pred_objects_set))
-            total_gt = len(gt_objects)
-            precision = correct_count / len(pred_objects_set) if pred_objects_set else 0.0
-            recall = correct_count / total_gt if total_gt > 0 else 0.0
-            f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-            
-            info = {
-                "precision": precision,
-                "recall": recall, 
-                "f1": f1,
-                "correct_count": correct_count,
-                "total_gt": total_gt,
-                "predicted_objects": list(pred_objects_set),
-                "ground_truth_objects": list(gt_objects)
-            }
-            
-            return correct_count == total_gt, info
+            return obj_presence_eval_fn(pred, self.answer)
         
         return False, {"error": "Unknown task type"}
     
@@ -585,13 +555,19 @@ class E2AEvaluationTask(BaseEvaluationTask):
 
 
 if __name__ == "__main__":
-    from ragen.env.spatial.config import SpatialGymConfig
+    from ..core import CANDIDATE_OBJECTS
     from ..utils.room_utils import generate_room
     from gymnasium.utils import seeding
 
-    config = SpatialGymConfig(n_objects=4, generation_type='pov', perspective='ego')
+    room_config = {
+        'room_range': [-10, 10],
+        'n_objects': 4,
+        'candidate_objects': CANDIDATE_OBJECTS,
+        'generation_type': 'rand',
+        'perspective': 'ego'
+    }
     np_random = seeding.np_random(1234)[0]
-    room = generate_room(**config.get_room_config(), np_random=np_random)
+    room = generate_room(**room_config, np_random=np_random)
     print(room)
 
     # # Test all pairs evaluation task

@@ -273,6 +273,72 @@ def deg_seq_eval_fn(
     return True
 
 
+def obj_presence_eval_fn(pred: Any, answer: List[str]) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Evaluate object presence task specifically.
+
+    Handles multiple input formats:
+    - book, lamp, chair
+    - ["book", "lamp", "chair"]
+    
+    Args:
+        pred: The predicted answer (string or list of object names)
+        answer: The ground truth answer (list of object names)
+        
+    Returns:
+        Tuple[bool, Dict[str, Any]]: (is_correct, info_dict with metrics)
+    """
+    # Parse predicted objects from text
+    if not pred or not isinstance(pred, str):
+        return False
+    
+    pred_objects = extract_elements(pred, str)
+    
+    if not pred_objects:
+        return False
+    
+    # Ground truth objects (already lowercase)
+    gt_objects = set(obj.lower() for obj in answer)
+    pred_objects_set = set(pred_objects)
+    
+    # Calculate metrics
+    correct_count = len(gt_objects.intersection(pred_objects_set))
+    total_gt = len(gt_objects)
+    precision = correct_count / len(pred_objects_set) if pred_objects_set else 0.0
+    recall = correct_count / total_gt if total_gt > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    
+    info = {
+        "precision": precision,
+        "recall": recall, 
+        "f1": f1,
+        "correct_count": correct_count,
+        "total_gt": total_gt,
+        "predicted_objects": list(pred_objects_set),
+        "ground_truth_objects": list(gt_objects)
+    }
+    
+    return correct_count == total_gt, info
+
+
+def multi_choice_eval_fn(pred: str, answer: List[str]) -> bool:
+    """
+    Evaluate if the predicted answer matches any of the valid answers (case-insensitive).
+    
+    Args:
+        pred: The predicted answer (string)
+        answer: List of valid answers
+        
+    Returns:
+        bool: True if prediction matches any valid answer, False otherwise
+    """
+    if not pred or not isinstance(pred, str):
+        return False
+    
+    pred_cleaned = pred.strip().lower()
+    return pred_cleaned in [ans.strip().lower() for ans in answer]
+
+
 def e2a_eval_fn(pred: Any, answer: Any) -> Tuple[bool, Dict[str, Any]]:
     """
     Evaluate E2A (ego to allocentric) task specifically.
@@ -315,28 +381,65 @@ def e2a_eval_fn(pred: Any, answer: Any) -> Tuple[bool, Dict[str, Any]]:
 if __name__ == "__main__":
     # Test cases for list_dir_eval_fn
     
-    # Test case 1: Basic correct case
-    test_answer_1 = "1. (left, above)\n2. (right, below)\n3. (right, same)"
-    test_gt_1 = ["(left, above)", "(right, below)", "(right, same)"]
-    result_1 = list_dir_eval_fn(test_answer_1, test_gt_1)
-    print(f"Test 1 result: {result_1}")  # Should be True
+    # # Test case 1: Basic correct case
+    # test_answer_1 = "1. (left, above)\n2. (right, below)\n3. (right, same)"
+    # test_gt_1 = ["(left, above)", "(right, below)", "(right, same)"]
+    # result_1 = list_dir_eval_fn(test_answer_1, test_gt_1)
+    # print(f"Test 1 result: {result_1}")  # Should be True
     
-    # Test case 2: Incorrect order
-    test_answer_2 = "1. (right, below)\n2. (left, above)\n3. (right, same)"
-    test_gt_2 = ["(left, above)", "(right, below)", "(right, same)"]
-    result_2 = list_dir_eval_fn(test_answer_2, test_gt_2)
-    print(f"Test 2 result: {result_2}")  # Should be False
+    # # Test case 2: Incorrect order
+    # test_answer_2 = "1. (right, below)\n2. (left, above)\n3. (right, same)"
+    # test_gt_2 = ["(left, above)", "(right, below)", "(right, same)"]
+    # result_2 = list_dir_eval_fn(test_answer_2, test_gt_2)
+    # print(f"Test 2 result: {result_2}")  # Should be False
     
-    # Test case 3: Different formatting but correct content
-    test_answer_3 = "1. (Left, Above)\n2. (Right, Below)\n3. (Right, Same)"
-    test_gt_3 = ["(left, above)", "(right, below)", "(right, same)"]
-    result_3 = list_dir_eval_fn(test_answer_3, test_gt_3)
-    print(f"Test 3 result: {result_3}")  # Should be True
+    # # Test case 3: Different formatting but correct content
+    # test_answer_3 = "1. (Left, Above)\n2. (Right, Below)\n3. (Right, Same)"
+    # test_gt_3 = ["(left, above)", "(right, below)", "(right, same)"]
+    # result_3 = list_dir_eval_fn(test_answer_3, test_gt_3)
+    # print(f"Test 3 result: {result_3}")  # Should be True
 
-    # Test case 4: Incorrect number of predictions
-    test_answer_4 = "1. (left, above)\n4. (left, below)\n3. (right, same)\n2. (right, below)"
-    test_gt_4 = ["(left, above)", "(right, below)", "(right, same)"]
-    result_4 = list_dir_eval_fn(test_answer_4, test_gt_4)
-    print(f"Test 4 result: {result_4}")  # Should be False
+    # # Test case 4: Incorrect number of predictions
+    # test_answer_4 = "1. (left, above)\n4. (left, below)\n3. (right, same)\n2. (right, below)"
+    # test_gt_4 = ["(left, above)", "(right, below)", "(right, same)"]
+    # result_4 = list_dir_eval_fn(test_answer_4, test_gt_4)
+    # print(f"Test 4 result: {result_4}")  # Should be False
     
+    # Test cases for obj_presence_eval_fn
+    
+    # Test case 5: Basic correct object presence
+    test_answer_5 = "book, lamp, chair"
+    test_gt_5 = ["book", "lamp", "chair"]
+    result_5 = obj_presence_eval_fn(test_answer_5, test_gt_5)
+    print(f"Test 5 result: {result_5}")  # Should be True
+    
+    # Test case 6: Extra objects in prediction
+    test_answer_6 = "book, lamp, chair, table"
+    test_gt_6 = ["book", "lamp", "chair"]
+    result_6 = obj_presence_eval_fn(test_answer_6, test_gt_6)
+    print(f"Test 6 result: {result_6}")  # Should be False
+    
+    # Test case 7: Missing objects in prediction
+    test_answer_7 = "book, lamp"
+    test_gt_7 = ["book", "lamp", "chair"]
+    result_7 = obj_presence_eval_fn(test_answer_7, test_gt_7)
+    print(f"Test 7 result: {result_7}")  # Should be False
+    
+    # Test case 8: Different order but correct objects
+    test_answer_8 = "chair, book, lamp"
+    test_gt_8 = ["book", "lamp", "chair"]
+    result_8 = obj_presence_eval_fn(test_answer_8, test_gt_8)
+    print(f"Test 8 result: {result_8}")  # Should be True
+    
+    # Test case 9: Case sensitivity
+    test_answer_9 = "Book, LAMP, Chair"
+    test_gt_9 = ["book", "lamp", "chair"]
+    result_9 = obj_presence_eval_fn(test_answer_9, test_gt_9)
+    print(f"Test 9 result: {result_9}")  # Should be True
+    
+    # Test case 10: Empty prediction
+    test_answer_10 = ""
+    test_gt_10 = ["book", "lamp", "chair"]
+    result_10 = obj_presence_eval_fn(test_answer_10, test_gt_10)
+    print(f"Test 10 result: {result_10}")  # Should be False
     

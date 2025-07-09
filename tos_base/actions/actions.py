@@ -362,7 +362,7 @@ class ActionSequence:
 
 if __name__ == "__main__":
     # Test action parsing and execution
-    from ragen.env.spatial.Base import Room, Object, Agent
+    from ..core import Room, Object, Agent
     import numpy as np
     
     # Create test room
