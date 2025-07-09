@@ -42,24 +42,22 @@ class EvaluationManager:
         task = self._get_current_eval_task()
         return None if task is None else task.generate_question(room.copy())
     
-    def evaluate_answer(self, answer: str) -> Tuple[bool, float, Dict[str, Any]]:
+    def evaluate_answer(self, answer: str) -> Tuple[bool, Dict[str, Any]]:
         """Evaluate answer for current task."""
         if self.current_index >= len(self.tasks):
-            return False, 0.0, {}
+            return False, {}
         
         task = self.tasks[self.current_index]
         correct, info = task.evaluate(answer)
-        score = info.get('score', 1.0 if correct else 0.0)
         
         # Record result
         self.results.append({
             "task_type": task.__class__.__name__,
             "correct": correct,
-            "score": score,
             "info": info
         })
         
-        return correct, score, info
+        return correct, info
     
     def next_task(self) -> bool:
         """Move to next task. Returns True if there are more tasks."""
@@ -116,19 +114,31 @@ class EvaluationManager:
 if __name__ == "__main__":
     # Simple test
     from ..utils.room_utils import generate_room
+    from ..core.constant import CANDIDATE_OBJECTS
     from gymnasium.utils import seeding
     
-    eval_tasks = [{"task_type": "dir", "task_kwargs": {}}]
+    eval_tasks = [{"task_type": "rot", "task_kwargs": {}}]
     np_random = seeding.np_random(42)[0]
     
     eval_manager = EvaluationManager(eval_tasks, np_random)
-    room = generate_room(np_random=np_random)
+    room = generate_room(
+        np_random=np_random,
+        n_objects=3, 
+        candidate_objects=CANDIDATE_OBJECTS,
+        generation_type="rand",
+        room_range=[-10, 10],
+        perspective="ego",
+    )
+    print(f"Room: {room}")
     
     question = eval_manager.get_current_question(room)
     print(f"Question: {question}")
     
-    correct, score, info = eval_manager.evaluate_answer("(left, front)")
-    print(f"Result: correct={correct}, score={score}")
+    task = eval_manager._get_current_eval_task()
+    print(f"Task Answer: {task.answer}")
+    
+    correct, info = eval_manager.evaluate_answer("['keyboard', 'sofa', 'microphone']")
+    print(f"Result: correct={correct}, info={info}")
     
     summary = eval_manager.get_evaluation_summary()
     print(f"Summary: {summary['accuracy']}") 

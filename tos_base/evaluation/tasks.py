@@ -437,8 +437,8 @@ class RotEvaluationTask(BaseEvaluationTask):
     """
 
     QUESTION_TEMPLATE = (
-        "As you turn {turn_direction} 360 degrees, what objects do you see directly in front of you during the rotation, in order?\n"
-        "List the objects as: object1, object2, object3"
+        "As you turn {turn_direction} 360 degrees, which objects appear directly in front of you DURING the rotation?\n"
+        "List them in the order you encounter them: object1, object2, object3"
     )
     
     def generate_question(self, room: Room) -> str:

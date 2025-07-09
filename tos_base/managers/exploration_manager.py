@@ -176,6 +176,8 @@ class ExplorationManager:
 
     def execute_action_sequence(self, action_sequence: ActionSequence) -> Tuple[str, Dict[str, Any]]:
         """Execute action sequence with validation."""
+        # TODO improve returned info
+        
         if not action_sequence.final_action:
             return "Action sequence requires a final action.", {}
         
