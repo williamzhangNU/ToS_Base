@@ -433,7 +433,7 @@ class RotEvaluationTask(BaseEvaluationTask):
     Agent turns clockwise/counterclockwise and lists objects in order of encounter.
 
     TODO:
-    1. To add difficulty, change agent's position and orientation
+    1. for movement, need to gaurentee no ambiguity when generate room / evaluate answer
     """
 
     QUESTION_TEMPLATE = (
