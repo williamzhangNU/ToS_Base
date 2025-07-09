@@ -1,0 +1,134 @@
+"""Simple Evaluation Manager for SpatialGym Environment"""
+
+import numpy as np
+from typing import List, Dict, Any, Optional, Tuple
+
+from ..evaluation.task_factory import get_eval_task
+from ..core.room import Room
+from ..evaluation.tasks import BaseEvaluationTask
+
+
+class EvaluationManager:
+    """
+    Manages evaluation tasks for the SpatialGym environment.
+    
+    Handles task initialization, question generation, answer evaluation,
+    and tracking of evaluation results across multiple tasks.
+    """
+    
+    def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator):
+        self.eval_tasks = eval_tasks
+        self.np_random = np_random
+        
+        # Initialize tasks
+        self.tasks = []
+        for task_spec in eval_tasks:
+            task_type = task_spec['task_type']
+            task_kwargs = task_spec.get('task_kwargs', {})
+            task = get_eval_task(task_type, np_random, task_kwargs)
+            self.tasks.append(task)
+        
+        self.current_index = 0
+        self.results = [] # log of results for each task
+    
+    def _get_current_eval_task(self) -> Optional[BaseEvaluationTask]:
+        """Get current evaluation task."""
+        if self.current_index >= len(self.tasks):
+            return None
+        return self.tasks[self.current_index]
+    
+    def get_current_question(self, room: Room) -> Optional[str]:
+        """Get question for current task."""
+        task = self._get_current_eval_task()
+        return None if task is None else task.generate_question(room.copy())
+    
+    def evaluate_answer(self, answer: str) -> Tuple[bool, float, Dict[str, Any]]:
+        """Evaluate answer for current task."""
+        if self.current_index >= len(self.tasks):
+            return False, 0.0, {}
+        
+        task = self.tasks[self.current_index]
+        correct, info = task.evaluate(answer)
+        score = info.get('score', 1.0 if correct else 0.0)
+        
+        # Record result
+        self.results.append({
+            "task_type": task.__class__.__name__,
+            "correct": correct,
+            "score": score,
+            "info": info
+        })
+        
+        return correct, score, info
+    
+    def next_task(self) -> bool:
+        """Move to next task. Returns True if there are more tasks."""
+        self.current_index += 1
+        return self.current_index < len(self.tasks)
+    
+    def get_evaluation_summary(self) -> Dict[str, Any]:
+        """Get evaluation summary."""
+        total_tasks = len(self.tasks)
+        completed_tasks = len(self.results)
+        
+        if completed_tasks == 0:
+            return {
+                "total_tasks": total_tasks,
+                "completed_tasks": 0,
+                "accuracy": 0.0,
+                "task_results": [],
+                "unanswered_tasks": total_tasks
+            }
+        
+        correct_count = sum(1 for r in self.results if r["correct"])
+        accuracy = correct_count / completed_tasks
+        
+        # Add completed results
+        task_results = self.results.copy()
+        
+        # Add unanswered tasks
+        for i in range(completed_tasks, total_tasks):
+            task_results.append({
+                "task_type": self.tasks[i].__class__.__name__,
+                "correct": False,
+                "score": 0.0,
+                "info": {"status": "unanswered"}
+            })
+        
+        return {
+            "total_tasks": total_tasks,
+            "completed_tasks": completed_tasks,
+            "unanswered_tasks": total_tasks - completed_tasks,
+            "accuracy": accuracy,
+            "accuracy_completed": accuracy,
+            "task_results": task_results
+        }
+    
+    def reset(self):
+        """Reset to start."""
+        self.current_index = 0
+        self.results = []
+    
+    def __len__(self):
+        return len(self.tasks)
+
+
+if __name__ == "__main__":
+    # Simple test
+    from ..utils.room_utils import generate_room
+    from gymnasium.utils import seeding
+    
+    eval_tasks = [{"task_type": "dir", "task_kwargs": {}}]
+    np_random = seeding.np_random(42)[0]
+    
+    eval_manager = EvaluationManager(eval_tasks, np_random)
+    room = generate_room(np_random=np_random)
+    
+    question = eval_manager.get_current_question(room)
+    print(f"Question: {question}")
+    
+    correct, score, info = eval_manager.evaluate_answer("(left, front)")
+    print(f"Result: correct={correct}, score={score}")
+    
+    summary = eval_manager.get_evaluation_summary()
+    print(f"Summary: {summary['accuracy']}") 
