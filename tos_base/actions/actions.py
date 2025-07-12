@@ -31,7 +31,7 @@ Examples:
 
 Rules:
 - Term() must be alone (no movement actions)
-- Field of view: 180 degrees (90° left, 90° right)
+- Field of view: {field_of_view} degrees.
 """
 
 
@@ -356,7 +356,8 @@ class ActionSequence:
         
         return ACTION_INSTRUCTION.format(
             actions=action_desc,
-            examples=examples
+            examples=examples,
+            field_of_view=BaseAction.get_field_of_view()
         )
 
 

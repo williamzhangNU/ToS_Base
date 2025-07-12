@@ -27,8 +27,22 @@ class BaseAction(ABC):
     example = ""
     format_pattern = ""
     
+    # Shared field of view for all actions
+    _field_of_view: int = 90
+    
     def __init__(self, parameters=None):
         self.parameters = parameters
+    
+    @classmethod
+    def set_field_of_view(cls, field_of_view: int):
+        """Set the field of view for all actions"""
+        assert field_of_view in [90, 180], "Field of view must be 90 or 180 degrees"
+        cls._field_of_view = field_of_view
+    
+    @classmethod
+    def get_field_of_view(cls) -> int:
+        """Get the current field of view"""
+        return cls._field_of_view
     
     @abstractmethod
     def success_message(self, **kwargs) -> str:
@@ -54,13 +68,13 @@ class BaseAction(ABC):
         pass
     
     @staticmethod
-    def _is_visible(from_obj, to_obj, field_of_view: int = 180) -> bool:
+    def _is_visible(from_obj, to_obj, field_of_view: int = None) -> bool:
         """
         Check if to_obj is visible from from_obj
         Args:
             from_obj: Object viewing from
             to_obj: Object being viewed
-            field_of_view: Field of view in degrees (90 or 180)
+            field_of_view: Field of view in degrees (90 or 180). If None, uses class default.
             
         Returns:
             bool: True if to_obj is visible from from_obj's perspective
@@ -69,6 +83,9 @@ class BaseAction(ABC):
             - For 90-degree field of view: objects within 45° left and right of orientation
             - For 180-degree field of view: objects within 90° left and right of orientation
         """
+        if field_of_view is None:
+            field_of_view = BaseAction._field_of_view
+        
         assert field_of_view in [90, 180], "Invalid field of view"
         direction_vec = to_obj.pos - from_obj.pos
         if np.allclose(direction_vec, 0):

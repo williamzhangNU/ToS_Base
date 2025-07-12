@@ -74,7 +74,7 @@ class ExplorationManager:
         """Update exploration graph after rotate action."""
         self.exp_graph.rotate_axis(degrees)
     
-    def _update_observe(self, visible_objects: List[str], field_of_view: int = 180) -> bool:
+    def _update_observe(self) -> bool:
         """Update exploration graph after observe action.
         
         Checks efficiency and updates relationships:
@@ -82,14 +82,19 @@ class ExplorationManager:
            unknown objects are only known to be behind the agent
         2. Update visible objects with full relationships
         3. For 180° field of view: update invisible objects as behind the agent
-        
-        Args:
-            visible_objects: List of object names that are visible
-            field_of_view: Field of view in degrees (90 or 180)
             
         Returns:
             bool: True if this observation is redundant (not efficient)
         """
+        field_of_view = BaseAction.get_field_of_view()
+        assert field_of_view in [90, 180], "Field of view must be 90 or 180 degrees"
+        
+        # Calculate visible objects using _is_visible
+        agent = self.exploration_room.agent
+        neglect_objects = [self.agent_anchor.name, agent.name]
+        visible_objects = [obj.name for obj in self.exploration_room.objects 
+                          if BaseAction._is_visible(agent, obj) and obj.name not in neglect_objects]
+        
         # 1. Check efficiency
         unknown_pairs = self.get_unknown_pairs()
         agent_unknown_pairs = [(pair[1], pair[0]) if pair[0] == self.agent_idx else pair 
@@ -97,24 +102,34 @@ class ExplorationManager:
         
         if not agent_unknown_pairs:
             is_redundant = True
+            print("No unknown pairs with agent")
         else:
             relationships = {self.exp_graph.get_direction(obj_idx, agent_idx) 
                            for obj_idx, agent_idx in agent_unknown_pairs}
             
-            is_redundant = (len(relationships) == 1 and 
-                          list(relationships)[0].horiz == Dir.UNKNOWN and 
-                          list(relationships)[0].vert == Dir.BACKWARD)
+            if field_of_view == 90:
+                # for 90 degree, agent should not observe when all objects are back
+                # four possible directions: front, back, left, right
+                is_redundant = (len(relationships) == 1 and 
+                                list(relationships)[0].horiz == Dir.UNKNOWN and 
+                                list(relationships)[0].vert == Dir.BACKWARD)
+            else:
+                # for 180 degree, agent should observe when all objects are front
+                print(f"relationships: {relationships}")
+                is_redundant = (len(relationships) == 1 and 
+                                (list(relationships)[0].horiz != Dir.UNKNOWN or 
+                                list(relationships)[0].vert != Dir.FORWARD))
         
         # 2. Update relationships for visible objects
         for obj_name in visible_objects:
             obj_idx = self._get_index(obj_name)
-            dir_pair, _ = self.exploration_room.get_direction(obj_name, self.exploration_room.agent.name)
+            dir_pair, _ = self.exploration_room.get_direction(obj_name, agent.name)
             self.exp_graph.add_edge(obj_idx, self.agent_idx, dir_pair)
         
         # 3. Update invisible objects for 180° field of view
         if field_of_view == 180:
             invisible_objects = [obj.name for obj in self.exploration_room.objects 
-                               if obj.name not in visible_objects + [self.agent_anchor.name, self.exploration_room.agent.name]]
+                               if obj.name not in visible_objects + neglect_objects]
             
             for obj_name in invisible_objects:
                 obj_idx = self._get_index(obj_name)
@@ -145,7 +160,7 @@ class ExplorationManager:
             self._update_move(result.data['target_name'])
             self._update_rotate(result.data['degrees'])
         elif isinstance(action, ObserveAction):
-            result.data['redundant'] = self._update_observe(result.data['visible_objects'])
+            result.data['redundant'] = self._update_observe()
         
         return result.success, result.message, result.data
 
@@ -295,8 +310,8 @@ if __name__ == "__main__":
         table_idx = manager._get_index("table")
         manager.exp_graph.add_edge(table_idx, agent_idx, DirPair(Dir.LEFT, Dir.SAME))
         
-        # Call _update_observe with table visible
-        is_novel = manager._update_observe(["table"])
+        # Call _update_observe
+        is_novel = manager._update_observe()
         
         print(f"  Result: is_novel = {is_novel}")
         print(f"  Expected: False (no unknown pairs)")
@@ -314,8 +329,8 @@ if __name__ == "__main__":
         ])
         manager = ExplorationManager(room)
         
-        # Call _update_observe with objects visible
-        is_novel = manager._update_observe(["table", "chair"])
+        # Call _update_observe
+        is_novel = manager._update_observe()
         
         print(f"  Result: is_novel = {is_novel}")
         print(f"  Expected: True (unknown pairs in front direction)")
@@ -338,7 +353,7 @@ if __name__ == "__main__":
         chair_idx = manager._get_index("chair")
         manager.exp_graph.add_edge(chair_idx, agent_idx, DirPair(Dir.SAME, Dir.FORWARD))
         
-        is_novel = manager._update_observe(["chair"])
+        is_novel = manager._update_observe()
         
         print(f"  Result: is_novel = {is_novel}")
         print(f"  Expected: False (not in front direction)")
@@ -355,7 +370,7 @@ if __name__ == "__main__":
         ])
         manager = ExplorationManager(room)
         
-        is_novel = manager._update_observe(["table", "chair"])
+        is_novel = manager._update_observe()
         
         print(f"  Result: is_novel = {is_novel}")
         print(f"  Expected: True (multiple directions)")
@@ -381,7 +396,7 @@ if __name__ == "__main__":
         print(f"    Table->Agent: {dir_pair_before}")
         
         # Call observe
-        manager._update_observe(["table"])
+        manager._update_observe()
         
         # After observe - should have known relationship
         print(f"  After observe:")
@@ -399,22 +414,63 @@ if __name__ == "__main__":
         room = create_test_room([("table", [-1, -1])])
         manager = ExplorationManager(room)
         
-        # Should handle empty list gracefully
-        is_novel = manager._update_observe([])
+        # Should handle gracefully
+        is_novel = manager._update_observe()
         
         print(f"  Result: is_novel = {is_novel}")
         print(f"  Expected: False (no visible objects)")
         # Should not be novel since no new information gained
         print("  ✓ PASSED\n")
     
+    # def test_update_observe_efficiency_algorithm():
+    #     """Test the detailed efficiency algorithm logic."""
+    #     print("Test 8: Detailed efficiency algorithm")
+        
+    #     room = create_test_room([
+    #         ("obj1", [1, 2]),    # front-right
+    #         ("obj2", [3, 0]),    # front-right
+    #         ("obj3", [-1, 1]),    # front-left
+    #         ("obj4", [2, -1])    # back-right
+    #     ])
+    #     manager = ExplorationManager(room)
+        
+    #     print("  Initial unknown pairs:")
+    #     unknown_pairs = manager.get_unknown_pairs()
+    #     agent_unknown = [(pair[1], pair[0]) if pair[0] == manager.agent_idx else pair 
+    #                     for pair in unknown_pairs if manager.agent_idx in pair]
+    #     print(f"    Agent unknown pairs: {len(agent_unknown)}")
+        
+    #     # All objects are in front (different horizontal positions)
+    #     # This should be considered novel
+    #     is_redundant = manager._update_observe()
+    #     print(f"Exp_graph: {manager.exp_graph.to_dict()}")
+        
+    #     manager.execute_action(MoveAction(target="obj1"))
+    #     manager.execute_action(RotateAction(degrees=270))
+    #     is_redundant = manager._update_observe()
+    #     print(f'Exp_graph: {manager.exp_graph.to_dict()}')
+
+    #     manager.execute_action(RotateAction(degrees=180))
+    #     manager.execute_action(MoveAction(target="obj4"))
+    #     manager.execute_action(RotateAction(degrees=270))
+
+    #     print(f"exp_graph: {manager.exp_graph.to_dict()}")
+
+    #     is_redundant = manager._update_observe()
+    #     print(f"  Result: is_redundant = {is_redundant}")
+    #     print(f"  Expected: False")
+    #     assert not is_redundant, "Should be redundant with objects in multiple front directions"
+    #     print("  ✓ PASSED\n")
+
     def test_update_observe_efficiency_algorithm():
         """Test the detailed efficiency algorithm logic."""
         print("Test 8: Detailed efficiency algorithm")
         
         room = create_test_room([
             ("obj1", [1, 2]),    # front-right
-            ("obj2", [0, 3]),    # front  
-            ("obj3", [-1, 1])    # front-left
+            ("obj2", [3, 0]),    # front-right
+            ("obj3", [-1, 1]),    # front-left
+            ("obj4", [2, -1])    # back-right
         ])
         manager = ExplorationManager(room)
         
@@ -426,14 +482,19 @@ if __name__ == "__main__":
         
         # All objects are in front (different horizontal positions)
         # This should be considered novel
-        is_novel = manager._update_observe(["obj1", "obj2", "obj3"])
+        is_redundant = manager._update_observe()
+        print(f"Exp_graph: {manager.exp_graph.to_dict()}")
         
-        manager.execute_action(MoveAction(target="obj3"))
-        manager.execute_action(RotateAction(degrees=0))
+        manager.execute_action(RotateAction(degrees=90))
+        is_redundant = manager._update_observe()
+        print(f'Exp_graph: {manager.exp_graph.to_dict()}')
 
-        print(f"After moving to obj1 exp_graph: {manager.exp_graph.to_dict()}")
+        manager.execute_action(MoveAction(target="obj4"))
+        manager.execute_action(RotateAction(degrees=180))
 
-        is_redundant = manager._update_observe(["obj2", "obj3"])
+        print(f"exp_graph: {manager.exp_graph.to_dict()}")
+
+        is_redundant = manager._update_observe()
         print(f"  Result: is_redundant = {is_redundant}")
         print(f"  Expected: False")
         assert not is_redundant, "Should be redundant with objects in multiple front directions"

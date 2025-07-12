@@ -205,9 +205,9 @@ class AllPairsEvaluationTask(BaseEvaluationTask):
     QUESTION_TEMPLATE = (
         "From a top-down view, determine the spatial relationships between the following object pairs:\n"
         "{obj_pairs_str}\n"
-        "For each pair, provide the relationship in the format: (<horizontal>, <vertical>)\n"
-        "Where horizontal is one of: north, south, same\n"
-        "Where vertical is one of: east, west, same\n"
+        "For each pair (A, B), provide the relationship in the format: (<horizontal>, <vertical>), meaning A is <horizontal> to B and <vertical> to B.\n"
+        "Where horizontal is one of: east, west, same\n"
+        "Where vertical is one of: north, south, same\n"
         "\n"
         "Answer format:\n"
         "1. (<horizontal>, <vertical>)\n"
@@ -593,14 +593,17 @@ if __name__ == "__main__":
     room = generate_room(**room_config, np_random=np_random)
     print(room)
 
-    # # Test all pairs evaluation task
-    # print("\n" + "="*50)
-    # print("Testing AllPairsEvaluationTask:")
-    # print("="*50)
-    # all_pairs_task = AllPairsEvaluationTask(np_random=np_random)
-    # all_pairs_question = all_pairs_task.generate_question(room)
-    # print(all_pairs_question)
-    # print(f"Expected answer: {all_pairs_task.answer}")
+    # Test all pairs evaluation task
+    print("\n" + "="*50)
+    print("Testing AllPairsEvaluationTask:")
+    print("="*50)
+    all_pairs_task = AllPairsEvaluationTask(np_random=np_random)
+    all_pairs_question = all_pairs_task.generate_question(room)
+    print(all_pairs_question)
+    print(f"Expected answer: {all_pairs_task.answer}")
+    correct, info = all_pairs_task.evaluate("1. (south, west)\n2. (north, west)\n3. (south, west)\n4. (south, east)\n5. (north, east)\n6. (north, east)")
+    print(correct)
+    print(info)
     
     # # Test evaluation with a sample answer
     # print("\n" + "="*50)
