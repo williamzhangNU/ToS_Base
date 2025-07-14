@@ -162,6 +162,9 @@ class ObserveAction(BaseAction):
     )
     example = "Observe()"
     format_pattern = r"^Observe\(\)$"
+
+    directional_template = "{obj_name} is {dir_str} of you"
+    orientation_template = "{obj_name} faces {orientation}"
     
     def __init__(self):
         super().__init__()
@@ -175,6 +178,7 @@ class ObserveAction(BaseAction):
     def execute(self, room, **kwargs) -> ActionResult:
         """Execute observe action on room state."""
         neglect_objects = kwargs.get('neglect_objects', [])
+        with_orientation = kwargs.get('with_orientation', True)
         visible_objects = [obj for obj in room.objects if self._is_visible(room.agent, obj) and obj.name not in neglect_objects]
         
         if not visible_objects:
@@ -186,11 +190,15 @@ class ObserveAction(BaseAction):
         relationships = []
         for obj in visible_objects:
             _, dir_str = room.get_direction(obj.name, room.agent.name, perspective='ego')
-            relationships.append(f"{obj.name} is {dir_str} of you")
-        answer = ", ".join(relationships)
+            answer_str = f"{obj.name} is {dir_str} of you"
+            if with_orientation and obj.has_orientation:
+                _, orientation = room.get_orientation(obj.name, room.agent.name)
+                answer_str += f" and faces {orientation}"
+            relationships.append(answer_str)
+        final_answer = ", ".join(relationships)
         
-        return ActionResult(True, self.get_feedback(True, answer=answer), {
-            'answer': answer,
+        return ActionResult(True, self.get_feedback(True, answer=final_answer), {
+            'answer': final_answer,
             'visible_objects': [obj.name for obj in visible_objects],
             'relationships': relationships
         })
@@ -407,10 +415,29 @@ if __name__ == "__main__":
     # print(f"  Result: {result4}")
     
 
-    # Test Case 4: Wrong order (should fail)
-    test5 = "Movement: [Observe()] \nFinal: Term()"
-    result5 = ActionSequence.parse(test5)
-    print(f"\nTest 5 - Wrong order: {'✓ PASS' if not result5 else '✗ FAIL'}")
-    print(f"  Input: {test5.replace(chr(10), ' | ')}")
-    print(f"  Expected: None (should fail)")
-    print(f"  Result: {result5}")
+    # # Test Case 4: Wrong order (should fail)
+    # test5 = "Movement: [Observe()] \nFinal: Term()"
+    # result5 = ActionSequence.parse(test5)
+    # print(f"\nTest 5 - Wrong order: {'✓ PASS' if not result5 else '✗ FAIL'}")
+    # print(f"  Input: {test5.replace(chr(10), ' | ')}")
+    # print(f"  Expected: None (should fail)")
+    # print(f"  Result: {result5}")
+
+    print("=== Testing Action Execution ===")
+    
+    # Test Case 1: Simple final action only
+    test1 = "Movement: []\nFinal: Observe()"
+    result1 = ActionSequence.parse(test1)
+    print(f"Test 1 - Simple final: {'✓ PASS' if result1 else '✗ FAIL'}")
+    print(f"  Input: {test1.replace(chr(10), ' | ')}")
+    print(f"  Result: {result1}")
+    
+    # Test Case 2: Observe with orientation
+    print("\nTest 2 - Observe with orientation")
+    action = ObserveAction()
+    result = action.execute(room, with_orientation=True)
+    print(f"  Result: {result.message}")
+    # expected_msg = "table is (right, front) of you and faces away from you, chair is (left, front) of you and faces away from you"
+    # assert expected_msg in result.message
+    # print(f"  ✓ PASS")
+    

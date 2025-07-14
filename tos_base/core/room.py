@@ -55,12 +55,31 @@ class Room:
         anchor_ori = None
         if anchor_name:
             anchor = self.get_object_by_name(anchor_name)
+            assert anchor.has_orientation, "Anchor must have orientation"
             anchor_ori = anchor.ori
         
         dir_pair = DirectionSystem.get_direction(obj1.pos, obj2.pos, anchor_ori)
         dir_str = DirectionSystem.to_string(dir_pair, perspective=perspective)
         
         return dir_pair, dir_str
+
+    def get_orientation(self, obj_name: str, anchor_name: str) -> Tuple[DirPair, str]:
+        """Get orientation of an object relative to an anchor."""
+        obj = self.get_object_by_name(obj_name)
+        anchor = self.get_object_by_name(anchor_name)
+        assert anchor.has_orientation, "Anchor must have orientation"
+
+        dir_pair = DirectionSystem.get_relative_orientation(tuple(obj.ori), tuple(anchor.ori))
+
+        mapping = {DirPair(Dir.SAME, Dir.FORWARD): 'away from you',
+                   DirPair(Dir.SAME, Dir.BACKWARD): 'towards you',
+                   DirPair(Dir.RIGHT, Dir.SAME): 'to your right side',
+                   DirPair(Dir.LEFT, Dir.SAME): 'to your left side'
+        }
+
+        ori_str = mapping[dir_pair]
+            
+        return dir_pair, ori_str
 
     def get_room_description(self) -> str:
         """Get textual description of the room"""

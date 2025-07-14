@@ -206,8 +206,6 @@ class AllPairsEvaluationTask(BaseEvaluationTask):
         "From a top-down view, determine the spatial relationships between the following object pairs:\n"
         "{obj_pairs_str}\n"
         "For each pair (A, B), provide the relationship in the format: (<horizontal>, <vertical>), meaning A is <horizontal> to B and <vertical> to B.\n"
-        "Where horizontal is one of: east, west, same\n"
-        "Where vertical is one of: north, south, same\n"
         "\n"
         "Answer format:\n"
         "1. (<horizontal>, <vertical>)\n"
@@ -439,7 +437,8 @@ class RotEvaluationTask(BaseEvaluationTask):
     QUESTION_TEMPLATE = (
         "You will turn {turn_direction} 360 degrees. "
         "During your rotation, you will encounter objects in a specific sequence as they come into your direct line of sight. "
-        "List them in the order you encounter them during the rotation: object1, object2, object3"
+        "List them in the order you encounter them during the rotation: <obj1>, <obj2>, <obj3>, ..."
+        "Do not list objects that are at the same position as you."
     )
     MOVEMENT_TEMPLATE = (
         "You moved to the same position as {move_obj_name}.\n"
@@ -492,15 +491,14 @@ class PovEvaluationTask(BaseEvaluationTask):
     """
     Evaluation task for perspective taking questions.
     
-    Q: Ask spatial relationship between two objects (a, b) from the perspective of c
+    Q: Ask spatial relationship between object a from the perspective of object c
     A: <dir>
     
     Tests ability to take another object's viewpoint for spatial reasoning.
     """
 
     QUESTION_TEMPLATE = (
-        "{obj_orientation_str}\n"
-        "Imagine you are {anchor_obj_name}. From your perspective, what direction is {obj1_name} relative to {obj2_name}?\n"
+        "Imagine you are {anchor_obj_name}. From your perspective, what direction is {obj_name} relative to you?\n"
         "Answer in the format: (horizontal, vertical)\n"
         "Example: (left, front) or (right, back)"
     )
@@ -509,19 +507,22 @@ class PovEvaluationTask(BaseEvaluationTask):
         room = room.copy()
         
         # Choose three different objects
-        obj1_idx = self.np_random.integers(0, len(room.all_objects))
-        obj2_idx = self.np_random.integers(0, len(room.all_objects))
-        anchor_obj_idx = self.np_random.integers(0, len(room.all_objects))
-        while obj2_idx == obj1_idx:
-            obj2_idx = self.np_random.integers(0, len(room.all_objects))
+        obj_idx = self.np_random.integers(0, len(room.all_objects))
+        
+        # Choose anchor object that has orientation
+        oriented_objects = [i for i, obj in enumerate(room.all_objects) if obj.has_orientation]
+        assert len(oriented_objects) > 0, "No objects with orientation found for perspective taking task"
+        anchor_obj_idx = self.np_random.choice(oriented_objects)
+        
+        while obj_idx == anchor_obj_idx:
+            obj_idx = self.np_random.integers(0, len(room.all_objects))
+        obj_name, anchor_obj_name = room.all_objects[obj_idx].name, room.all_objects[anchor_obj_idx].name
 
         self.eval_data.question = self.QUESTION_TEMPLATE.format(
-            obj_orientation_str=room.get_objects_orientation(),
-            anchor_obj_name=room.all_objects[anchor_obj_idx].name,
-            obj1_name=room.all_objects[obj1_idx].name,
-            obj2_name=room.all_objects[obj2_idx].name
+            anchor_obj_name=anchor_obj_name,
+            obj_name=obj_name,
         )
-        _, dir_pair_str = room.get_direction(room.all_objects[obj1_idx].name, room.all_objects[obj2_idx].name, room.all_objects[anchor_obj_idx].name)
+        _, dir_pair_str = room.get_direction(obj_name, anchor_obj_name, anchor_name=anchor_obj_name)
         self.eval_data.answer = dir_pair_str
         self.eval_data.reasoning = self._generate_reasoning(room)
         return self.eval_data.question
@@ -586,10 +587,9 @@ if __name__ == "__main__":
         'room_range': [-10, 10],
         'n_objects': 4,
         'candidate_objects': CANDIDATE_OBJECTS,
-        'generation_type': 'rand',
-        'perspective': 'ego'
+        'generation_type': 'pov',
     }
-    np_random = seeding.np_random(1234)[0]
+    np_random = seeding.np_random(21)[0]
     room = generate_room(**room_config, np_random=np_random)
     print(room)
 
@@ -634,28 +634,28 @@ if __name__ == "__main__":
     # print(reverse_dir_question)
     # print(f"Expected answer: {reverse_dir_task.answer}")
 
-    # Test rotation evaluation task
-    print("\n" + "="*50)
-    print("Testing RotEvaluationTask:")
-    print("="*50)
-    rotation_config = {
-        'turn_direction': 'counterclockwise',
-        'if_move': True,
-        'if_turn': True
-    }
-    rot_task = RotEvaluationTask(np_random=np_random, config=rotation_config)
-    rot_question = rot_task.generate_question(room)
-    print(rot_question)
-    print(f"Expected answer: {rot_task.answer}")
-
-    # # Test pov evaluation task
+    # # Test rotation evaluation task
     # print("\n" + "="*50)
-    # print("Testing PovEvaluationTask:")
+    # print("Testing RotEvaluationTask:")
     # print("="*50)
-    # pov_task = PovEvaluationTask(np_random=np_random)
-    # pov_question = pov_task.generate_question(room)
-    # print(pov_question)
-    # print(f"Expected answer: {pov_task.answer}")
+    # rotation_config = {
+    #     'turn_direction': 'counterclockwise',
+    #     'if_move': True,
+    #     'if_turn': True
+    # }
+    # rot_task = RotEvaluationTask(np_random=np_random, config=rotation_config)
+    # rot_question = rot_task.generate_question(room)
+    # print(rot_question)
+    # print(f"Expected answer: {rot_task.answer}")
+
+    # Test pov evaluation task
+    print("\n" + "="*50)
+    print("Testing PovEvaluationTask:")
+    print("="*50)
+    pov_task = PovEvaluationTask(np_random=np_random)
+    pov_question = pov_task.generate_question(room)
+    print(pov_question)
+    print(f"Expected answer: {pov_task.answer}")
 
     # # Test object presence evaluation task
     # print("\n" + "="*50)

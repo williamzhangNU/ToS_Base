@@ -3,22 +3,22 @@ from typing import List
 import sys
 
 from ..core.room import Room
-from ..core.constant import CANDIDATE_OBJECTS
+from ..core.constant import CANDIDATE_OBJECTS, ObjectInfo
 from ..core.object import Object, Agent
 
 def generate_room(
         room_range: tuple[int, int],
         n_objects: int,
-        candidate_objects: list[Object],
         generation_type: str,
-        perspective: str,
         np_random: np.random.Generator,
         room_name: str = 'room',
+        candidate_objects: list[ObjectInfo] = CANDIDATE_OBJECTS,
     ) -> Room:
     """
     Generate a room based on the given configuration
     """
-    if generation_type == 'rand' or generation_type == 'pov' or generation_type == 'a2e':
+
+    if generation_type in ['rand', 'pov']:
         objects = generate_random_objects(
             n=n_objects,
             candidate_list=candidate_objects,
@@ -46,7 +46,7 @@ def generate_room(
     return Room(
         objects=objects,
         name=room_name,
-        agent=Agent() if perspective == 'ego' else None,
+        agent=Agent()
     )
 
 
@@ -54,14 +54,14 @@ def generate_room(
 def generate_random_objects(
     n: int,
     random_generator: np.random.Generator,
-    candidate_list: list[str],
     room_range: list[int] = [-10, 10],
     perspective_taking: bool = False,
+    candidate_list: list[ObjectInfo] = CANDIDATE_OBJECTS,
 ) -> list[Object]:
     """Generate random objects with random positions and orientations."""
     # Select random objects from candidate list
     indices = random_generator.choice(len(candidate_list), n, replace=False)
-    names = [candidate_list[i] for i in indices]
+    selected_object_info = [candidate_list[i] for i in indices]
     
     # Generate random positions ensuring no two objects are at the same position
     positions = [np.array([0, 0])]
@@ -73,18 +73,13 @@ def generate_random_objects(
     orientations = random_generator.integers(0, 4, n)
     
     # Map orientation values to vectors
-    ori_vectors = {
-        0: [0, 1],
-        1: [1, 0],
-        2: [0, -1],
-        3: [-1, 0]
-    }
+    ori_vectors = {0: [0, 1], 1: [1, 0], 2: [0, -1], 3: [-1, 0]}
     
     # Create and return object list
     objects = []
-    for name, pos, ori_idx in zip(names, positions, orientations):
-        ori = np.array(ori_vectors[ori_idx] if perspective_taking else [0, 1])
-        objects.append(Object(name=name, pos=pos, ori=ori))
+    for obj_info, pos, ori_idx in zip(selected_object_info, positions, orientations):
+        ori = np.array(ori_vectors[ori_idx]) if obj_info.has_orientation and perspective_taking else np.array([0, 1])
+        objects.append(Object(name=obj_info.name, pos=pos, ori=ori, has_orientation=obj_info.has_orientation))
 
     return objects
 
@@ -94,7 +89,7 @@ def generate_room_for_rotation_eval(
     n: int,
     random_generator: np.random.Generator,
     room_range: list[int] = [-10, 10],
-    candidate_list: list[str] = CANDIDATE_OBJECTS,
+    candidate_list: list[ObjectInfo] = CANDIDATE_OBJECTS,
 ) -> list[Object]:
     """Generate random objects for rotation evaluation with specific placement constraints:
     1. No object directly in front of agent
@@ -148,15 +143,18 @@ def generate_room_for_rotation_eval(
     
     # Select random objects
     random_indices = random_generator.choice(len(candidate_list), n, replace=False)
-    names = [candidate_list[i] for i in random_indices]
+    selected_object_info = [candidate_list[i] for i in random_indices]
     
     # Add objects that satisfy constraints
     obj_count = 0
     while obj_count < n:
         pos = random_generator.integers(room_range[0], room_range[1], (1, 2))[0]
-        obj = Object(name=names[obj_count], pos=pos)
         
-        if _is_valid_placement(objects[1:], obj):
+        obj_info = selected_object_info[obj_count]
+        
+        obj = Object(name=obj_info.name, pos=pos, has_orientation=obj_info.has_orientation)
+        
+        if _is_valid_placement(objects, obj):
             objects.append(obj)
             obj_count += 1
             
@@ -164,72 +162,9 @@ def generate_room_for_rotation_eval(
 
 
 
-def generate_allo2ego_objects(
-    n: int,
-    random_generator: np.random.Generator,
-    room_range: list[int] = [-10, 10],
-    candidate_list: list[str] = CANDIDATE_OBJECTS,
-) -> list[Object]:
-    """Generate objects for allocentric-to-egocentric evaluation.
-    
-    Places objects in a sequence where an agent can visit each one
-    by moving only in cardinal directions (0°, 90°, 180°, 270°).
-    
-    Args:
-        n: Number of objects to generate
-        random_generator: NumPy random generator
-        room_range: Min/max room coordinates
-        candidate_list: Possible object types
-        
-    Returns:
-        List of positioned objects
-    """
-    # Calculate step size range
-    min_step = 1
-    max_step = (room_range[1] - room_range[0]) // 4
-    
-    # Select random objects
-    indices = random_generator.choice(len(candidate_list), n, replace=False)
-    names = [candidate_list[i] for i in indices]
-    
-    # Direction vectors (up, right, down, left)
-    directions = [
-        np.array([0, 1]),   # up
-        np.array([1, 0]),   # right
-        np.array([0, -1]),  # down
-        np.array([-1, 0])   # left
-    ]
-    
-    # Initialize with first object at origin
-    objects = [Object(name=names[0], pos=np.array([0, 0]))]
-    
-    # Generate path of objects
-    for i in range(1, n):
-        current_pos = objects[-1].pos
-        
-        while True:
-            # Choose random direction and step size
-            dir_idx = random_generator.integers(0, 4)
-            step_size = random_generator.integers(min_step, max_step + 1)
-            
-            # Calculate new position
-            direction_vector = directions[dir_idx] * step_size
-            new_pos = current_pos + direction_vector
-            
-            # Check if position is free
-            if not any(np.array_equal(obj.pos, new_pos) for obj in objects):
-                break
-        
-        # Add new object
-        objects.append(Object(name=names[i], pos=new_pos))
-    
-    return objects
-
-
-
 if __name__ == '__main__':
     room = generate_room_for_rotation_eval(
         n=10,
-        random_generator=np.random.RandomState(42),
+        random_generator=np.random.default_rng(42),
     )
     print(room)

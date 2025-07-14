@@ -56,7 +56,7 @@ room = generate_room(n_objects=5, np_random=np_random)
 ```python
 exploration_manager = ExplorationManager(room)
 action_seq = ActionSequence.parse("Move(table); Observe()")
-result, info = exploration_manager.execute_action_sequence(action_seq)
+result, info = exploration_manager.explore(action_seq)
 ```
 
 ### Evaluation

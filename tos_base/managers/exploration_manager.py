@@ -180,16 +180,16 @@ class ExplorationManager:
             self.exploration_efficiency['n_valid_queries'] += 1
         self.history.append(action_sequence)
 
-    def execute_action_sequence(self, action_sequence: ActionSequence) -> Tuple[str, Dict[str, Any]]:
-        """Execute action sequence with validation."""
-        # TODO improve returned info
+    def explore(self, action_sequence: ActionSequence) -> Tuple[str, Dict[str, Any]]:
+        """
+        Execute a sequence of motion actions followed by a final action.
+        If any motion action fails, execute an observe action and end.
+        TODO: log fail action
+        """
+        
+        assert action_sequence.final_action, "Action sequence requires a final action."
+        assert not (isinstance(action_sequence.final_action, TermAction) and action_sequence.motion_actions), "Term() action should not have motion actions."
 
-        if not action_sequence.final_action:
-            return "Action sequence requires a final action.", {}
-        
-        if isinstance(action_sequence.final_action, TermAction) and action_sequence.motion_actions:
-            return "Term() action should not have motion actions.", {}
-        
         info = {'redundant': False}
         messages = []
         
@@ -197,19 +197,31 @@ class ExplorationManager:
         for action in action_sequence.motion_actions:
             success, msg, action_info = self._execute_and_update(action)
             info.update(action_info)
-            messages.append(msg)
             if not success:
+                # On failure, perform an observe action and end
+                obs_success, obs_msg, obs_info = self._execute_and_update(ObserveAction())
+                assert obs_success, f"Observe action failed: {obs_msg}"
+                info.update(obs_info)
+                
+                success_str = f"You successfully executed: {' '.join(messages)}\n" if messages else "You executed no actions\n"
+                message = success_str + f"But failed to execute {action}: {msg} So instead, {ObserveAction()} is executed: {obs_msg}"
+                
                 self._log_exploration(action_sequence, info)
-                return "\n".join(messages), info
-        
+                return message, info
+            messages.append(f'{action}: {msg}')
+
         # Execute final action
-        success, msg, action_info = self._execute_and_update(action_sequence.final_action)
+        final_action = action_sequence.final_action
+        success, msg, action_info = self._execute_and_update(final_action)
+        assert success, f"Final action {final_action} failed: {msg}"
         info.update(action_info)
-        messages.append(msg)
         
+        messages.append(f'{final_action}: {msg}')
+        message = f"You successfully executed: {' '.join(messages)}"
+
         # Always log before return
         self._log_exploration(action_sequence, info)
-        return "\n".join(messages), info
+        return message, info
     
     
     
@@ -499,6 +511,29 @@ if __name__ == "__main__":
         print(f"  Expected: False")
         assert not is_redundant, "Should be redundant with objects in multiple front directions"
         print("  ✓ PASSED\n")
+
+    def test_explore_fail_action():
+        """Test exploration with failed action execution."""
+        print("Test 9: Exploration with failed action")
+        
+        room = create_test_room([("obj1", [1, 2])])
+        manager = ExplorationManager(room)
+        
+        # Create action sequence with invalid move (non-existent object)
+        action_sequence = ActionSequence([RotateAction(degrees=90), RotateAction(degrees=270), MoveAction(target="obj1")], ObserveAction())
+        
+        # Execute should fail on move but succeed on observe
+        message, info = manager.explore(action_sequence)
+        
+        print(f"  Message: {message}")
+        print(f"  Info: {info}")
+        
+        # Should contain failure message and observe result
+        assert "failed to execute" in message
+        assert "So instead, you observe" in message
+        assert "obj1 is front-right of you" in message
+        
+        print("  ✓ PASSED\n")
     
     def run_all_tests():
         """Run all test cases."""
@@ -513,7 +548,8 @@ if __name__ == "__main__":
             # test_update_observe_multiple_directions()
             # test_update_observe_visible_objects_update()
             # test_update_observe_empty_visible_list()
-            test_update_observe_efficiency_algorithm()
+            # test_update_observe_efficiency_algorithm()
+            test_explore_fail_action()
             
             print("=" * 60)
             print("ALL TESTS PASSED! ✓")

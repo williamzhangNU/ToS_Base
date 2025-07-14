@@ -16,19 +16,23 @@ class Object:
             - (0, 1)  → 90 degrees
             - (-1, 0) → 180 degrees
             - (0, -1) → 270 degrees
+        has_orientation (bool): Whether this object has meaningful orientation
 
     Raises:
         ValueError: If the orientation vector is not one of the valid orientations
+                   (only for objects with has_orientation=True)
     """
 
     name: str
     pos: np.ndarray = field(default_factory=lambda: np.zeros(2))
     ori: np.ndarray = field(default_factory=lambda: np.array([1, 0]))
+    has_orientation: bool = True
 
     def __post_init__(self):
         assert len(self.pos) == 2, "Position must be a 2D vector"
         assert len(self.ori) == 2, "Orientation must be a 2D vector"
-        self._validate()
+        if self.has_orientation:
+            self._validate()
 
 
     def _validate(self) -> None:
@@ -44,19 +48,21 @@ class Object:
                 f"got {self.ori.tolist()}"
             )
 
-    def to_dict(self) -> Dict[str, Union[str, List[float]]]:
+    def to_dict(self) -> Dict[str, Union[str, List[float], bool]]:
         return {
             'name': self.name,
             'pos': self.pos.tolist(),
-            'ori': self.ori.tolist()
+            'ori': self.ori.tolist(),
+            'has_orientation': self.has_orientation
         }
 
     @classmethod
-    def from_dict(cls, obj_dict: Dict[str, Union[str, List[float]]]) -> 'Object':
+    def from_dict(cls, obj_dict: Dict[str, Union[str, List[float], bool]]) -> 'Object':
         return cls(
             name=obj_dict['name'],
             pos=np.array(obj_dict['pos']),
-            ori=np.array(obj_dict['ori'])
+            ori=np.array(obj_dict['ori']),
+            has_orientation=obj_dict.get('has_orientation', True)
         )
 
     def __repr__(self) -> str:
@@ -64,7 +70,8 @@ class Object:
             f"\nObject(\n"
             f"    name={self.name},\n"
             f"    pos={self.pos.tolist()},\n"
-            f"    ori={self.ori.tolist()}\n"
+            f"    ori={self.ori.tolist()},\n"
+            f"    has_orientation={self.has_orientation}\n"
             f")"
         )
     
@@ -72,7 +79,8 @@ class Object:
         return Object(
             name=self.name,
             pos=self.pos.copy(),
-            ori=self.ori.copy()
+            ori=self.ori.copy(),
+            has_orientation=self.has_orientation
         )
 
 @dataclass
@@ -80,3 +88,4 @@ class Agent(Object):
     name: str = 'agent'
     pos: np.ndarray = field(default_factory=lambda: np.array([0, 0]), init=False)
     ori: np.ndarray = field(default_factory=lambda: np.array([0, 1]), init=False)
+    has_orientation: bool = field(default=True, init=False)

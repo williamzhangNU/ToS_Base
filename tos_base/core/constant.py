@@ -1,47 +1,50 @@
+from dataclasses import dataclass
 import numpy as np
 from .object import Object
 
 
+@dataclass
+class ObjectInfo:
+    name: str
+    has_orientation: bool
+
 AGENT_NAME = 'you'
 
-CANDIDATE_OBJECTS = [
-    'table',
+# Objects with orientation (have a clear front/back, directional)
+OBJECT_NAMES_WITH_ORIENTATION = [
     'chair',
     'sofa',
-    'bed',
-    'desk',
     'bookshelf',
     'cabinet',
-    'lamp',
     'television',
     'refrigerator',
-    'microwave',
-    'oven',
-    'toaster',
-    'clock',
-    'plant',
-    'flower',
-    'vase',
-    'computer',
-    'printer',
-    'scanner',
-    'monitor',
-    'keyboard',
-    'mouse',
-    'headphones',
-    'microphone',
-    'projector',
-    'whiteboard',
-    'notebook',
-    'pen',
-    'pencil',
-    'eraser',
-    'stapler',
-    'folder',
+    # 'microwave',
+    # 'oven',
+    # 'computer',
+    # 'printer',
+    # 'scanner',
+    # 'monitor',
+    # 'projector',
+    # 'whiteboard',
+    # 'air conditioner',
 ]
+OBJECTS_WITH_ORIENTATION = [ObjectInfo(name, True) for name in OBJECT_NAMES_WITH_ORIENTATION]
 
 
-ADDITIONAL_CANDIDATE_OBJECTS = [
+# Objects without orientation (omnidirectional, no clear front/back)
+OBJECT_NAMES_WITHOUT_ORIENTATION = [
+    'table',
+    'lamp',
+    'plant',
+    'vase',
+    'trash can',
+]
+OBJECTS_WITHOUT_ORIENTATION = [ObjectInfo(name, False) for name in OBJECT_NAMES_WITHOUT_ORIENTATION]
+
+# Combined lists for backward compatibility
+CANDIDATE_OBJECTS = OBJECTS_WITH_ORIENTATION + OBJECTS_WITHOUT_ORIENTATION
+
+_ADDITIONAL_OBJECT_NAMES = [
     'curtains',
     'mirror',
     'rug',
@@ -62,6 +65,11 @@ ADDITIONAL_CANDIDATE_OBJECTS = [
     'phone charger',
     'coaster',
     'decorative bowl'
+]
+
+ADDITIONAL_CANDIDATE_OBJECTS = [
+    ObjectInfo(name, has_orientation=name in OBJECT_NAMES_WITH_ORIENTATION) 
+    for name in sorted(list(set(_ADDITIONAL_OBJECT_NAMES)))
 ]
 
 
