@@ -179,7 +179,7 @@ class ExplorationManager:
             self.exploration_efficiency['n_valid_queries'] += 1
         self.history.append(action_sequence)
 
-    def explore(self, action_sequence: ActionSequence) -> Tuple[str, Dict[str, Any]]:
+    def explore(self, action_sequence: ActionSequence, is_visual: bool = False) -> Tuple[str, Dict[str, Any]]:
         """
         Execute a sequence of motion actions followed by a final action.
         If any motion action fails, execute an observe action and end.
@@ -215,7 +215,9 @@ class ExplorationManager:
         assert success, f"Final action {final_action} failed: {msg}"
         info.update(action_info)
         
-        messages.append(f'{final_action}: {msg}')
+        if not is_visual and isinstance(final_action, ObserveAction):
+            # for not visual, use text as observation, instead, no text observation
+            messages.append(f'{final_action}: {msg}')
         message = f"You successfully executed: {' '.join(messages)}"
 
         # Always log before return
