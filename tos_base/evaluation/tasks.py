@@ -806,7 +806,6 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
         
         # Step 2: Position agent
         if agent_pos is not None:
-            print('agent_pos', agent_pos)
             self._position_agent_at(room, agent_pos)
         else:
             self._position_agent_random(room)
@@ -842,7 +841,6 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
             other_objects = [obj for obj in room.objects if obj.name != target_obj.name]
         
         ref_obj1, ref_obj2 = self.np_random.choice(other_objects, size=2, replace=False)
-        print('ref_obj1', ref_obj1.name, 'ref_obj2', ref_obj2.name)
         
         # Calculate agent's diagonal position first
         agent_pos = self._get_diagonal_position(room, target_obj, ref_obj1, ref_obj2, neglect_trivial=True)
@@ -860,7 +858,6 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
         y_range = (agent_pos[1], max_y) if chosen_quadrant[1] > 0 else (min_y, agent_pos[1])
         
         new_pos = np.array([self.np_random.uniform(*x_range), self.np_random.uniform(*y_range)])
-        print('new_pos', new_pos)
         target_obj.pos = new_pos
         
         return target_obj.name, agent_pos

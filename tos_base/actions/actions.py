@@ -17,21 +17,20 @@ Available Actions:
 {actions}
 
 Answer with following format:
-Movement: [<movement_action1>, <movement_action2>, ...]
-Final: <final_action>
+Movement: [<movement_action1>, <movement_action2>, ...]; Final: <final_action>
 
 Format Notes:
 - Use movement actions in Movement, and final action in Final.
 - If no movement is needed, use [] in Movement.
 - Actions in Movement will be executed in order.
-- Exactly 2 lines in movement and final order, separated these two lines by a newline.
+- Separated these two lines by a semicolon.
 
 Examples:
 {examples}
 
 Rules:
 - Term() must be alone (no movement actions)
-- Field of view: {field_of_view} degrees.
+- You have a field of view for observation: {field_of_view} degrees.
 """
 
 
@@ -183,7 +182,7 @@ class ObserveAction(BaseAction):
         visible_objects = [obj for obj in room.objects if self._is_visible(room.agent, obj) and obj.name not in neglect_objects]
         
         if not visible_objects:
-            answer = "Nothing to observe in the current field of view"
+            answer = "Nothing in your field of view."
             return ActionResult(True, self.get_feedback(True, answer=answer), {
                 'answer': answer, 'visible_objects': [], 'relationships': []
             })
@@ -304,7 +303,7 @@ class ActionSequence:
     @classmethod
     def parse(cls, action_str: str) -> Optional['ActionSequence']:
         """Parse action string into ActionSequence"""
-        lines = [line.strip() for line in action_str.strip().split('\n') if line.strip()]
+        lines = [line.strip() for line in action_str.strip().split(';') if line.strip()]
         
         # Must have exactly 2 lines: Movement then Final
         if len(lines) != 2 or not lines[0].startswith('Movement:') or not lines[1].startswith('Final:'):
@@ -358,10 +357,9 @@ class ActionSequence:
             "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in final_actions)
         )
         examples = (
-            f"Valid Example:\nMovement: [Move(table), Rotate(90)]\nFinal: Observe()\n\n" +
-            f"Valid Example (no movement):\nMovement: []\nFinal: Observe()\n\n" +
-            f"Invalid Example (wrong order):\nFinal: Observe()\nMovement: []\n\n" +
-            f"Invalid Example (missing separator):\nMovement: [Move(table)] Final: Observe()"
+            f"Valid Example:\nMovement: [Move(table), Rotate(90)]; Final: Observe()\n\n" +
+            f"Valid Example (no movement):\nMovement: []; Final: Observe()\n\n" +
+            f"Invalid Example (wrong order):\nFinal: Observe(); Movement: []\n\n"
         )
         
         return ACTION_INSTRUCTION.format(
