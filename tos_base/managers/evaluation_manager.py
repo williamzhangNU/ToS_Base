@@ -39,7 +39,7 @@ class EvaluationManager:
     def get_current_question(self, room: Room) -> Optional[str]:
         """Get question for current task."""
         task = self._get_current_eval_task()
-        return None if task is None else task.generate_question(room.copy())
+        return None if task is None else task.question if task.question else task.generate_question(room.copy())
     
     def evaluate_answer(self, answer: str) -> Tuple[bool, Dict[str, Any]]:
         """Evaluate answer for current task."""

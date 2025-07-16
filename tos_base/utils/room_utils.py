@@ -1,6 +1,5 @@
 import numpy as np
-from typing import List
-import sys
+from typing import Dict, Any
 
 from ..core.room import Room
 from ..core.constant import CANDIDATE_OBJECTS, ObjectInfo
@@ -159,6 +158,36 @@ def generate_room_for_rotation_eval(
             obj_count += 1
             
     return objects
+
+
+
+# for initializing visual-based
+def initialize_room_from_json(json_data: Dict[str, Any]) -> Room:
+    """
+    Initialize a Room from your metadata JSON, which now has:
+      - objects: list of {oid, model, pos:{x,y,z}, rot:{x,y,z}, size:[w,h]}
+      - cameras: list of {id, label, position:{x,y,z}, rotation:{y}}
+      - room_size, screen_size, etc.
+    """
+    # Rotation to orientation vector mapping
+    rotation_map = {0: np.array([1, 0]), 90: np.array([0, 1]), 180: np.array([-1, 0]), 270: np.array([0, -1])}
+    
+    # 1) Parse all objects
+    objects = []
+    for obj in json_data.get("objects", []):
+        objects.append(Object(
+            name=obj['model'],
+            pos=np.array([obj["pos"]["x"], obj["pos"]["z"]]),
+            ori=rotation_map.get(obj["rot"]["y"]),
+            has_orientation=True
+        ))
+    # 2) Room size metadata
+    room_name = json_data.get("name", "room_from_json")
+    #room_size = tuple(json_data.get("room_size", []))  # if your Room supports it
+
+    # 3) Build and return
+    return Room(objects=objects, name=room_name, agent=Agent())
+
 
 
 
