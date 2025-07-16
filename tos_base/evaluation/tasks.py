@@ -697,9 +697,9 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
         "Then, what is the direction and orientation of the {target_name} from your current perspective?\n\n"
         "Answer Format:\n"
         "Provide answer as a three-element tuple: (<horizontal>, <vertical>, <orientation>).\n"
-        "where <orientation> is one of: towards you, away from you, to your left, to your right\n\n"
+        "where <orientation> is one of: forward, backward, right, left\n\n"
         "Example:\n"
-        "(left, front, towards you)"
+        "(left, front, forward)"
     )
     
     def generate_question(self, room: Room) -> str:
@@ -754,6 +754,7 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
 
     ROTATION_TEMPLATE = (
         "One object in the room has rotated.\n"
+        "You observe the room from another view.\n"
         "{observations}\n"
         "Which object rotated and by how many degrees clockwise?\n\n"
         "Answer Format:\n"
@@ -764,6 +765,7 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
     
     MOVEMENT_TEMPLATE = (
         "One object in the room has moved.\n" 
+        "You observe the room from another view.\n"
         "{observations}\n"
         "Which object moved?\n\n"
         "Answer Format:\n"
@@ -774,6 +776,7 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
     
     BOTH_TEMPLATE = (
         "One object moved and one object rotated (may be the same object).\n"
+        "You observe the room from another view.\n"
         "{observations}\n"
         "Which object moved and which object rotated and by how many degrees clockwise?\n\n"
         "Answer Format:\n"

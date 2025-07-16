@@ -115,7 +115,6 @@ class ExplorationManager:
                                 list(relationships)[0].vert == Dir.BACKWARD)
             else:
                 # for 180 degree, agent should observe when all objects are front
-                print(f"relationships: {relationships}")
                 is_redundant = (len(relationships) == 1 and 
                                 (list(relationships)[0].horiz != Dir.UNKNOWN or 
                                 list(relationships)[0].vert != Dir.FORWARD))

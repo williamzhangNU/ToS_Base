@@ -75,10 +75,10 @@ class Room:
 
         dir_pair = DirectionSystem.get_relative_orientation(tuple(obj.ori), tuple(anchor.ori))
 
-        mapping = {DirPair(Dir.SAME, Dir.FORWARD): 'away from you',
-                   DirPair(Dir.SAME, Dir.BACKWARD): 'towards you',
-                   DirPair(Dir.RIGHT, Dir.SAME): 'to your right',
-                   DirPair(Dir.LEFT, Dir.SAME): 'to your left'
+        mapping = {DirPair(Dir.SAME, Dir.FORWARD): 'forward',
+                   DirPair(Dir.SAME, Dir.BACKWARD): 'backward',
+                   DirPair(Dir.RIGHT, Dir.SAME): 'right',
+                   DirPair(Dir.LEFT, Dir.SAME): 'left'
         }
 
         ori_str = mapping[dir_pair]
