@@ -170,11 +170,11 @@ def initialize_room_from_json(json_data: Dict[str, Any]) -> Room:
       - room_size, screen_size, etc.
     """
     # Rotation to orientation vector mapping
-    rotation_map = {0: np.array([1, 0]), 90: np.array([0, 1]), 180: np.array([-1, 0]), 270: np.array([0, -1])}
+    rotation_map = {0: np.array([0, 1]), 90: np.array([1, 0]), 180: np.array([0, -1]), 270: np.array([-1, 0])}
     
     # 1) Parse all objects
     objects = []
-    for obj in json_data.get("objects", []):
+    for obj in json_data['objects']:
         objects.append(Object(
             name=obj['model'],
             pos=np.array([obj["pos"]["x"], obj["pos"]["z"]]),
@@ -186,8 +186,11 @@ def initialize_room_from_json(json_data: Dict[str, Any]) -> Room:
     #room_size = tuple(json_data.get("room_size", []))  # if your Room supports it
 
     # 3) Build and return
+    agent_pos = [camera['position'] for camera in json_data['cameras'] if camera['id'] == 'central'][0]
+    agent_pos = np.array([agent_pos["x"], agent_pos["z"]])
+    for obj in objects:
+        obj.pos -= agent_pos
     return Room(objects=objects, name=room_name, agent=Agent())
-
 
 
 
