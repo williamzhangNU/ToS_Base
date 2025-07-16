@@ -40,7 +40,7 @@ from .managers.evaluation_manager import EvaluationManager
 
 # Evaluation tasks
 from .evaluation.tasks import BaseEvaluationTask
-from .evaluation.task_factory import get_eval_task
+from .evaluation.task_types import EvalTaskType
 
 # Utilities
 from .utils.room_utils import generate_room
@@ -60,7 +60,7 @@ __all__ = [
     'ExplorationManager', 'EvaluationManager',
     
     # Evaluation
-    'BaseEvaluationTask', 'get_eval_task',
+    'BaseEvaluationTask', 'EvalTaskType',
     
     # Utils
     'generate_room'

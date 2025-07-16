@@ -17,22 +17,26 @@ class Room:
 
     def __init__(self, objects: List[Object], name: str = 'room', agent: Agent = None):
         self.name = name
+        self._init_objects(objects, agent)
+
+    def _init_objects(self, objects: List[Object], agent: Agent = None):
+        """Initialize objects, agent, and validate unique names"""
         self.objects = copy.deepcopy(objects)
         self.agent = copy.deepcopy(agent) if agent is not None else None
-        
-        # All objects including agent (for ground truth calculations)
         self.all_objects = ([self.agent] + self.objects) if self.agent else self.objects
-        
-        # Ground truth graph for evaluation
         self.gt_graph = DirectionalGraph(self.all_objects, is_explore=False)
         
         # Validate unique names
-        self._validate_objects()
-
-    def _validate_objects(self):
-        """Ensure all objects have unique names"""
         names = [obj.name for obj in self.all_objects]
         assert len(names) == len(set(names)), "All object names must be unique"
+
+    def add_object(self, obj: Object):
+        """Add an object to the room"""
+        self._init_objects(self.objects + [obj], self.agent)
+    
+    def remove_object(self, obj_name: str):
+        """Remove an object from the room"""
+        self._init_objects([o for o in self.objects if o.name != obj_name], self.agent)
 
     def get_object_by_name(self, name: str) -> Object:
         """Get object by name"""
@@ -73,8 +77,8 @@ class Room:
 
         mapping = {DirPair(Dir.SAME, Dir.FORWARD): 'away from you',
                    DirPair(Dir.SAME, Dir.BACKWARD): 'towards you',
-                   DirPair(Dir.RIGHT, Dir.SAME): 'to your right side',
-                   DirPair(Dir.LEFT, Dir.SAME): 'to your left side'
+                   DirPair(Dir.RIGHT, Dir.SAME): 'to your right',
+                   DirPair(Dir.LEFT, Dir.SAME): 'to your left'
         }
 
         ori_str = mapping[dir_pair]
@@ -248,27 +252,37 @@ if __name__ == '__main__':
     
     room_with_agent = Room(objects=objects, name="test_room_with_agent", agent=agent)
     
-    print("\n=== Room with Agent - Text ===")
+    # print("\n=== Room with Agent - Text ===")
+    # room_with_agent.plot('text')
+    
+    # print("\n=== Room with Agent - Image ===")
+    # room_with_agent.plot('img', 'test_with_agent.pdf')
+    
+    # # Test without agent
+    # room_no_agent = Room(objects=objects, name="test_room_no_agent", agent=None)
+    
+    # print("\n=== Room without Agent - Text ===")
+    # room_no_agent.plot('text')
+    
+    # print("\n=== Room without Agent - Image ===")
+    # room_no_agent.plot('img', 'test_no_agent.pdf')
+    
+    # # Test error handling
+    # print("\n=== Error Handling Test ===")
+    # try:
+    #     room_with_agent.plot('invalid_mode')
+    # except ValueError as e:
+    #     print(f"✓ Caught expected error: {e}")
+
+    # test add and remove object
+    print("\n=== Add and Remove Object Test ===")
     room_with_agent.plot('text')
-    
-    print("\n=== Room with Agent - Image ===")
-    room_with_agent.plot('img', 'test_with_agent.pdf')
-    
-    # Test without agent
-    room_no_agent = Room(objects=objects, name="test_room_no_agent", agent=None)
-    
-    print("\n=== Room without Agent - Text ===")
-    room_no_agent.plot('text')
-    
-    print("\n=== Room without Agent - Image ===")
-    room_no_agent.plot('img', 'test_no_agent.pdf')
-    
-    # Test error handling
-    print("\n=== Error Handling Test ===")
-    try:
-        room_with_agent.plot('invalid_mode')
-    except ValueError as e:
-        print(f"✓ Caught expected error: {e}")
+    room_with_agent.add_object(Object(name="new_obj", pos=np.array([5, 5]), ori=np.array([0, 1])))
+    print(room_with_agent.objects, room_with_agent.all_objects, room_with_agent.gt_graph._v_matrix)
+    room_with_agent.plot('text')
+    room_with_agent.remove_object(objects[0].name)
+    print(room_with_agent.objects, room_with_agent.all_objects, room_with_agent.gt_graph._v_matrix)
+    room_with_agent.plot('text')
     
     print("\nAll tests completed!")
 

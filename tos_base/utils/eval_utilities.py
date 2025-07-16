@@ -137,28 +137,28 @@ def exp_evaluate_fn(
 
 
 
-def dir_eval_fn(
-        pred: str,
-        direction: str,
-) -> bool:
+def tuple_eval_fn(pred: str, ground_truth: tuple) -> bool:
     """
-    Evaluate if the predicted direction matches the ground truth direction
-    - ground truth direction: (H, V)
-    - predicted direction: raw string, (H, V), [H, V], ...
+    Evaluate if the predicted tuple matches the ground truth tuple
+    - ground_truth: tuple of elements 
+    - predicted: raw string, (elem1, elem2, ...), [elem1, elem2, ...], ...
     """
     if not pred or not isinstance(pred, str):
         return False
-    pair = extract_elements(pred, expected_type=str)
+    elements = extract_elements(pred, expected_type=str)
     
-    if not pair or len(pair) != 2:
+    if not elements or len(elements) != len(ground_truth):
         return False
         
-    pred_h, pred_v = pair
-    return f"({pred_h}, {pred_v})".lower() == direction.lower()
+    # Compare elements directly
+    for pred_elem, gt_elem in zip(elements, ground_truth):
+        if pred_elem.lower() != gt_elem.lower():
+            return False
+    return True
 
 def list_dir_eval_fn(
         pred: str,
-        gt_list: List[str],
+        gt_list: List[tuple],
 ) -> bool:
     """
     Evaluate if the predicted list of directions matches the ground truth list of directions
@@ -167,7 +167,7 @@ def list_dir_eval_fn(
             1. (<horiz>, <vert>)
             2. (<horiz>, <vert>)
             ...
-        gt_list (List[str]): the ground truth list of directions
+        gt_list (List[tuple]): the ground truth list of direction tuples
     Returns:
         score (int): the number of correct predictions
     """
@@ -200,7 +200,7 @@ def list_dir_eval_fn(
         # Make sure the index is valid
         if 0 <= idx < len(gt_list):
             gt_dir = gt_list[idx]
-            if dir_eval_fn(pred_dir, gt_dir):
+            if tuple_eval_fn(pred_dir, gt_dir):
                 correct_count += 1
     
     return correct_count
@@ -299,7 +299,7 @@ def obj_presence_eval_fn(pred: Any, answer: List[str]) -> Tuple[bool, Dict[str, 
     
     # Ground truth objects (already lowercase)
     gt_objects = set(obj.lower() for obj in answer)
-    pred_objects_set = set(pred_objects)
+    pred_objects_set = set(obj.lower() for obj in pred_objects)
     
     # Calculate metrics
     correct_count = len(gt_objects.intersection(pred_objects_set))

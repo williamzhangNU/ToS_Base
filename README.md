@@ -20,7 +20,7 @@ Base/
 │   └── evaluation_manager.py  # Evaluation tasks and scoring
 ├── evaluation/                # Evaluation system
 │   ├── tasks.py              # Task implementations
-│   └── task_factory.py       # Task creation factory
+│   └── task_types.py         # Task type definitions and factory
 └── utils/                     # Utility functions
     ├── room_utils.py         # Room generation
     └── eval_utilities.py     # Evaluation helpers
@@ -78,7 +78,7 @@ score = eval_manager.submit_answer("north")
 4. Add to exports in `actions/__init__.py`
 
 ### Adding New Evaluation Tasks
-1. Create task class in `evaluation/tasks.py` inheriting from `BaseTask`
-2. Implement `generate_question()` and `check_answer()` methods
-3. Update `evaluation/task_factory.py` to include new task
+1. Create task class in `evaluation/tasks.py` inheriting from `BaseEvaluationTask`
+2. Implement `generate_question()` method
+3. Add new task to `EvalTaskType` enum in `evaluation/task_types.py`
 4. Add configuration options as needed

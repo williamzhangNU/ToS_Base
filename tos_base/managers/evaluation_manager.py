@@ -3,7 +3,7 @@
 import numpy as np
 from typing import List, Dict, Any, Optional, Tuple
 
-from ..evaluation.task_factory import get_eval_task
+from ..evaluation.task_types import EvalTaskType
 from ..core.room import Room
 from ..evaluation.tasks import BaseEvaluationTask
 
@@ -25,7 +25,7 @@ class EvaluationManager:
         for task_spec in eval_tasks:
             task_type = task_spec['task_type']
             task_kwargs = task_spec.get('task_kwargs', {})
-            task = get_eval_task(task_type, np_random, task_kwargs)
+            task = EvalTaskType.create_task(task_type, np_random, task_kwargs)
             self.tasks.append(task)
         
         self.current_index = 0
@@ -33,8 +33,7 @@ class EvaluationManager:
     
     def _get_current_eval_task(self) -> Optional[BaseEvaluationTask]:
         """Get current evaluation task."""
-        if self.current_index >= len(self.tasks):
-            return None
+        assert self.current_index < len(self.tasks), "No more tasks"
         return self.tasks[self.current_index]
     
     def get_current_question(self, room: Room) -> Optional[str]:
@@ -44,8 +43,7 @@ class EvaluationManager:
     
     def evaluate_answer(self, answer: str) -> Tuple[bool, Dict[str, Any]]:
         """Evaluate answer for current task."""
-        if self.current_index >= len(self.tasks):
-            return False, {}
+        assert self.current_index < len(self.tasks), "No more tasks"
         
         task = self.tasks[self.current_index]
         correct, info = task.evaluate(answer)
@@ -67,39 +65,13 @@ class EvaluationManager:
     def get_evaluation_summary(self) -> Dict[str, Any]:
         """Get evaluation summary."""
         total_tasks = len(self.tasks)
-        completed_tasks = len(self.results)
-        
-        if completed_tasks == 0:
-            return {
-                "total_tasks": total_tasks,
-                "completed_tasks": 0,
-                "accuracy": 0.0,
-                "task_results": [],
-                "unanswered_tasks": total_tasks
-            }
-        
+        assert total_tasks == len(self.results), "Number of tasks and results mismatch"
         correct_count = sum(1 for r in self.results if r["correct"])
-        accuracy = correct_count / completed_tasks
-        
-        # Add completed results
-        task_results = self.results.copy()
-        
-        # Add unanswered tasks
-        for i in range(completed_tasks, total_tasks):
-            task_results.append({
-                "task_type": self.tasks[i].__class__.__name__,
-                "correct": False,
-                "score": 0.0,
-                "info": {"status": "unanswered"}
-            })
         
         return {
             "total_tasks": total_tasks,
-            "completed_tasks": completed_tasks,
-            "unanswered_tasks": total_tasks - completed_tasks,
-            "accuracy": accuracy,
-            "accuracy_completed": accuracy,
-            "task_results": task_results
+            "accuracy": correct_count / total_tasks if total_tasks > 0 else 0.0,
+            "task_results": self.results
         }
     
     def reset(self):

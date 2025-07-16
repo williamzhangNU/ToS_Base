@@ -92,7 +92,6 @@ class BaseAction(ABC):
             return True
         direction_norm = direction_vec / np.linalg.norm(direction_vec)
         ori_norm = from_obj.ori / np.linalg.norm(from_obj.ori)
-        
         return np.dot(direction_norm, ori_norm) >= (0.707 - 1e-3) if field_of_view == 90 else np.dot(direction_norm, ori_norm) >= (0.0 - 1e-3)
     
     @staticmethod

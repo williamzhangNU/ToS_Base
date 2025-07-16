@@ -58,7 +58,8 @@ class MoveAction(BaseAction):
             obj.pos = obj.pos - target_pos
     
     def success_message(self, **kwargs) -> str:
-        return f"You moved to the same position as {self.target}."
+        return f"You moved at {self.target}."
+        # return f"You moved to the same position as {self.target}."
     
     def error_message(self, error_type: str) -> str:
         errors = {"not_found": "object not found", "not_visible": "object not visible"}
@@ -70,7 +71,7 @@ class MoveAction(BaseAction):
             return ActionResult(False, self.get_feedback(False, "not_found"))
         
         target_obj = room.get_object_by_name(self.target)
-        if not self._is_visible(room.agent, target_obj):
+        if not kwargs.get('move_anyway', False) and not self._is_visible(room.agent, target_obj):
             return ActionResult(False, self.get_feedback(False, "not_visible"))
         
         self._move_agent_to_pos(room, target_obj.pos)
@@ -170,7 +171,7 @@ class ObserveAction(BaseAction):
         super().__init__()
     
     def success_message(self, **kwargs) -> str:
-        return f"You observe in your field of view: {kwargs.get('answer', 'nothing')}."
+        return f"You observe: {kwargs.get('answer', 'nothing')}."
     
     def error_message(self, error_type: str) -> str:
         return "Cannot observe: execution failed."
@@ -190,7 +191,8 @@ class ObserveAction(BaseAction):
         relationships = []
         for obj in visible_objects:
             _, dir_str = room.get_direction(obj.name, room.agent.name, perspective='ego')
-            answer_str = f"{obj.name} is {dir_str} of you"
+            # answer_str = f"{obj.name} is {dir_str} of you"
+            answer_str = f"{obj.name} is {dir_str}"
             if with_orientation and obj.has_orientation:
                 _, orientation = room.get_orientation(obj.name, room.agent.name)
                 answer_str += f" and faces {orientation}"
