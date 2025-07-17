@@ -227,6 +227,7 @@ class AllPairsEvaluationTask(BaseEvaluationTask):
         pairs = [(i, j) if self.np_random.random() >= 0.5 else (j, i) 
                 for i in range(n) for j in range(i+1, n)]
         self.np_random.shuffle(pairs)
+        pairs = pairs[:5]
         
         rel_questions = []
         for i, j in pairs:
