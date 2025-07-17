@@ -207,7 +207,8 @@ class AllPairsEvaluationTask(BaseEvaluationTask):
         "From a top-down view, what is the spatial relationship between each object pair?\n"
         "{obj_pairs_str}\n\n"
         "Answer Format:\n"
-        "For each pair (A, B), provide the relationship as (<horizontal>, <vertical>), where A is <horizontal> of B and <vertical> of B. "
+        "For each pair (A, B), provide the relationship as (<horizontal>, <vertical>), means A is <horizontal> of B and A is <vertical> of B.\n"
+        "E.g., (A, B) is (left, front) means A is left of B and A is in front of B.\n"
         "Provide a list of these tuples.\n"
         "1. (<horizontal>, <vertical>)\n"
         "2. (<horizontal>, <vertical>)\n"
@@ -898,17 +899,17 @@ if __name__ == "__main__":
 
     BaseAction.set_field_of_view(180)
 
-    # # Test all pairs evaluation task
-    # print("\n" + "="*50)
-    # print("Testing AllPairsEvaluationTask:")
-    # print("="*50)
-    # all_pairs_task = AllPairsEvaluationTask(np_random=np_random)
-    # all_pairs_question = all_pairs_task.generate_question(room)
-    # print(all_pairs_question)
-    # print(f"Expected answer: {all_pairs_task.answer}")
-    # correct, info = all_pairs_task.evaluate("1. (south, west)\n2. (north, west)\n3. (south, west)\n4. (south, east)\n5. (north, east)\n6. (north, east)")
-    # print(correct)
-    # print(info)
+    # Test all pairs evaluation task
+    print("\n" + "="*50)
+    print("Testing AllPairsEvaluationTask:")
+    print("="*50)
+    all_pairs_task = AllPairsEvaluationTask(np_random=np_random)
+    all_pairs_question = all_pairs_task.generate_question(room)
+    print(all_pairs_question)
+    print(f"Expected answer: {all_pairs_task.answer}")
+    correct, info = all_pairs_task.evaluate("1. (south, west)\n2. (north, west)\n3. (south, west)\n4. (south, east)\n5. (north, east)\n6. (north, east)")
+    print(correct)
+    print(info)
     
 
     # # Test evaluation with a sample answer
@@ -965,10 +966,10 @@ if __name__ == "__main__":
     # print(f"Expected answer: {pov_task.answer}")
 
 
-    # Test FalseBeliefEvaluationTask with different action types
-    print("\n" + "="*50)
-    print("Testing FalseBeliefEvaluationTask:")
-    print("="*50)
+    # # Test FalseBeliefEvaluationTask with different action types
+    # print("\n" + "="*50)
+    # print("Testing FalseBeliefEvaluationTask:")
+    # print("="*50)
     
     # # Test rotation only
     # print("Rotation only:")
@@ -980,25 +981,25 @@ if __name__ == "__main__":
     # correct, info = task.evaluate('("oven", "180")')
     # print(f"Evaluation: {correct}, Info: {info}")
     
-    # Test movement only
-    print("\nMovement only:")
-    config = {'action_type': 'movement'}
-    task = FalseBeliefEvaluationTask(np_random=np_random, config=config)
-    question = task.generate_question(room)
-    print(question)
-    print(f"Answer: {task.answer}")
-    correct, info = task.evaluate(task.answer)
-    print(f"Evaluation: {correct}, Info: {info}")
+    # # Test movement only
+    # print("\nMovement only:")
+    # config = {'action_type': 'movement'}
+    # task = FalseBeliefEvaluationTask(np_random=np_random, config=config)
+    # question = task.generate_question(room)
+    # print(question)
+    # print(f"Answer: {task.answer}")
+    # correct, info = task.evaluate(task.answer)
+    # print(f"Evaluation: {correct}, Info: {info}")
     
-    # Test both
-    print("\nBoth movement and rotation:")
-    config = {'action_type': 'both'}
-    task = FalseBeliefEvaluationTask(np_random=np_random, config=config)
-    question = task.generate_question(room)
-    print(question)
-    print(f"Answer: {task.answer}")
-    correct, info = task.evaluate(task.answer)
-    print(f"Evaluation: {correct}, Info: {info}")
+    # # Test both
+    # print("\nBoth movement and rotation:")
+    # config = {'action_type': 'both'}
+    # task = FalseBeliefEvaluationTask(np_random=np_random, config=config)
+    # question = task.generate_question(room)
+    # print(question)
+    # print(f"Answer: {task.answer}")
+    # correct, info = task.evaluate(task.answer)
+    # print(f"Evaluation: {correct}, Info: {info}")
 
     # # Test target localization task
     # print("\n" + "="*50)

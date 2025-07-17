@@ -405,41 +405,4 @@ if __name__ == "__main__":
     # result_4 = list_dir_eval_fn(test_answer_4, test_gt_4)
     # print(f"Test 4 result: {result_4}")  # Should be False
     
-    # Test cases for obj_presence_eval_fn
-    
-    # Test case 5: Basic correct object presence
-    test_answer_5 = "book, lamp, chair"
-    test_gt_5 = ["book", "lamp", "chair"]
-    result_5 = obj_presence_eval_fn(test_answer_5, test_gt_5)
-    print(f"Test 5 result: {result_5}")  # Should be True
-    
-    # Test case 6: Extra objects in prediction
-    test_answer_6 = "book, lamp, chair, table"
-    test_gt_6 = ["book", "lamp", "chair"]
-    result_6 = obj_presence_eval_fn(test_answer_6, test_gt_6)
-    print(f"Test 6 result: {result_6}")  # Should be False
-    
-    # Test case 7: Missing objects in prediction
-    test_answer_7 = "book, lamp"
-    test_gt_7 = ["book", "lamp", "chair"]
-    result_7 = obj_presence_eval_fn(test_answer_7, test_gt_7)
-    print(f"Test 7 result: {result_7}")  # Should be False
-    
-    # Test case 8: Different order but correct objects
-    test_answer_8 = "chair, book, lamp"
-    test_gt_8 = ["book", "lamp", "chair"]
-    result_8 = obj_presence_eval_fn(test_answer_8, test_gt_8)
-    print(f"Test 8 result: {result_8}")  # Should be True
-    
-    # Test case 9: Case sensitivity
-    test_answer_9 = "Book, LAMP, Chair"
-    test_gt_9 = ["book", "lamp", "chair"]
-    result_9 = obj_presence_eval_fn(test_answer_9, test_gt_9)
-    print(f"Test 9 result: {result_9}")  # Should be True
-    
-    # Test case 10: Empty prediction
-    test_answer_10 = ""
-    test_gt_10 = ["book", "lamp", "chair"]
-    result_10 = obj_presence_eval_fn(test_answer_10, test_gt_10)
-    print(f"Test 10 result: {result_10}")  # Should be False
-    
+    pass

@@ -14,11 +14,14 @@ class EvaluationManager:
     
     Handles task initialization, question generation, answer evaluation,
     and tracking of evaluation results across multiple tasks.
+
+    TODO handle unanswerer question
     """
     
     def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator):
         self.eval_tasks = eval_tasks
         self.np_random = np_random
+        self.results = []
         
         # Initialize tasks
         self.tasks = []
@@ -27,9 +30,13 @@ class EvaluationManager:
             task_kwargs = task_spec.get('task_kwargs', {})
             task = EvalTaskType.create_task(task_type, np_random, task_kwargs)
             self.tasks.append(task)
+            self.results.append({
+                "task_type": task.__class__.__name__,
+                "correct": False,
+                "info": {}
+            })
         
         self.current_index = 0
-        self.results = [] # log of results for each task
     
     def _get_current_eval_task(self) -> Optional[BaseEvaluationTask]:
         """Get current evaluation task."""
@@ -49,11 +56,8 @@ class EvaluationManager:
         correct, info = task.evaluate(answer)
         
         # Record result
-        self.results.append({
-            "task_type": task.__class__.__name__,
-            "correct": correct,
-            "info": info
-        })
+        self.results[self.current_index]["correct"] = correct
+        self.results[self.current_index]["info"] = info
         
         return correct, info
     
@@ -65,7 +69,6 @@ class EvaluationManager:
     def get_evaluation_summary(self) -> Dict[str, Any]:
         """Get evaluation summary."""
         total_tasks = len(self.tasks)
-        assert total_tasks == len(self.results), "Number of tasks and results mismatch"
         correct_count = sum(1 for r in self.results if r["correct"])
         
         return {
