@@ -208,14 +208,16 @@ class AllPairsEvaluationTask(BaseEvaluationTask):
         "{obj_pairs_str}\n\n"
         "Answer Format:\n"
         "For each pair (A, B), provide the relationship as (<horizontal>, <vertical>), means A is <horizontal> of B and A is <vertical> of B.\n"
-        "E.g., (A, B) is (left, front) means A is left of B and A is in front of B.\n"
+        "horizontal: west, east, same\n"
+        "vertical: north, south, same\n"
+        "E.g., (A, B) is (west, north) means A is west of B and A is north of B.\n"
         "Provide a list of these tuples.\n"
         "1. (<horizontal>, <vertical>)\n"
         "2. (<horizontal>, <vertical>)\n"
         "...\n\n"
         "Example:\n"
-        "1. (left, front)\n"
-        "2. (right, same)"
+        "1. (west, north)\n"
+        "2. (east, south)"
     )
     
     def generate_question(self, room: Room) -> str:
@@ -903,11 +905,11 @@ if __name__ == "__main__":
     print("\n" + "="*50)
     print("Testing AllPairsEvaluationTask:")
     print("="*50)
-    all_pairs_task = AllPairsEvaluationTask(np_random=np_random)
+    all_pairs_task = AllPairsEvaluationTask(np_random=np_random, config={'num_pairs': 2})
     all_pairs_question = all_pairs_task.generate_question(room)
     print(all_pairs_question)
     print(f"Expected answer: {all_pairs_task.answer}")
-    correct, info = all_pairs_task.evaluate("1. (south, west)\n2. (north, west)\n3. (south, west)\n4. (south, east)\n5. (north, east)\n6. (north, east)")
+    correct, info = all_pairs_task.evaluate("1. (east, south)\n2. (east, south)")
     print(correct)
     print(info)
     
