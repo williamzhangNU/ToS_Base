@@ -7,6 +7,7 @@ from ..core.relationship import DirPair, DirectionSystem, Dir
 from ..core.graph import DirectionalGraph
 from ..actions import (
     BaseAction,
+    ActionResult,
     ActionSequence,
     MoveAction,
     RotateAction,
@@ -137,7 +138,7 @@ class ExplorationManager:
 
         return is_redundant
 
-    def _execute_and_update(self, action: BaseAction) -> Tuple[bool, str, Dict[str, Any]]:
+    def _execute_and_update(self, action: BaseAction) -> ActionResult:
         """Execute action and update exploration state."""
         if isinstance(action, ReturnAction):
             kwargs = {'agent_anchor': self.agent_anchor}
@@ -148,7 +149,7 @@ class ExplorationManager:
         result = action.execute(self.exploration_room, **kwargs)
         
         if not result.success:
-            return result.success, result.message, result.data
+            return result
         
         # success execution
         if isinstance(action, MoveAction):
@@ -161,15 +162,13 @@ class ExplorationManager:
         elif isinstance(action, ObserveAction):
             result.data['redundant'] = self._update_observe()
         
-        return result.success, result.message, result.data
+        return result
 
 
 
-    def execute_action(self, action: BaseAction) -> None:
-        """Execute single action with validation."""
-        success, message, _ = self._execute_and_update(action)
-        if not success:
-            raise ValueError(f"Action execution failed: {message}")
+    def execute_action(self, action: BaseAction) -> ActionResult:
+        """Execute single action and return result."""
+        return self._execute_and_update(action)
     
     def _log_exploration(self, action_sequence: ActionSequence, info: Dict[str, Any]) -> None:
         """Log exploration history and efficiency."""
@@ -179,57 +178,52 @@ class ExplorationManager:
             self.exploration_efficiency['n_valid_queries'] += 1
         self.history.append(action_sequence)
 
-    def explore(self, action_sequence: ActionSequence, is_visual: bool = False) -> Tuple[str, Dict[str, Any]]:
+    def execute_action_sequence(self, action_sequence: ActionSequence) -> Tuple[Dict[str, Any], List[ActionResult]]:
         """
         Execute a sequence of motion actions followed by a final action.
         If any motion action fails, execute an observe action and end.
-        TODO: log fail action
+        Returns info and list of action results.
         """
         
         assert action_sequence.final_action, "Action sequence requires a final action."
         assert not (isinstance(action_sequence.final_action, TermAction) and action_sequence.motion_actions), "Term() action should not have motion actions."
 
         info = {'redundant': False}
-        messages = []
+        action_results = []
         
         # Execute motion actions
         for action in action_sequence.motion_actions:
-            success, msg, action_info = self._execute_and_update(action)
-            info.update(action_info)
-            if not success:
+            result = self._execute_and_update(action)
+            action_results.append(result)
+            info.update(result.data)
+            if not result.success:
                 # On failure, perform an observe action and end
-                obs_success, obs_msg, obs_info = self._execute_and_update(ObserveAction())
-                assert obs_success, f"Observe action failed: {obs_msg}"
-                info.update(obs_info)
-                
-                success_str = f"You successfully executed: {' '.join(messages)}\n" if messages else "You executed no actions\n"
-                message = success_str + f"But failed to execute {action}: {msg} So instead, {ObserveAction()} is executed: {obs_msg}"
-                
+                obs_result = self._execute_and_update(ObserveAction())
+                action_results.append(obs_result)
+                assert obs_result.success, f"Observe action failed: {obs_result.message}"
+                info.update(obs_result.data)
                 self._log_exploration(action_sequence, info)
-                return message, info
-            messages.append(f'{action}: {msg}')
+                return info, action_results
 
         # Execute final action
         final_action = action_sequence.final_action
-        success, msg, action_info = self._execute_and_update(final_action)
-        assert success, f"Final action {final_action} failed: {msg}"
-        info.update(action_info)
-        
-        if not is_visual and isinstance(final_action, ObserveAction):
-            # for not visual, use text as observation, instead, no text observation
-            messages.append(f'{final_action}: {msg}')
-        message = f"You successfully executed: {' '.join(messages)}"
+        result = self._execute_and_update(final_action)
+        action_results.append(result)
+        assert result.success, f"Final action {final_action} failed: {result.message}"
+        info.update(result.data)
 
         # Always log before return
         self._log_exploration(action_sequence, info)
-        return message, info
+        return info, action_results
     
     
     
     def finish_exploration(self, return_to_origin: bool = True, neglect_anchor: bool = True) -> Room:
         """Complete exploration and return final room state."""
         if return_to_origin and self.agent_anchor:
-            self.execute_action(ReturnAction())
+            result = self.execute_action(ReturnAction())
+            if not result.success:
+                raise ValueError(f"Failed to return to origin: {result.message}")
             
         if neglect_anchor:
             self._remove_anchor()
@@ -289,10 +283,10 @@ if __name__ == "__main__":
     # Add the Base directory to the path so we can import modules
     sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/../")
     
-    from core.object import Object, Agent
-    from core.room import Room
-    from core.relationship import DirPair, Dir
-    from core.graph import DirectionalGraph
+    from ..core import Object, Agent
+    from ..core import Room
+    from ..core import DirPair, Dir
+    from ..core import DirectionalGraph
     import numpy as np
     
     def create_test_room(objects_data):

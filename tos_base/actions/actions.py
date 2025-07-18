@@ -66,16 +66,16 @@ class MoveAction(BaseAction):
     
     def execute(self, room, **kwargs) -> ActionResult:
         """Execute move action on room state."""
+        success, message = True, self.get_feedback(True)
         if not room.has_object(self.target):
-            return ActionResult(False, self.get_feedback(False, "not_found"))
+            success, message = False, self.get_feedback(False, "not_found")
         
         target_obj = room.get_object_by_name(self.target)
         if not kwargs.get('move_anyway', False) and not self._is_visible(room.agent, target_obj):
-            return ActionResult(False, self.get_feedback(False, "not_visible"))
-        
+            success, message = False, self.get_feedback(False, "not_visible")        
         self._move_agent_to_pos(room, target_obj.pos)
 
-        return ActionResult(True, self.get_feedback(True), {'target_name': self.target})
+        return ActionResult(success, message, str(self), 'move', {'target_name': self.target})
     
     def __repr__(self):
         return f"Move({self.target})"
@@ -111,12 +111,13 @@ class RotateAction(BaseAction):
     
     def execute(self, room, **kwargs) -> ActionResult:
         """Execute rotate action on room state."""
+        success, message = True, self.get_feedback(True)
         if self.degrees is None or self.degrees not in self.VALID_DEGREES:
-            return ActionResult(False, self.get_feedback(False, "invalid_degree"))
+            success, message = False, self.get_feedback(False, "invalid_degree")
         
         self._rotate_agent(room, self.degrees)
             
-        return ActionResult(True, self.get_feedback(True), {'degrees': self.degrees})
+        return ActionResult(success, message, str(self), 'rotate', {'degrees': self.degrees})
     
     def __repr__(self):
         return f"Rotate({self.degrees})"
@@ -146,7 +147,7 @@ class ReturnAction(BaseAction):
         MoveAction(agent_anchor.name).execute(room)
         RotateAction(target_deg).execute(room)
         
-        return ActionResult(True, self.get_feedback(True), {'target_name': agent_anchor.name, 'degrees': target_deg})
+        return ActionResult(True, self.get_feedback(True), str(self), 'return', {'target_name': agent_anchor.name, 'degrees': target_deg})
     
     def __repr__(self):
         return "Return()"
@@ -183,7 +184,7 @@ class ObserveAction(BaseAction):
         
         if not visible_objects:
             answer = "Nothing in your field of view."
-            return ActionResult(True, self.get_feedback(True, answer=answer), {
+            return ActionResult(True, self.get_feedback(True, answer=answer), str(self), 'observe', {
                 'answer': answer, 'visible_objects': [], 'relationships': []
             })
 
@@ -198,7 +199,7 @@ class ObserveAction(BaseAction):
             relationships.append(answer_str)
         final_answer = ", ".join(relationships)
         
-        return ActionResult(True, self.get_feedback(True, answer=final_answer), {
+        return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe', {
             'answer': final_answer,
             'visible_objects': [obj.name for obj in visible_objects],
             'relationships': relationships
@@ -228,7 +229,7 @@ class TermAction(BaseAction):
     
     def execute(self, room, **kwargs) -> ActionResult:
         """Execute term action on room state."""
-        return ActionResult(True, self.get_feedback(True), {'terminated': True})
+        return ActionResult(True, self.get_feedback(True), str(self), 'term', {'terminated': True})
     
     @staticmethod
     def is_final() -> bool:
@@ -240,50 +241,6 @@ class TermAction(BaseAction):
     
     def __repr__(self):
         return "Term()"
-
-
-class QueryAction(BaseAction):
-    """Query spatial relationship of a specific object"""
-    
-    format_desc = "Query(object_name)"
-    description = "Query spatial relationship of a specific object relative to your current position"
-    example = "Query(table)"
-    format_pattern = r"^Query\(([A-Za-z0-9_-]+)\)$"
-    
-    def __init__(self, target=None):
-        super().__init__(target)
-        self.target = target
-    
-    def success_message(self, **kwargs) -> str:
-        return f"Queried: {kwargs.get('answer', 'N/A')}"
-    
-    def error_message(self, error_type: str) -> str:
-        errors = {"not_found": "object not found", "not_visible": "not visible"}
-        return f"Cannot query '{self.target}': {errors.get(error_type, 'execution failed')}."
-    
-    def execute(self, room, **kwargs) -> ActionResult:
-        """Execute query action on room state."""
-        if not room.has_object(self.target):
-            return ActionResult(False, self.get_feedback(False, "not_found"))
-        
-        target_obj = room.get_object_by_name(self.target)
-        if not self._is_visible(room.agent, target_obj):
-            return ActionResult(False, self.get_feedback(False, "not_visible"))
-        
-        dir_pair, dir_str = room.get_direction(self.target, room.agent.name, perspective='ego')
-        answer = f"{self.target} is {dir_str}"
-        
-        return ActionResult(True, self.get_feedback(True, answer=answer), {
-            'answer': answer, 'target_object': self.target, 
-            'direction_pair': dir_pair, 'direction_string': dir_str
-        })
-    
-    def is_final(self) -> bool:
-        return True
-    
-    def __repr__(self):
-        return f"Query({self.target})"
-
 
 # Action registry for easy lookup
 ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveAction, TermAction]

@@ -30,7 +30,6 @@ from .actions.actions import (
     ReturnAction,
     ObserveAction,
     TermAction,
-    QueryAction,
     ActionSequence
 )
 
@@ -54,7 +53,7 @@ __all__ = [
     
     # Actions
     'BaseAction', 'ActionResult', 'ActionSequence',
-    'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'TermAction', 'QueryAction',
+    'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'TermAction',
     
     # Managers
     'ExplorationManager', 'EvaluationManager',

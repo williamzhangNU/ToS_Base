@@ -15,6 +15,8 @@ class ActionResult:
     """Result of action execution"""
     success: bool
     message: str
+    action_command: str = ""
+    action_type: str = ""
     data: Dict[str, Any] = field(default_factory=dict)
 
 

@@ -9,12 +9,11 @@ from .actions import (
     ReturnAction,
     ObserveAction,
     TermAction,
-    QueryAction,
     ActionSequence,
     ACTION_CLASSES
 )
 
 __all__ = [
     'BaseAction', 'ActionResult', 'ActionSequence', 'ACTION_CLASSES',
-    'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'TermAction', 'QueryAction'
+    'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'TermAction'
 ] 
