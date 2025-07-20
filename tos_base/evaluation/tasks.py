@@ -475,9 +475,15 @@ class RotEvaluationTask(BaseEvaluationTask):
     1. for movement, need to gaurentee no ambiguity when generate room / evaluate answer
     """
 
+    
     QUESTION_TEMPLATE = (
-        "You are going to turn {turn_direction} 360 degrees.\n"
-        "List the objects in the order you see them. Do not include objects at your own position.\n\n"
+        "You will perform a complete 360-degree rotation, turning {turn_direction}.\n"
+        "As you rotate, identify and list all objects that appear directly in front of you during the turn.\n"
+        "List them in the order they appear as you complete the rotation.\n\n"
+        "Instructions:\n"
+        "- Only include objects directly ahead of you (not to your sides)\n"
+        "- Do not include objects at your current position\n"
+        "- Provide object names in chronological order of appearance\n\n"
         "Answer Format:\n"
         "List the object names, separated by commas: <obj1>, <obj2>, ...\n\n"
         "Example:\n"
