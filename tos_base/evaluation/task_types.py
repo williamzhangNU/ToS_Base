@@ -12,6 +12,7 @@ class EvalTaskType(Enum):
     ALL_PAIRS = ("all_pairs", "AllPairsEvaluationTask")
     DIR = ("dir", "DirEvaluationTask") 
     ROT = ("rot", "RotEvaluationTask")
+    ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
     POV = ("pov", "PovEvaluationTask")
     REVERSE_DIR = ("rev", "ReverseDirEvaluationTask")
     E2A = ("e2a", "E2AEvaluationTask")
@@ -39,8 +40,8 @@ class EvalTaskType(Enum):
         # Import here to avoid circular imports
         from .tasks import (
             AllPairsEvaluationTask, DirEvaluationTask, RotEvaluationTask,
-            PovEvaluationTask, ReverseDirEvaluationTask, E2AEvaluationTask,
-            ObjectPresenceEvaluationTask, LocalizationEvaluationTask, 
+            RotDualEvaluationTask, PovEvaluationTask, ReverseDirEvaluationTask, 
+            E2AEvaluationTask, ObjectPresenceEvaluationTask, LocalizationEvaluationTask, 
             FalseBeliefEvaluationTask
         )
         
@@ -48,6 +49,7 @@ class EvalTaskType(Enum):
             cls.ALL_PAIRS.short_name: AllPairsEvaluationTask,
             cls.DIR.short_name: DirEvaluationTask,
             cls.ROT.short_name: RotEvaluationTask,
+            cls.ROT_DUAL.short_name: RotDualEvaluationTask,
             cls.POV.short_name: PovEvaluationTask,
             cls.REVERSE_DIR.short_name: ReverseDirEvaluationTask,
             cls.E2A.short_name: E2AEvaluationTask,
