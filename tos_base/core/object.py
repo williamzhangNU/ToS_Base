@@ -25,7 +25,7 @@ class Object:
 
     name: str
     pos: np.ndarray = field(default_factory=lambda: np.zeros(2))
-    ori: np.ndarray = field(default_factory=lambda: np.array([1, 0]))
+    ori: np.ndarray = field(default_factory=lambda: np.array([0, 1]))
     has_orientation: bool = True
 
     def __post_init__(self):
