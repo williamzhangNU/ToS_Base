@@ -35,7 +35,7 @@ class EvaluationManager:
                 "correct": False,
                 "info": {}
             })
-        
+        self.eval_metrics_log: List[Dict[str,Any]] = []
         self.current_index = 0
     
     def _get_current_eval_task(self) -> Optional[BaseEvaluationTask]:
@@ -58,9 +58,17 @@ class EvaluationManager:
         # Record result
         self.results[self.current_index]["correct"] = correct
         self.results[self.current_index]["info"] = info
-        
+        turn_metrics = {
+            "turn_idx":    self.current_index,
+            "task_type":   self.results[self.current_index]["task_type"],
+            "correct":     correct,
+            **info,       
+            "cumulative_accuracy": sum(r["correct"] for r in self.results) / (self.current_index+1)
+        }
+        self.eval_metrics_log.append(turn_metrics)
         return correct, info
-    
+    def get_eval_metrics_log(self) -> List[Dict[str,Any]]:
+        return self.eval_metrics_log
     def next_task(self) -> bool:
         """Move to next task. Returns True if there are more tasks."""
         self.current_index += 1

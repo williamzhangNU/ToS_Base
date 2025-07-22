@@ -200,7 +200,7 @@ class Room:
             return
         
         if save_path is None:
-            save_path = f"room_{self.name}.pdf"
+            save_path = f"room_{self.name}.png"
         
         fig, ax = plt.subplots(figsize=(8, 6))
         min_x, max_x, min_y, max_y = self.get_boundary()
@@ -222,7 +222,7 @@ class Room:
         ax.set_title(f'Room: {self.name}')
         
         # Save to specified file path
-        plt.savefig(save_path, format='pdf', bbox_inches='tight')
+        plt.savefig(save_path, bbox_inches='tight')
         print(f"Room plot saved to: {save_path}")
         plt.close()
 
