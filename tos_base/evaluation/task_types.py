@@ -10,15 +10,16 @@ class EvalTaskType(Enum):
     
     # Task type definitions: (short_name, class_name)
     ALL_PAIRS = ("all_pairs", "AllPairsEvaluationTask")
-    DIR = ("dir", "DirEvaluationTask") 
     ROT = ("rot", "RotEvaluationTask")
+    CIRCULAR_ROT = ("circular_rot", "CircularRotEvaluationTask")
     ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
     POV = ("pov", "PovEvaluationTask")
-    REVERSE_DIR = ("rev", "ReverseDirEvaluationTask")
     E2A = ("e2a", "E2AEvaluationTask")
     OBJECT_PRESENCE = ("obj_presence", "ObjectPresenceEvaluationTask")
     LOCALIZATION = ("loc", "LocalizationEvaluationTask")
     FALSE_BELIEF = ("false_belief", "FalseBeliefEvaluationTask")
+    # DIR = ("dir", "DirEvaluationTask") 
+    # REVERSE_DIR = ("rev", "ReverseDirEvaluationTask")
     
     def __init__(self, short_name: str, class_name: str):
         self.short_name = short_name
@@ -39,19 +40,18 @@ class EvalTaskType(Enum):
         """Get mapping from short names to task classes."""
         # Import here to avoid circular imports
         from .tasks import (
-            AllPairsEvaluationTask, DirEvaluationTask, RotEvaluationTask,
-            RotDualEvaluationTask, PovEvaluationTask, ReverseDirEvaluationTask, 
-            E2AEvaluationTask, ObjectPresenceEvaluationTask, LocalizationEvaluationTask, 
-            FalseBeliefEvaluationTask
+            AllPairsEvaluationTask, RotEvaluationTask,
+            CircularRotEvaluationTask, RotDualEvaluationTask, PovEvaluationTask, 
+            E2AEvaluationTask, ObjectPresenceEvaluationTask, 
+            LocalizationEvaluationTask, FalseBeliefEvaluationTask
         )
         
         task_map = {
             cls.ALL_PAIRS.short_name: AllPairsEvaluationTask,
-            cls.DIR.short_name: DirEvaluationTask,
             cls.ROT.short_name: RotEvaluationTask,
+            cls.CIRCULAR_ROT.short_name: CircularRotEvaluationTask,
             cls.ROT_DUAL.short_name: RotDualEvaluationTask,
             cls.POV.short_name: PovEvaluationTask,
-            cls.REVERSE_DIR.short_name: ReverseDirEvaluationTask,
             cls.E2A.short_name: E2AEvaluationTask,
             cls.OBJECT_PRESENCE.short_name: ObjectPresenceEvaluationTask,
             cls.LOCALIZATION.short_name: LocalizationEvaluationTask,
