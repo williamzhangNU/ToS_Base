@@ -85,7 +85,22 @@ class Room:
             
         return dir_pair, ori_str
 
-    def get_room_description(self) -> str:
+    def _get_topdown_info(self) -> str:
+        """Get topdown view showing object coordinates and orientations"""
+        ori_mapping = {
+            (0, 1): "north",
+            (0, -1): "south",
+            (1, 0): "east",
+            (-1, 0): "west",
+        }
+        info = "## Topdown Information\n"
+        if self.agent:
+            info += f"Yourself at ({self.agent.pos[0]}, {self.agent.pos[1]}) facing {ori_mapping[tuple(self.agent.ori)]}\n"
+        for obj in self.objects:
+            info += f"{obj.name} at ({obj.pos[0]}, {obj.pos[1]}) facing {ori_mapping[tuple(obj.ori)]}\n"
+        return info
+
+    def get_room_description(self, with_topdown: bool = False) -> str:
         """Get textual description of the room"""
         if self.agent:
             desc = f"Imagine yourself as {self.agent.name} in a room.\n"
@@ -94,7 +109,11 @@ class Room:
         else:
             desc = "Imagine looking at a room from above.\n"
             desc += f"Objects in the room: {', '.join([obj.name for obj in self.objects])}\n"
+        
+        if with_topdown:
+            desc += "\n" + self._get_topdown_info()
         return desc
+
     
     def get_boundary(self):
         """

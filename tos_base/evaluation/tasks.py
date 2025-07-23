@@ -275,16 +275,17 @@ class RotEvaluationTask(BaseEvaluationTask):
 
     
     QUESTION_TEMPLATE = (
-        "You will perform a complete 360-degree rotation, turning {turn_direction}.\n"
-        "As you rotate, identify and list all objects that appear directly in front of you during the turn.\n"
-        "Think of this like a spotlight beam pointing straight forward from your position - only objects illuminated by this narrow forward beam count.\n"
-        "List them in the order they appear as you complete the rotation.\n\n"
+        "You will perform a full 360-degree rotation by continuously turning {turn_direction} in place.\n"
+        "As you rotate, imagine a narrow spotlight beam projecting straight ahead from your current viewpoint.\n"
+        "This beam represents your direct line of sight and sweeps across the environment as you turn.\n\n"
+        "**CRITICAL: Objects are only visible when you turn to face them directly.**\n"
+        "- An object is 'directly in front' when the beam points straight at it\n"
+        "Your task is to identify sequence of objects that becomes visible as your beam points directly at it during the full rotation.\n\n"
         "Instructions:\n"
-        "- Only include objects directly ahead of you (not to your sides)\n"
-        "- Do not include objects at your current position\n"
-        "- Provide object names in chronological order of appearance\n\n"
+        "- Do **not** include any object at your current position\n"
+        "- Assume a smooth, continuous 360° rotation that will point directly at every possible angle\n\n"
         "Answer Format:\n"
-        "List the object names, separated by commas: <obj1>, <obj2>, ...\n\n"
+        "List all visible objects, separated by commas: <obj1>, <obj2>, ...\n\n"
         "Example:\n"
         "table, bookshelf, sofa"
     )
