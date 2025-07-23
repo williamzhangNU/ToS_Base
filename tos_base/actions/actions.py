@@ -66,16 +66,15 @@ class MoveAction(BaseAction):
     
     def execute(self, room, **kwargs) -> ActionResult:
         """Execute move action on room state."""
-        success, message = True, self.get_feedback(True)
         if not room.has_object(self.target):
-            success, message = False, self.get_feedback(False, "not_found")
+            return ActionResult(False, self.get_feedback(False, "not_found"), str(self), 'move', {'target_name': self.target})
         
         target_obj = room.get_object_by_name(self.target)
         if not kwargs.get('move_anyway', False) and not self._is_visible(room.agent, target_obj):
-            success, message = False, self.get_feedback(False, "not_visible")        
+            return ActionResult(False, self.get_feedback(False, "not_visible"), str(self), 'move', {'target_name': self.target})        
         self._move_agent_to_pos(room, target_obj.pos)
 
-        return ActionResult(success, message, str(self), 'move', {'target_name': self.target})
+        return ActionResult(True, self.get_feedback(True), str(self), 'move', {'target_name': self.target})
     
     def __repr__(self):
         return f"Move({self.target})"
