@@ -529,6 +529,7 @@ class E2AEvaluationTask(BaseEvaluationTask):
     QUESTION_TEMPLATE = (
         "Assume your front is the positive y-axis, your right is the positive x-axis.\n"
         "You observe objects at these coordinates: {coordinates}.\n"
+        "NOTE there may be a random offset to the coordinates.\n"
         "What objects are at these coordinates in the same order?\n\n"
         "Answer Format:\n"
         "List the object names, separated by commas: <obj1>, <obj2>, ...\n\n"
