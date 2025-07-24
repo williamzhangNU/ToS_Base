@@ -1,5 +1,6 @@
 import numpy as np
 import copy
+from copy import deepcopy
 from typing import List, Tuple, Dict, Any
 
 from ..core.object import Object, Agent
@@ -48,7 +49,7 @@ class ExplorationManager:
         self.exp_graph = DirectionalGraph(self.objects, is_explore=True)
         
         self.exp_graph.add_edge(self.agent_idx, self.anchor_idx, DirPair(Dir.SAME, Dir.SAME))
-
+        self.metrics_log: List[Dict[str, Any]] = []
 
         # log exploration history and efficiency
         self.exploration_efficiency = {
@@ -176,7 +177,11 @@ class ExplorationManager:
             self.exploration_efficiency['n_redundant_queries'] += 1
         if not action_sequence.final_action.is_term():
             self.exploration_efficiency['n_valid_queries'] += 1
+        self.metrics_log.append(deepcopy(self.exploration_efficiency))
+        self.metrics_log.append(deepcopy(info))
         self.history.append(action_sequence)
+    def get_metrics_log(self) -> List[Dict[str, Any]]:
+        return self.metrics_log
 
     def execute_action_sequence(self, action_sequence: ActionSequence) -> Tuple[Dict[str, Any], List[ActionResult]]:
         """
