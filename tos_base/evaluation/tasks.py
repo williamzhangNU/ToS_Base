@@ -40,17 +40,20 @@ class EvaluationData:
     
     def evaluate(self, pred: Any) -> Tuple[bool, Dict[str, Any]]:
         """Evaluate an answer to the given question"""
-        if self.task_type == 'AllPairsEvaluationTask':
-            correct_count = list_dir_eval_fn(pred, self.answer)
-            total_answers = len(self.answer)
-            score = correct_count / total_answers if total_answers > 0 else 0.0
+        # if self.task_type == 'AllPairsEvaluationTask':
+        #     correct_count = list_dir_eval_fn(pred, self.answer)
+        #     total_answers = len(self.answer)
+        #     score = correct_count / total_answers if total_answers > 0 else 0.0
             
-            info = {
-                "score": score,
-                "correct_count": correct_count,
-                "total_count": total_answers
-            }
-            return correct_count == total_answers, info
+        #     info = {
+        #         "score": score,
+        #         "correct_count": correct_count,
+        #         "total_count": total_answers
+        #     }
+        #     return correct_count == total_answers, info
+
+        if self.task_type == 'AllPairsEvaluationTask':
+            return tuple_eval_fn(pred, self.answer), {}
         
         # elif self.task_type in ['DirEvaluationTask', 'PovEvaluationTask']:
         #     return tuple_eval_fn(pred, self.answer), {}
@@ -212,50 +215,70 @@ class AllPairsEvaluationTask(BaseEvaluationTask):
     Answer format: 1. (<horiz>, <vert>), 2. (<horiz>, <vert>), ...
     """
 
+    # QUESTION_TEMPLATE = (
+    #     "From a top-down view, what is the spatial relationship between each object pair?\n"
+    #     "{obj_pairs_str}\n\n"
+    #     "Answer Format:\n"
+    #     "For each pair (A, B), provide the relationship as (<horizontal>, <vertical>), means A is <horizontal> of B and A is <vertical> of B.\n"
+    #     "horizontal: west, east, same\n"
+    #     "vertical: north, south, same\n"
+    #     "E.g., (A, B) is (west, north) means A is west of B and A is north of B.\n"
+    #     "Provide a list of these tuples.\n"
+    #     "1. (<horizontal>, <vertical>)\n"
+    #     "2. (<horizontal>, <vertical>)\n"
+    #     "...\n\n"
+    #     "Example:\n"
+    #     "1. (west, north)\n"
+    #     "2. (east, south)"
+    # )
     QUESTION_TEMPLATE = (
-        "From a top-down view, what is the spatial relationship between each object pair?\n"
-        "{obj_pairs_str}\n\n"
-        "Answer Format:\n"
-        "For each pair (A, B), provide the relationship as (<horizontal>, <vertical>), means A is <horizontal> of B and A is <vertical> of B.\n"
+        "From a top-down view, what is the spatial relationship between the given pair {obj_pairs_str}?\n"
+        "For the pair (A, B), provide the relationship as (<horizontal>, <vertical>), means A is <horizontal> of B and A is <vertical> of B.\n"
         "horizontal: west, east, same\n"
         "vertical: north, south, same\n"
         "E.g., (A, B) is (west, north) means A is west of B and A is north of B.\n"
-        "Provide a list of these tuples.\n"
-        "1. (<horizontal>, <vertical>)\n"
-        "2. (<horizontal>, <vertical>)\n"
-        "...\n\n"
+        "Answer Format:\n"
+        "Provide a tuple: (<horizontal>, <vertical>)\n"
         "Example:\n"
-        "1. (west, north)\n"
-        "2. (east, south)"
+        "(west, north)"
     )
     
     def generate_question(self, room: Room) -> str:
         """Generate a question that asks about all spatial relationships between pairs of objects"""
         room = room.copy()
-        answer = []
         n = len(room.all_objects)
         
         # Generate all pairs with random order
         pairs = [(i, j) if self.np_random.random() >= 0.5 else (j, i) 
                 for i in range(n) for j in range(i+1, n)]
         self.np_random.shuffle(pairs)
-        pairs = pairs[:self.config.get('num_pairs', 5)]
+
+        # answer = []
+        # pairs = pairs[:self.config.get('num_pairs', 5)]
         
-        rel_questions = []
-        for i, j in pairs:
-            obj1, obj2 = room.all_objects[i], room.all_objects[j]
-            dir_pair, _ = room.get_direction(obj1.name, obj2.name, perspective='allo')
-            answer.append((
-                DirectionSystem.to_string(dir_pair.horiz, perspective='allo'),
-                DirectionSystem.to_string(dir_pair.vert, perspective='allo')
-            ))
-            rel_questions.append(f"({obj1.name}, {obj2.name})")
+        # rel_questions = []
+        # for i, j in pairs:
+        #     obj1, obj2 = room.all_objects[i], room.all_objects[j]
+        #     dir_pair, _ = room.get_direction(obj1.name, obj2.name, perspective='allo')
+        #     answer.append((
+        #         DirectionSystem.to_string(dir_pair.horiz, perspective='allo'),
+        #         DirectionSystem.to_string(dir_pair.vert, perspective='allo')
+        #     ))
+        #     rel_questions.append(f"({obj1.name}, {obj2.name})")
         
-        rel_questions_str = "\n".join([f"{i}. {question}" for i, question in enumerate(rel_questions, 1)])
-        
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(obj_pairs_str=rel_questions_str)
-        self.eval_data.answer = answer
+        # rel_questions_str = "\n".join([f"{i}. {question}" for i, question in enumerate(rel_questions, 1)])
+
+        pair = pairs[0]
+        obj1, obj2 = room.all_objects[pair[0]], room.all_objects[pair[1]]
+        dir_pair, _ = room.get_direction(obj1.name, obj2.name, perspective='allo')
+
+        self.eval_data.question = self.QUESTION_TEMPLATE.format(obj_pairs_str=f"({obj1.name}, {obj2.name})")
+        self.eval_data.answer = (
+            DirectionSystem.to_string(dir_pair.horiz, perspective='allo'),
+            DirectionSystem.to_string(dir_pair.vert, perspective='allo')
+        )
         self.eval_data.reasoning = self._generate_reasoning(room)
+        
         return self.eval_data.question
 
 
@@ -323,11 +346,13 @@ class RotEvaluationTask(BaseEvaluationTask):
             turn_prompt = self.TURN_TEMPLATE.format(degree=degree)
             RotateAction(degree).execute(room)
 
-        objects = room.objects
-        objects.sort(key=lambda x: get_angle(x.pos), reverse=(turn_direction == 'counterclockwise'))
+        objects = room.objects.copy()
+        direct_front_objects = [obj for obj in objects if obj.pos[0] == 0 and obj.pos[1] >= 0]
+        other_objects = [obj for obj in objects if obj.name not in [obj.name for obj in direct_front_objects]]
+        other_objects.sort(key=lambda x: get_angle(x.pos), reverse=(turn_direction == 'counterclockwise'))
 
         self.eval_data.question = movement_prompt + turn_prompt + self.QUESTION_TEMPLATE.format(turn_direction=turn_direction)
-        self.eval_data.answer = [obj.name for obj in objects if obj.name not in neglect_objects]
+        self.eval_data.answer = [obj.name for obj in direct_front_objects] + [obj.name for obj in other_objects]
         self.eval_data.reasoning = self._generate_reasoning(room)
         return self.eval_data.question
     
@@ -1064,17 +1089,17 @@ if __name__ == "__main__":
 
     BaseAction.set_field_of_view(180)
 
-    # # Test all pairs evaluation task
-    # print("\n" + "="*50)
-    # print("Testing AllPairsEvaluationTask:")
-    # print("="*50)
-    # all_pairs_task = AllPairsEvaluationTask(np_random=np_random, config={'num_pairs': 2})
-    # all_pairs_question = all_pairs_task.generate_question(room)
-    # print(all_pairs_question)
-    # print(f"Expected answer: {all_pairs_task.answer}")
-    # correct, info = all_pairs_task.evaluate("1. (east, south)\n2. (east, south)")
-    # print(correct)
-    # print(info)
+    # Test all pairs evaluation task
+    print("\n" + "="*50)
+    print("Testing AllPairsEvaluationTask:")
+    print("="*50)
+    all_pairs_task = AllPairsEvaluationTask(np_random=np_random, config={'num_pairs': 2})
+    all_pairs_question = all_pairs_task.generate_question(room)
+    print(all_pairs_question)
+    print(f"Expected answer: {all_pairs_task.answer}")
+    correct, info = all_pairs_task.evaluate("1. (east, south)\n2. (east, south)")
+    print(correct)
+    print(info)
     
 
     # # Test evaluation with a sample answer
@@ -1213,21 +1238,21 @@ if __name__ == "__main__":
     # correct, info = rot_dual_task.evaluate(wrong_answer)
     # print(f"Wrong answer test: {correct}, Info: {info}")
 
-    # Test circular rot evaluation task
-    print("\n" + "="*50)
-    print("Testing CircularRotEvaluationTask:")
-    print("="*50)
-    circular_rot_task = CircularRotEvaluationTask(np_random=np_random)
-    circular_rot_question = circular_rot_task.generate_question(room)
-    print(circular_rot_question)
-    print(f"Expected answer: {circular_rot_task.answer}")
-    correct, info = circular_rot_task.evaluate(circular_rot_task.answer)
-    print(f"Self-evaluation: {correct}, Info: {info}")
+    # # Test circular rot evaluation task
+    # print("\n" + "="*50)
+    # print("Testing CircularRotEvaluationTask:")
+    # print("="*50)
+    # circular_rot_task = CircularRotEvaluationTask(np_random=np_random)
+    # circular_rot_question = circular_rot_task.generate_question(room)
+    # print(circular_rot_question)
+    # print(f"Expected answer: {circular_rot_task.answer}")
+    # correct, info = circular_rot_task.evaluate(circular_rot_task.answer)
+    # print(f"Self-evaluation: {correct}, Info: {info}")
     
-    # Test with wrong answer
-    wrong_answer = "clockwise" if circular_rot_task.answer == "counterclockwise" else "counterclockwise"
-    correct, info = circular_rot_task.evaluate(wrong_answer)
-    print(f"Wrong answer test: {correct}, Info: {info}")
+    # # Test with wrong answer
+    # wrong_answer = "clockwise" if circular_rot_task.answer == "counterclockwise" else "counterclockwise"
+    # correct, info = circular_rot_task.evaluate(wrong_answer)
+    # print(f"Wrong answer test: {correct}, Info: {info}")
 
     # # Test e2a evaluation task
     # print("\n" + "="*50)
