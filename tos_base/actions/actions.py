@@ -110,13 +110,11 @@ class RotateAction(BaseAction):
     
     def execute(self, room, **kwargs) -> ActionResult:
         """Execute rotate action on room state."""
-        success, message = True, self.get_feedback(True)
         if self.degrees is None or self.degrees not in self.VALID_DEGREES:
-            success, message = False, self.get_feedback(False, "invalid_degree")
+            return ActionResult(False, self.get_feedback(False, "invalid_degree"), str(self), 'rotate', {'degrees': self.degrees})
         
         self._rotate_agent(room, self.degrees)
-            
-        return ActionResult(success, message, str(self), 'rotate', {'degrees': self.degrees})
+        return ActionResult(True, self.get_feedback(True), str(self), 'rotate', {'degrees': self.degrees})
     
     def __repr__(self):
         return f"Rotate({self.degrees})"
