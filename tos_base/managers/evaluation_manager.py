@@ -58,14 +58,8 @@ class EvaluationManager:
         # Record result
         self.results[self.current_index]["correct"] = correct
         self.results[self.current_index]["info"] = info
-        turn_metrics = {
-            "turn_idx":    self.current_index,
-            "task_type":   self.results[self.current_index]["task_type"],
-            "correct":     correct,
-            **info,       
-            "cumulative_accuracy": sum(r["correct"] for r in self.results) / (self.current_index+1)
-        }
-        self.eval_metrics_log.append(turn_metrics)
+        correct_answer = task.answer
+        self.eval_metrics_log.append(correct_answer)
         return correct, info
     def get_eval_metrics_log(self) -> List[Dict[str,Any]]:
         return self.eval_metrics_log
