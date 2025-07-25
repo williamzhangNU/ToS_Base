@@ -9,7 +9,7 @@ class EvalTaskType(Enum):
     """Enum for all available evaluation task types."""
     
     # Task type definitions: (short_name, class_name)
-    DIRECTION = ("direction", "DirectionEvaluationTask")
+    DIR = ("dir", "DirectionEvaluationTask")
     ROT = ("rot", "RotEvaluationTask")
     CIRCULAR_ROT = ("circular_rot", "CircularRotEvaluationTask")
     ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
@@ -44,7 +44,7 @@ class EvalTaskType(Enum):
         )
         
         task_map = {
-            cls.DIRECTION.short_name: DirectionEvaluationTask,
+            cls.DIR.short_name: DirectionEvaluationTask,
             cls.ROT.short_name: RotEvaluationTask,
             cls.CIRCULAR_ROT.short_name: CircularRotEvaluationTask,
             cls.ROT_DUAL.short_name: RotDualEvaluationTask,
