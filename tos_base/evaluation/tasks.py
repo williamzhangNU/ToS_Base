@@ -13,12 +13,6 @@ from .task_types import EvalTaskType
 
 from ..core.room import Room
 from ..utils.eval_utilities import (
-    tuple_eval_fn,
-    obj_seq_eval_fn,
-    deg_seq_eval_fn,
-    list_dir_eval_fn,
-    e2a_eval_fn,
-    obj_presence_eval_fn,
     multi_choice_eval_fn,
 )
 from ..core.constant import CANDIDATE_OBJECTS
@@ -33,66 +27,17 @@ class EvaluationData:
     answer: str
     reasoning: str
     task_type: str
+    choices: List[str] = None
 
     def __post_init__(self):
         valid_task_types = EvalTaskType.get_class_names()
         assert self.task_type in valid_task_types, f"Invalid task type: {self.task_type}"
+        if self.choices is None:
+            self.choices = []
     
     def evaluate(self, pred: Any) -> Tuple[bool, Dict[str, Any]]:
-        """Evaluate an answer to the given question"""
-        # if self.task_type == 'AllPairsEvaluationTask':
-        #     correct_count = list_dir_eval_fn(pred, self.answer)
-        #     total_answers = len(self.answer)
-        #     score = correct_count / total_answers if total_answers > 0 else 0.0
-            
-        #     info = {
-        #         "score": score,
-        #         "correct_count": correct_count,
-        #         "total_count": total_answers
-        #     }
-        #     return correct_count == total_answers, info
-
-        if self.task_type == 'AllPairsEvaluationTask':
-            return tuple_eval_fn(pred, self.answer), {}
-        
-        # elif self.task_type in ['DirEvaluationTask', 'PovEvaluationTask']:
-        #     return tuple_eval_fn(pred, self.answer), {}
-        
-        # elif self.task_type == 'ReverseDirEvaluationTask':
-        #     return multi_choice_eval_fn(pred, self.answer), {}
-
-        elif self.task_type == 'PovEvaluationTask':
-            return tuple_eval_fn(pred, self.answer), {}
-        
-        elif self.task_type == 'RotEvaluationTask':
-            return obj_seq_eval_fn(pred, self.answer), {}
-        
-        elif self.task_type == 'CircularRotEvaluationTask':
-            return obj_seq_eval_fn(pred, self.answer), {}
-        
-        elif self.task_type == 'RotDualEvaluationTask':
-            return pred.strip().lower() == self.answer.strip().lower(), {}
-        
-        elif self.task_type == 'E2AEvaluationTask':
-            return obj_seq_eval_fn(pred, self.answer), {}
-        
-        elif self.task_type == 'ObjectPresenceEvaluationTask':
-            return obj_presence_eval_fn(pred, self.answer)
-        
-        elif self.task_type == 'LocalizationEvaluationTask':
-            return tuple_eval_fn(pred, self.answer), {}
-        
-        elif self.task_type == 'FalseBeliefEvaluationTask':
-            # Handle different answer formats for FalseBeliefEvaluationTask
-            if isinstance(self.answer, tuple):
-                # Tuple format: rotation or both cases
-                return tuple_eval_fn(pred, self.answer), {}
-            elif isinstance(self.answer, str):
-                # Movement format: obj_name
-                return pred.strip() == self.answer.strip(), {}
-            return False, {"error": "Invalid answer format"}
-        
-        return False, {"error": "Unknown task type"}
+        """Evaluate an answer to the given question using multi-choice evaluation"""
+        return multi_choice_eval_fn(pred, self.answer), {}
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert the evaluation data to a dictionary"""
@@ -101,6 +46,7 @@ class EvaluationData:
             'answer': self.answer,
             'reasoning': self.reasoning,
             'task_type': self.task_type,
+            'choices': self.choices,
         }
 
     @classmethod
@@ -120,7 +66,8 @@ class BaseEvaluationTask(ABC):
             question="",
             answer="",
             reasoning="",
-            task_type=self.__class__.__name__
+            task_type=self.__class__.__name__,
+            choices=[]
         )
 
     @property
@@ -135,9 +82,22 @@ class BaseEvaluationTask(ABC):
     def reasoning(self) -> str:
         return self.eval_data.reasoning
     
+    @property
+    def choices(self) -> List[str]:
+        return self.eval_data.choices
+    
     def _generate_reasoning(self, room: Room) -> str:
         """Generate reasoning for the evaluation task"""
         return f"Testing spatial reasoning for {self.__class__.__name__}"
+    
+    def format_choices(self, choices: List[str], correct_index: int) -> str:
+        """Format choices as A. B. C. D. ... and return choice text"""
+        return "\n".join([f"{chr(65+i)}. {choice}" for i, choice in enumerate(choices)]), chr(65 + correct_index)
+    
+    @abstractmethod
+    def generate_choices(self, correct_answer: Any, room: Room) -> Tuple[List[str], str]:
+        """Generate choices with only one correct answer"""
+        pass
     
     @abstractmethod
     def generate_question(self, room: Room) -> str:
@@ -157,6 +117,7 @@ class BaseEvaluationTask(ABC):
             'question': self.question,
             'answer': self.answer,
             'reasoning': self.reasoning,
+            'choices': self.choices,
         }
 
     @classmethod
@@ -176,75 +137,28 @@ class BaseEvaluationTask(ABC):
         return task_types.get(task_type, cls).from_dict(data)
 
 
-class ObjectPresenceEvaluationTask(BaseEvaluationTask):
+class DirectionEvaluationTask(BaseEvaluationTask):
     """
-    Evaluation task for identifying what objects are present in the room.
+    Evaluation task for checking spatial relationship between one randomly chosen object pair.
     
-    Q: What objects are in the room?
-    A: List of object names (excluding agent)
+    Q: spatial relationship between a randomly chosen pair
+    A: (<horiz>, <vert>)
+    
+    Randomly chooses one pair from all possible object pairs and asks for their relationship.
     """
 
     QUESTION_TEMPLATE = (
-        "What objects are in the room?\n\n"
-        "Answer Format:\n"
-        "List the object names, separated by commas: <obj1>, <obj2>, ...\n\n"
-        "Example:\n"
-        "chair, table, sofa"
+        "From a top-down view, what is the spatial relationship between the pair {obj_pairs_str}?\n"
+        "For the pair (A, B), the relationship (<horizontal>, <vertical>) means A is <horizontal> of B and A is <vertical> of B.\n"
+        "where <horizontal>: west, east, same; <vertical>: north, south, same\n"
+        "Choose the correct answer:\n"
+        "{choices_text}\n\n"
+        "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
+        "Answer: "
     )
     
     def generate_question(self, room: Room) -> str:
-        """Generate a question asking about object presence in the room"""
-        
-        # Get all object names excluding the agent
-        object_names = [obj.name for obj in room.objects]
-        
-        self.eval_data.question = self.QUESTION_TEMPLATE
-        self.eval_data.answer = object_names
-        self.eval_data.reasoning = f"The room contains {len(object_names)} objects: {', '.join(object_names)}"
-        return self.eval_data.question
-
-
-class AllPairsEvaluationTask(BaseEvaluationTask):
-    """
-    Evaluation task for checking all spatial relationships allocentrically between object pairs.
-    
-    Q: spatial relationship between all pairs of objects
-    A: [<dir>, <dir>, ...]
-    
-    For N objects, generates N*(N-1)/2 distinct relationships with randomly shuffled object orders.
-    Answer format: 1. (<horiz>, <vert>), 2. (<horiz>, <vert>), ...
-    """
-
-    # QUESTION_TEMPLATE = (
-    #     "From a top-down view, what is the spatial relationship between each object pair?\n"
-    #     "{obj_pairs_str}\n\n"
-    #     "Answer Format:\n"
-    #     "For each pair (A, B), provide the relationship as (<horizontal>, <vertical>), means A is <horizontal> of B and A is <vertical> of B.\n"
-    #     "horizontal: west, east, same\n"
-    #     "vertical: north, south, same\n"
-    #     "E.g., (A, B) is (west, north) means A is west of B and A is north of B.\n"
-    #     "Provide a list of these tuples.\n"
-    #     "1. (<horizontal>, <vertical>)\n"
-    #     "2. (<horizontal>, <vertical>)\n"
-    #     "...\n\n"
-    #     "Example:\n"
-    #     "1. (west, north)\n"
-    #     "2. (east, south)"
-    # )
-    QUESTION_TEMPLATE = (
-        "From a top-down view, what is the spatial relationship between the given pair {obj_pairs_str}?\n"
-        "For the pair (A, B), provide the relationship as (<horizontal>, <vertical>), means A is <horizontal> of B and A is <vertical> of B.\n"
-        "horizontal: west, east, same\n"
-        "vertical: north, south, same\n"
-        "E.g., (A, B) is (west, north) means A is west of B and A is north of B.\n"
-        "Answer Format:\n"
-        "Provide a tuple: (<horizontal>, <vertical>)\n"
-        "Example:\n"
-        "(west, north)"
-    )
-    
-    def generate_question(self, room: Room) -> str:
-        """Generate a question that asks about all spatial relationships between pairs of objects"""
+        """Generate a question that asks about spatial relationship between one randomly chosen pair"""
         room = room.copy()
         n = len(room.all_objects)
         
@@ -253,33 +167,39 @@ class AllPairsEvaluationTask(BaseEvaluationTask):
                 for i in range(n) for j in range(i+1, n)]
         self.np_random.shuffle(pairs)
 
-        # answer = []
-        # pairs = pairs[:self.config.get('num_pairs', 5)]
-        
-        # rel_questions = []
-        # for i, j in pairs:
-        #     obj1, obj2 = room.all_objects[i], room.all_objects[j]
-        #     dir_pair, _ = room.get_direction(obj1.name, obj2.name, perspective='allo')
-        #     answer.append((
-        #         DirectionSystem.to_string(dir_pair.horiz, perspective='allo'),
-        #         DirectionSystem.to_string(dir_pair.vert, perspective='allo')
-        #     ))
-        #     rel_questions.append(f"({obj1.name}, {obj2.name})")
-        
-        # rel_questions_str = "\n".join([f"{i}. {question}" for i, question in enumerate(rel_questions, 1)])
-
         pair = pairs[0]
         obj1, obj2 = room.all_objects[pair[0]], room.all_objects[pair[1]]
-        dir_pair, _ = room.get_direction(obj1.name, obj2.name, perspective='allo')
+        _, correct_answer = room.get_direction(obj1.name, obj2.name, perspective='allo')
+        
+        # Generate choices
+        choices, correct_idx = self.generate_choices(correct_answer, room)
+        choices_text, correct_label = self.format_choices(choices, correct_idx)
 
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(obj_pairs_str=f"({obj1.name}, {obj2.name})")
-        self.eval_data.answer = (
-            DirectionSystem.to_string(dir_pair.horiz, perspective='allo'),
-            DirectionSystem.to_string(dir_pair.vert, perspective='allo')
+        self.eval_data.question = self.QUESTION_TEMPLATE.format(
+            obj_pairs_str=f"({obj1.name}, {obj2.name})",
+            choices_text=choices_text
         )
+        self.eval_data.answer = correct_label
+        self.eval_data.choices = choices
         self.eval_data.reasoning = self._generate_reasoning(room)
         
         return self.eval_data.question
+    
+    def generate_choices(self, correct_answer: str, room: Room) -> Tuple[List[str], int]:
+        """Generate 4 direction choices"""
+        h_dirs = ['west', 'east', 'same']
+        v_dirs = ['north', 'south', 'same']
+        choices = [correct_answer]
+        while len(choices) < 4:
+            random_h = self.np_random.choice(h_dirs)
+            random_v = self.np_random.choice(v_dirs)
+            choice = f"({random_h}, {random_v})"
+            if choice not in choices:
+                choices.append(choice)
+        
+        self.np_random.shuffle(choices)
+        correct_idx = choices.index(str(correct_answer))
+        return choices, correct_idx
 
 
 class RotEvaluationTask(BaseEvaluationTask):
@@ -300,17 +220,14 @@ class RotEvaluationTask(BaseEvaluationTask):
     QUESTION_TEMPLATE = (
         "You will perform a full 360-degree rotation by continuously turning {turn_direction} in place.\n"
         "As you rotate, imagine a narrow spotlight beam projecting straight ahead from your current viewpoint.\n"
-        "This beam represents your direct line of sight and sweeps across the environment as you turn.\n\n"
-        "**CRITICAL: Objects are only visible when you turn to face them directly.**\n"
-        "- An object is 'directly in front' when the beam points straight at it\n"
-        "Your task is to identify sequence of objects that becomes visible as your beam points directly at it during the full rotation.\n\n"
+        "Your task is to identify the sequence of objects that become visible during the full rotation.\n\n"
         "Instructions:\n"
-        "- Do **not** include any object at your current position\n"
-        "- Assume a smooth, continuous 360° rotation that will point directly at every possible angle\n\n"
-        "Answer Format:\n"
-        "List all visible objects, separated by commas: <obj1>, <obj2>, ...\n\n"
-        "Example:\n"
-        "table, bookshelf, sofa"
+        "- Object at your current position is not included\n"
+        "- Objects are visible ONLY when you turn to face them directly\n\n"
+        "Choose the correct sequence:\n"
+        "{choices_text}\n\n"
+        "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
+        "Answer: "
     )
     MOVEMENT_TEMPLATE = (
         "You moved to the same position as {move_obj_name}.\n"
@@ -329,7 +246,8 @@ class RotEvaluationTask(BaseEvaluationTask):
             return angle
         
         room = room.copy()
-        turn_direction = self.config.get('turn_direction', 'clockwise')
+        # turn_direction = self.config.get('turn_direction', 'clockwise')
+        turn_direction = self.np_random.choice(['clockwise', 'counterclockwise'])
         if_move = self.config.get('if_move', False)
         if_turn = self.config.get('if_turn', False)
         
@@ -351,10 +269,36 @@ class RotEvaluationTask(BaseEvaluationTask):
         other_objects = [obj for obj in objects if obj.name not in [obj.name for obj in direct_front_objects]]
         other_objects.sort(key=lambda x: get_angle(x.pos), reverse=(turn_direction == 'counterclockwise'))
 
-        self.eval_data.question = movement_prompt + turn_prompt + self.QUESTION_TEMPLATE.format(turn_direction=turn_direction)
-        self.eval_data.answer = [obj.name for obj in direct_front_objects] + [obj.name for obj in other_objects]
+        correct_answer = [obj.name for obj in direct_front_objects] + [obj.name for obj in other_objects]
+        
+        # Generate choices
+        choices, correct_idx = self.generate_choices(correct_answer, room)
+        choices_text, correct_label = self.format_choices(choices, correct_idx)
+
+        self.eval_data.question = movement_prompt + turn_prompt + self.QUESTION_TEMPLATE.format(
+            turn_direction=turn_direction,
+            choices_text=choices_text
+        )
+        self.eval_data.answer = correct_label
+        self.eval_data.choices = choices
         self.eval_data.reasoning = self._generate_reasoning(room)
         return self.eval_data.question
+    
+    def generate_choices(self, correct_answer: list, room: Room) -> Tuple[List[str], int]:
+        """Generate 4 object sequence choices"""
+        correct_answer_str = ", ".join(correct_answer)
+        choices = [correct_answer_str]
+        
+        for _ in range(3):
+            wrong_list = correct_answer.copy()
+            assert len(wrong_list) >= 3, "Need at least 3 objects for this task"
+            while ", ".join(wrong_list) in choices:
+                self.np_random.shuffle(wrong_list)
+            choices.append(", ".join(wrong_list))
+        
+        self.np_random.shuffle(choices)
+        correct_idx = choices.index(correct_answer_str)
+        return choices, correct_idx
     
     @override
     def to_string(self) -> str:
@@ -374,13 +318,15 @@ class CircularRotEvaluationTask(BaseEvaluationTask):
         "Assume your original position is the center of the room.\n"
         "Move {direction} from the center until you are farther away than any object in the room.\n"
         "Now face the center and walk {turn_direction} in a circle around it.\n"
-        "As you circle around, only count objects that are directly in front of you AND between you and the center.\n"
-        "Imagine a narrow beam of light from you to the center - only objects in this beam count.\n"
-        "List the objects in the order you encounter them.\n\n"
-        "Answer Format:\n"
-        "Object names separated by commas: <obj1>, <obj2>, ...\n\n"
-        "Example:\n"
-        "table, chair, sofa"
+        "Imagine a narrow spotlight beam projecting straight ahead from your current viewpoint.\n"
+        "Your task is to identify the sequence of objects that become visible during the full rotation.\n\n"
+        "Instructions:\n"
+        "- As you circle around, only count objects that are directly in front of you AND between you and the center.\n"
+        "- Objects are visible ONLY when you turn to face them directly\n\n"
+        "Choose the correct sequence:\n"
+        "{choices_text}\n\n"
+        "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
+        "Answer: "
     )
     
     def generate_question(self, room: Room) -> str:
@@ -405,14 +351,38 @@ class CircularRotEvaluationTask(BaseEvaluationTask):
         objects = room.objects.copy()
         objects.sort(key=lambda x: get_angle(x.pos), reverse=(turn_direction == 'counterclockwise'))
         
+        correct_answer = [obj.name for obj in objects]
+        
+        # Generate choices
+        choices, correct_idx = self.generate_choices(correct_answer, room)
+        choices_text, correct_label = self.format_choices(choices, correct_idx)
+        
         self.eval_data.question = self.QUESTION_TEMPLATE.format(
             direction=direction,
-            turn_direction=turn_direction
+            turn_direction=turn_direction,
+            choices_text=choices_text
         )
-        self.eval_data.answer = [obj.name for obj in objects]
+        self.eval_data.answer = correct_label
+        self.eval_data.choices = choices
         self.eval_data.reasoning = f"Agent rotates {turn_direction} around center from {direction}"
         
         return self.eval_data.question
+    
+    def generate_choices(self, correct_answer: list, room: Room) -> Tuple[List[str], int]:
+        """Generate 4 object sequence choices"""
+        correct_answer_str = ", ".join(correct_answer)
+        choices = [correct_answer_str]
+        
+        for _ in range(3):
+            wrong_list = correct_answer.copy()
+            assert len(wrong_list) >= 3, "Need at least 3 objects for this task"
+            while ", ".join(wrong_list) in choices:
+                self.np_random.shuffle(wrong_list)
+            choices.append(", ".join(wrong_list))
+        
+        self.np_random.shuffle(choices)
+        correct_idx = choices.index(correct_answer_str)
+        return choices, correct_idx
     
     @override
     def to_string(self) -> str:
@@ -427,6 +397,8 @@ class RotDualEvaluationTask(BaseEvaluationTask):
     A: "clockwise" or "counterclockwise"
     
     Reverse of RotEvaluationTask - provides sequence, asks for direction.
+
+    TODO: make it four-choice
     """
 
     QUESTION_TEMPLATE = (
@@ -434,10 +406,10 @@ class RotDualEvaluationTask(BaseEvaluationTask):
         "During the rotation, these objects appeared directly in front of you in this order:\n"
         "{object_sequence}\n\n"
         "Based on this sequence, in which direction did you rotate?\n\n"
-        "Answer Format:\n"
-        "clockwise or counterclockwise\n\n"
-        "Example:\n"
-        "clockwise"
+        "Choose the correct answer:\n"
+        "{choices_text}\n\n"
+        "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
+        "Answer: "
     )
     
     def generate_question(self, room: Room) -> str:
@@ -462,11 +434,28 @@ class RotDualEvaluationTask(BaseEvaluationTask):
         object_names = [obj.name for obj in objects]
         object_sequence = ", ".join(object_names)
         
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(object_sequence=object_sequence)
-        self.eval_data.answer = turn_direction
+        # Generate choices
+        choices, correct_idx = self.generate_choices(turn_direction, room)
+        choices_text, correct_label = self.format_choices(choices, correct_idx)
+        
+        self.eval_data.question = self.QUESTION_TEMPLATE.format(
+            object_sequence=object_sequence,
+            choices_text=choices_text
+        )
+        self.eval_data.answer = correct_label
+        self.eval_data.choices = choices
         self.eval_data.reasoning = self._generate_reasoning(room)
         
         return self.eval_data.question
+    
+    def generate_choices(self, correct_answer: str, room: Room) -> Tuple[List[str], int]:
+        """Generate 4 rotation direction choices"""
+        opposite = 'counterclockwise' if correct_answer == 'clockwise' else 'clockwise'
+        choices = [correct_answer, opposite]
+        
+        self.np_random.shuffle(choices)
+        correct_idx = choices.index(correct_answer)
+        return choices, correct_idx
 
 
 class PovEvaluationTask(BaseEvaluationTask):
@@ -482,10 +471,11 @@ class PovEvaluationTask(BaseEvaluationTask):
     QUESTION_TEMPLATE = (
         "Imagine you are at the same position and orientation as the {anchor_obj_name}.\n"
         "From this perspective, what is the direction of the {obj_name}?\n\n"
-        "Answer Format:\n"
-        "Provide the relationship as a tuple: (<horizontal>, <vertical>).\n\n"
-        "Example:\n"
-        "(left, front)"
+        "For object A, the relationship (<horizontal>, <vertical>) means A is <horizontal> and <vertical> of you.\n"
+        "Choose the correct answer:\n"
+        "{choices_text}\n\n"
+        "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
+        "Answer: "
     )
     
     def generate_question(self, room: Room) -> str:
@@ -503,81 +493,132 @@ class PovEvaluationTask(BaseEvaluationTask):
             obj_idx = self.np_random.integers(0, len(room.all_objects))
         obj_name, anchor_obj_name = room.all_objects[obj_idx].name, room.all_objects[anchor_obj_idx].name
 
+        _, correct_answer = room.get_direction(obj_name, anchor_obj_name, anchor_name=anchor_obj_name)
+        
+        # Generate choices
+        choices, correct_idx = self.generate_choices(correct_answer, room)
+        choices_text, correct_label = self.format_choices(choices, correct_idx)
+
         self.eval_data.question = self.QUESTION_TEMPLATE.format(
             anchor_obj_name=anchor_obj_name,
             obj_name=obj_name,
+            choices_text=choices_text
         )
-        dir_pair, _ = room.get_direction(obj_name, anchor_obj_name, anchor_name=anchor_obj_name)
-        self.eval_data.answer = (
-            DirectionSystem.to_string(dir_pair.horiz, perspective='ego'),
-            DirectionSystem.to_string(dir_pair.vert, perspective='ego')
-        )
+        self.eval_data.answer = correct_label
+        self.eval_data.choices = choices
         self.eval_data.reasoning = self._generate_reasoning(room)
         return self.eval_data.question
+    
+    def generate_choices(self, correct_answer: str, room: Room) -> Tuple[List[str], int]:
+        """Generate 4 direction choices"""
+        h_dirs = ['west', 'east', 'same']
+        v_dirs = ['north', 'south', 'same']
+        choices = [correct_answer]
+        while len(choices) < 4:
+            random_h = self.np_random.choice(h_dirs)
+            random_v = self.np_random.choice(v_dirs)
+            choice = f"({random_h}, {random_v})"
+            if choice not in choices:
+                choices.append(choice)
+        
+        self.np_random.shuffle(choices)
+        correct_idx = choices.index(str(correct_answer))
+        return choices, correct_idx
 
 
 class E2AEvaluationTask(BaseEvaluationTask):
     """
-    Evaluation task for allo2ego questions.
+    Evaluation task for coordinate and orientation identification.
     
-    Q: Given coordinates, what objects are at these positions?
-    A: [<obj1>, <obj2>, ...]
+    Q: Given object names, what are their coordinates and orientations?
+    A: [(coord, orientation), ...]
     
-    Tests conversion from allocentric coordinates to object identification.
+    Tests conversion from object identification to coordinates and orientations.
+
+    TODO debug
     """
 
     QUESTION_TEMPLATE = (
-        "Assume your front is the positive y-axis, your right is the positive x-axis.\n"
-        "You observe objects at these coordinates: {coordinates}.\n"
-        "NOTE there may be a random offset to the coordinates.\n"
-        "What objects are at these coordinates in the same order?\n\n"
-        "Answer Format:\n"
-        "List the object names, separated by commas: <obj1>, <obj2>, ...\n\n"
-        "Example:\n"
-        "table, chair, sofa"
-    )
-
-    MOVEMENT_TEMPLATE = (
-        "You moved to the same position as {move_obj_name}.\n"
-    )
-    TURN_TEMPLATE = (
-        "You turned clockwise {degree} degrees.\n"
+        "You are at position (0, 0) and facing north.\n"
+        "Your front is the positive y-axis, your right is the positive x-axis.\n"
+        "What are the coordinates and orientations of these objects: {object_names}?\n\n"
+        "Answer format: [obj at (x, y) facing orientation, ...] where orientation is north/east/south/west\n"
+        "Choose the correct answer:\n"
+        "{choices_text}\n\n"
+        "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
+        "Answer: "
     )
     
     def generate_question(self, room: Room) -> str:
         room = room.copy()
-    
-        if_move, if_turn = self.config.get('if_move', False), self.config.get('if_turn', False)
-        movement_prompt = ""
-        turn_prompt = ""
-        # Step 1: Agent moves to a randomly chosen object
-        if if_move:
-            chosen_obj = self.np_random.choice(room.objects)
-            move_action = MoveAction(chosen_obj.name)
-            move_action.execute(room, move_anyway=True)
-            movement_prompt = self.MOVEMENT_TEMPLATE.format(move_obj_name=chosen_obj.name)
-                
-        # Step 2: Agent rotates by a random degree
-        if if_turn:
-            degree = self.np_random.choice([0, 90, 180, 270])
-            rotate_action = RotateAction(degree)
-            rotate_action.execute(room)
-            turn_prompt = self.TURN_TEMPLATE.format(degree=degree)
         
-        # Step 3: Get objects and add offset to coordinates
-        objects = [obj for obj in copy.deepcopy(room.all_objects) 
-                  if room.agent is None or obj.name != room.agent.name]
+        # Get objects excluding agent and objects at same position as agent
+        agent_pos = room.agent.pos if room.agent else None
+        objects = [obj for obj in room.objects 
+                  if agent_pos is None or not np.array_equal(obj.pos, agent_pos)]
+        
         self.np_random.shuffle(objects)
+        object_names = [obj.name for obj in objects]
         
-        # Add random offset to all coordinates
-        offset = self.np_random.uniform(-5, 5, size=2).astype(int)
-        offset_coords = [tuple(obj.pos + offset) for obj in objects]
-
-        self.eval_data.question = movement_prompt + turn_prompt + self.QUESTION_TEMPLATE.format(coordinates=str(offset_coords))
-        self.eval_data.answer = [obj.name for obj in objects]
+        # Create correct answer: (object_name, coord, orientation)
+        correct_answer = [(obj.name, tuple(obj.pos.astype(int)), self._get_orientation_string(obj)) 
+                         for obj in objects]
+        
+        # Generate choices
+        choices, correct_idx = self.generate_choices(correct_answer, objects, room)
+        choices_text, correct_label = self.format_choices(choices, correct_idx)
+        
+        self.eval_data.question = self.QUESTION_TEMPLATE.format(
+            object_names=", ".join(object_names),
+            choices_text=choices_text
+        )
+        self.eval_data.answer = correct_label
+        self.eval_data.choices = choices
         self.eval_data.reasoning = self._generate_reasoning(room)
         return self.eval_data.question
-
+    
+    def _get_orientation_string(self, obj: Object) -> str:
+        """Convert object orientation to north/east/south/west string"""
+        return {(0, 1): "north", (1, 0): "east", (0, -1): "south", (-1, 0): "west"}[tuple(obj.ori)]
+    
+    def generate_choices(self, correct_answer: List[Tuple], objects: List[Object], room: Room) -> Tuple[List[str], int]:
+        """Generate 4 coordinate and orientation choices"""
+        correct_str = self._format_answer(correct_answer)
+        choices = [correct_str]
+        
+        # Create ground truth graph for comparison
+        coords = [obj.pos for obj in objects]
+        gt_v_matrix, gt_h_matrix = DirectionalGraph.create_graph_from_coordinates(coords)
+        
+        for _ in range(3):
+            wrong_answer = self._generate_wrong_choice(correct_answer, objects, room, gt_v_matrix, gt_h_matrix)
+            choices.append(self._format_answer(wrong_answer))
+        
+        self.np_random.shuffle(choices)
+        correct_idx = choices.index(correct_str)
+        return choices, correct_idx
+    
+    def _format_answer(self, answer: List[Tuple]) -> str:
+        """Format answer tuples to string"""
+        return ", ".join([f"{name} at {coord} facing {orientation}" for name, coord, orientation in answer])
+    
+    def _generate_wrong_choice(self, correct_answer: List[Tuple], objects: List[Object], room: Room,
+                              gt_v_matrix: np.ndarray, gt_h_matrix: np.ndarray) -> List[Tuple]:
+        """Generate a wrong choice that differs in coordinates or orientations"""
+        
+        # Randomly choose to change coordinates or orientations
+        orientations = ["north", "east", "south", "west"]
+        min_x, max_x, min_y, max_y = room.get_boundary()
+        for _ in range(10):  # Try up to 10 times to find different coordinates
+            wrong_coords = [(self.np_random.integers(int(min_x), int(max_x) + 1),
+                            self.np_random.integers(int(min_y), int(max_y) + 1)) for _ in range(len(objects))]
+            
+            # Check if coordinates create different spatial relationships
+            wrong_v_matrix, wrong_h_matrix = DirectionalGraph.create_graph_from_coordinates(wrong_coords)
+            if not (np.array_equal(wrong_v_matrix, gt_v_matrix) and np.array_equal(wrong_h_matrix, gt_h_matrix)):
+                return [(name, coord, self.np_random.choice(orientations)) for (name, _, orientation), coord in zip(correct_answer, wrong_coords)]
+        raise ValueError("Failed to generate wrong choice")
+        
 
 class SpatialManipulationTaskBase(BaseEvaluationTask):
     """Base class for tasks that manipulate objects and position agents"""
@@ -645,13 +686,12 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
     QUESTION_TEMPLATE = (
         "You observe the room from another view.\n"
         "{observations}\n"
-        "Based on your observations, you should infer where you are in the room.\n"
-        "Then, what is the direction and orientation of the {target_name} from your current perspective?\n\n"
-        "Answer Format:\n"
-        "Provide answer as a three-element tuple: (<horizontal>, <vertical>, <orientation>).\n"
-        "where <orientation> is one of: forward, backward, right, left\n\n"
-        "Example:\n"
-        "(left, front, forward)"
+        "Based on your observations, what is the direction and orientation of the {target_name} from your current perspective?\n\n"
+        "Answer format: (<horiz>, <vert>), <orientation>\n"
+        "Choose the correct answer:\n"
+        "{choices_text}\n\n"
+        "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
+        "Answer: "
     )
     
     def generate_question(self, room: Room) -> str:
@@ -676,32 +716,55 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
         # Step 4: Position agent and take observations
         self._position_agent_at(room, diagonal_pos)
         observations = self._take_full_observations(room, neglect_objects=[target_name])
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(
-            observations=observations,
-            target_name=target_name
-        )
         
         # Calculate answer (direction + orientation)
         dir_pair, _ = room.get_direction(target_name, room.agent.name, perspective='ego')
         _, orientation_str = room.get_orientation(target_name, room.agent.name)
-        self.eval_data.answer = (
+        correct_answer = [
             DirectionSystem.to_string(dir_pair.horiz, perspective='ego'), 
             DirectionSystem.to_string(dir_pair.vert, perspective='ego'), 
             orientation_str
+        ]
+        
+        # Generate choices
+        choices, correct_idx = self.generate_choices(correct_answer, room)
+        choices_text, correct_label = self.format_choices(choices, correct_idx)
+        
+        self.eval_data.question = self.QUESTION_TEMPLATE.format(
+            observations=observations,
+            target_name=target_name,
+            choices_text=choices_text
         )
+        self.eval_data.answer = correct_label
+        self.eval_data.choices = choices
         self.eval_data.reasoning = self._generate_reasoning(room)
         
         return self.eval_data.question
+    
+    def generate_choices(self, correct_answer: tuple, room: Room) -> Tuple[List[str], int]:
+        """Generate 4 localization choices"""
+        h_dirs = ['left', 'right', 'same']
+        v_dirs = ['front', 'back', 'same']
+        orientations = ['forward', 'backward', 'right', 'left']
+        choices = [f'({correct_answer[0]}, {correct_answer[1]}), {correct_answer[2]}']
+        
+        while len(choices) < 4:
+            wrong_h, wrong_v, wrong_o = self.np_random.choice(h_dirs), self.np_random.choice(v_dirs), self.np_random.choice(orientations)
+            choice = f"({wrong_h}, {wrong_v}), {wrong_o}"
+            if choice not in choices:
+                choices.append(choice)
+        
+        self.np_random.shuffle(choices)
+        correct_idx = choices.index(f'({correct_answer[0]}, {correct_answer[1]}), {correct_answer[2]}')
+        return choices, correct_idx
 
 
 class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
     """
-    Evaluation task for detecting object movement and/or rotation.
+    Evaluation task for detecting object movement or rotation.
     
     Config options:
-    - 'action_type': 'rotation', 'movement', or 'both' (default: 'rotation')
-
-    TODO prove correctness of the task
+    - 'action_type': 'rotation' or 'movement' (default: 'rotation')
     """
 
     ROTATION_TEMPLATE = (
@@ -709,10 +772,11 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
         "You observe the room from another view.\n"
         "{observations}\n"
         "Which object rotated and by how many degrees clockwise?\n\n"
-        "Answer Format:\n"
-        "(<object_name>, <degrees>)\n\n"
-        "Example:\n"
-        "(chair, 90)"
+        "Answer format: <object_name>, <degrees>\n"
+        "Choose the correct answer:\n"
+        "{choices_text}\n\n"
+        "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
+        "Answer: "
     )
     
     MOVEMENT_TEMPLATE = (
@@ -720,21 +784,11 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
         "You observe the room from another view.\n"
         "{observations}\n"
         "Which object moved?\n\n"
-        "Answer Format:\n"
-        "<object_name>\n\n"
-        "Example:\n"
-        "chair"
-    )
-    
-    BOTH_TEMPLATE = (
-        "One object moved and one object rotated (may be the same object).\n"
-        "You observe the room from another view.\n"
-        "{observations}\n"
-        "Which object moved and which object rotated and by how many degrees clockwise?\n\n"
-        "Answer Format:\n"
-        "(<moved_object>, <rotated_object>, <degrees>)\n\n"
-        "Example:\n"
-        "(table, chair, 90)"
+        "Answer format: <object_name>\n"
+        "Choose the correct answer:\n"
+        "{choices_text}\n\n"
+        "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
+        "Answer: "
     )
     
     def generate_question(self, room: Room) -> str:
@@ -744,332 +798,100 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
             raise ValueError("Agent must be present for this task")
         
         action_type = self.config.get('action_type', 'rotation')
-        moved_obj_name = None
-        rotated_obj_name = None
-        rotation_degrees = None
         
-        # Step 1: Apply actions based on type
-        agent_pos = None
-        if action_type in ['movement', 'both']:
-            moved_obj_name, agent_pos = self._apply_movement(room)
-        
-        if action_type in ['rotation', 'both']:
-            rotated_obj_name, rotation_degrees = self._apply_rotation(room)
-        
-        # Step 2: Position agent
-        if agent_pos is not None:
+        # Apply action based on type
+        if action_type == 'movement':
+            correct_answer, agent_pos = self._apply_movement(room)
+            template = self.MOVEMENT_TEMPLATE
             self._position_agent_at(room, agent_pos)
-        else:
+        else:  # rotation
+            correct_answer = self._apply_rotation(room)
+            template = self.ROTATION_TEMPLATE
             self._position_agent_random(room)
         
-        # Step 3: Take observations
+        # Take observations and generate question
         observations = self._take_full_observations(room)
+        choices, correct_idx = self.generate_choices(correct_answer, room)
+        choices_text, correct_label = self.format_choices(choices, correct_idx)
         
-        # Step 4: Generate question and answer based on action type
-        if action_type == 'rotation':
-            template = self.ROTATION_TEMPLATE
-            answer = (rotated_obj_name, str(rotation_degrees))
-        elif action_type == 'movement':
-            template = self.MOVEMENT_TEMPLATE
-            answer = moved_obj_name
-        else:  # both
-            template = self.BOTH_TEMPLATE
-            answer = (moved_obj_name, rotated_obj_name, str(rotation_degrees))
-        
-        self.eval_data.question = template.format(observations=observations)
-        self.eval_data.answer = answer
+        self.eval_data.question = template.format(
+            observations=observations,
+            choices_text=choices_text
+        )
+        self.eval_data.answer = correct_label
+        self.eval_data.choices = choices
         self.eval_data.reasoning = self._generate_reasoning(room)
         return self.eval_data.question
     
     def _apply_movement(self, room: Room) -> Tuple[str, np.ndarray]:
-        """Apply object movement relative to agent's diagonal position"""
-        # Select target object
+        """Apply object movement and return moved object name and agent position"""
         target_obj = self.np_random.choice(room.objects)
         
-        # Select two reference objects with orientation
-        other_objects = [obj for obj in room.objects 
-                        if obj.name != target_obj.name and obj.has_orientation]
-        if len(other_objects) < 2:
-            other_objects = [obj for obj in room.objects if obj.name != target_obj.name]
-        
+        # Get reference objects for positioning
+        other_objects = [obj for obj in room.objects if obj.name != target_obj.name and obj.has_orientation]
         ref_obj1, ref_obj2 = self.np_random.choice(other_objects, size=2, replace=False)
         
-        # Calculate agent's diagonal position first
+        # Calculate agent position and move target to opposite quadrant
         agent_pos = self._get_diagonal_position(room, target_obj, ref_obj1, ref_obj2, neglect_trivial=True)
         
-        # Move target to different quadrant relative to agent position
-        rel_x = target_obj.pos[0] - agent_pos[0]
-        rel_y = target_obj.pos[1] - agent_pos[1]
-        
-        # Choose opposite quadrant
-        chosen_quadrant = (-1 if rel_x >= 0 else 1, -1 if rel_y >= 0 else 1)
-        
-        # Calculate new position in chosen quadrant relative to agent
+        # Move target to opposite quadrant relative to agent
+        rel_x, rel_y = target_obj.pos - agent_pos
         min_x, max_x, min_y, max_y = room.get_boundary()
-        x_range = (agent_pos[0], max_x) if chosen_quadrant[0] > 0 else (min_x, agent_pos[0])
-        y_range = (agent_pos[1], max_y) if chosen_quadrant[1] > 0 else (min_y, agent_pos[1])
         
-        new_pos = np.array([self.np_random.uniform(*x_range), self.np_random.uniform(*y_range)])
-        target_obj.pos = new_pos
+        x_range = (agent_pos[0], max_x) if rel_x < 0 else (min_x, agent_pos[0])
+        y_range = (agent_pos[1], max_y) if rel_y < 0 else (min_y, agent_pos[1])
         
+        target_obj.pos = np.array([self.np_random.uniform(*x_range), self.np_random.uniform(*y_range)])
         return target_obj.name, agent_pos
     
-    def _apply_rotation(self, room: Room) -> Tuple[str, int]:
-        """Apply object rotation"""
+    def _apply_rotation(self, room: Room) -> Tuple[str, str]:
+        """Apply object rotation and return (object_name, degrees_str)"""
         oriented_objects = [obj for obj in room.objects if obj.has_orientation]
+        assert len(oriented_objects) >= 2, "Need at least 2 objects with orientation for this task"
         target_obj = self.np_random.choice(oriented_objects)
         rotation_degrees = self.np_random.choice([90, 180, 270])
         
         rotations = {90: [[0,-1],[1,0]], 180: [[-1,0],[0,-1]], 270: [[0,1],[-1,0]]}
         target_obj.ori = target_obj.ori @ rotations[rotation_degrees]
         
-        return target_obj.name, rotation_degrees
+        return target_obj.name, str(rotation_degrees)
     
     def _position_agent_random(self, room: Room):
         """Position agent randomly for rotation-only tasks"""
         min_x, max_x, min_y, max_y = room.get_boundary()
         agent_pos = np.array([self.np_random.uniform(min_x, max_x), self.np_random.uniform(min_y, max_y)])
         self._position_agent_at(room, agent_pos)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# class DirEvaluationTask(BaseEvaluationTask):
-#     """
-#     Evaluation task for direction questions.
     
-#     Q: Ask spatial relationship between two objects (a, b)
-#     A: <dir>
-    
-#     Movement types:
-#     1. static: Add new object <dir> to anchor_obj
-#     2. object_move: Move target_obj <dir> to anchor_obj  
-#     3. agent_move: Move agent <dir> to anchor_obj
-#     4. agent_turn: Rotate agent <degree>
-#     """
-    
-#     QUESTION_TEMPLATE = (
-#         "{observation}\n"
-#         "Given the new layout, what is the direction of {target_name} relative to {query_obj_name}?\n\n"
-#         "Answer Format:\n"
-#         "Provide the relationship as a tuple: (<horizontal>, <vertical>).\n\n"
-#         "Example:\n"
-#         "(left, front)"
-#     )
-
-#     AGENT_TURN_ALLO_QUESTION_TEMPLATE = (
-#         "After you turn {degree} degrees, what is the direction of {target_name} relative to {query_obj_name}?\n\n"
-#         "Answer Format:\n"
-#         "Provide the relationship as a tuple: (<horizontal>, <vertical>).\n\n"
-#         "Example:\n"
-#         "(left, front)"
-#     )
-
-#     def generate_question(self, room: Room) -> str:
-#         room = room.copy()
-#         movement = self.config.get('movement', 'static')
+    def generate_choices(self, correct_answer: Any, room: Room) -> Tuple[List[str], int]:
+        """Generate 4 false belief choices"""
+        choices = [str(correct_answer) if isinstance(correct_answer, str) else f'{correct_answer[0]}, {correct_answer[1]}']
+        objects = [obj.name for obj in room.objects]
         
-#         # Validate movement requirements
-#         if movement in ['agent_move', 'agent_turn'] and room.agent is None:
-#             raise ValueError(f"Agent must be in the room for {movement}")
-
-#         graph = DirectionalGraph(room.all_objects, is_explore=False)
-#         graph.is_explore = True
-
-#         # Handle different movement types
-#         if movement == 'static':
-#             target_name, target_obj_idx, obs = self._handle_static_movement(room)
-#         elif movement == 'object_move':
-#             target_name, target_obj_idx, obs = self._handle_object_movement(room)
-#         elif movement == 'agent_move':
-#             target_name, target_obj_idx, obs = self._handle_agent_movement(room)
-#         elif movement == 'agent_turn':
-#             return self._handle_agent_turn(room, graph)
-#         else:
-#             raise ValueError(f"Invalid movement type: {movement}")
-
-#         # Update graph and generate question
-#         anchor_obj_idx, anchor_name, new_pos, dir_pair, dir_pair_str = self._get_movement_details(room)
-#         obs += f"{target_name} moves {dir_pair_str} to {anchor_name}."
-
-#         if movement == 'static':
-#             graph.add_node(anchor_obj_idx, dir_pair)
-#         else:
-#             graph.move_node(target_obj_idx, anchor_obj_idx, dir_pair)
-
-#         query_obj_idx, query_obj = self._get_query_object(room, target_name, anchor_name)
-#         self.eval_data.question = self.QUESTION_TEMPLATE.format(
-#             observation=obs,
-#             target_name=target_name,
-#             query_obj_name=query_obj.name,
-#         )
-#         dir_pair_query = graph.get_direction(target_obj_idx, query_obj_idx)
-#         perspective = 'ego' if room.agent else 'allo'
-#         self.eval_data.answer = (
-#             DirectionSystem.to_string(dir_pair_query.horiz, perspective),
-#             DirectionSystem.to_string(dir_pair_query.vert, perspective)
-#         )
-#         self.eval_data.reasoning = self._generate_reasoning(room)
-
-#         return self.eval_data.question
-
-#     def _handle_static_movement(self, room: Room) -> Tuple[str, int, str]:
-#         """Get a new object and its index for static movement."""
-#         target_name = room.objects[0].name
-#         while room.has_object(target_name):
-#             target_name = self.np_random.choice(CANDIDATE_OBJECTS)
-#         target_obj_idx = len(room.all_objects)
-#         obs = f"A new object {target_name} is placed in the room.\n"
-#         return target_name, target_obj_idx, obs
-
-#     def _handle_object_movement(self, room: Room) -> Tuple[str, int, str]:
-#         """Handle object movement"""
-#         non_agent_indices = [i for i, obj in enumerate(room.all_objects) 
-#                            if room.agent is None or obj.name != room.agent.name]
-#         target_obj_idx = self.np_random.choice(non_agent_indices)
-#         target_name = room.all_objects[target_obj_idx].name
-#         obs = f"{target_name} is moved to a new position.\n"
-#         return target_name, target_obj_idx, obs
-
-#     def _handle_agent_movement(self, room: Room) -> Tuple[str, int, str]:
-#         """Handle agent movement"""
-#         target_name = room.agent.name
-#         target_obj_idx = next(i for i, obj in enumerate(room.all_objects) if obj == room.agent)
-#         obs = f"{target_name} moves to a new position.\n"
-#         return target_name, target_obj_idx, obs
-
-#     def _handle_agent_turn(self, room: Room, graph: DirectionalGraph) -> str:
-#         """Handle agent turn movement"""
-#         target_obj_idx = self.np_random.integers(0, len(room.all_objects))
-#         target_name = room.all_objects[target_obj_idx].name
+        while len(choices) < (4 if self.config['action_type'] == 'rotation' else len(objects)):
+            if isinstance(correct_answer, tuple):  # Rotation: (object, degrees)
+                wrong_obj = self.np_random.choice(objects)
+                wrong_deg = self.np_random.choice(['0', '90', '180', '270'])
+                choice = f"{wrong_obj}, {wrong_deg}"
+            else:  # Movement: object name
+                choice = self.np_random.choice(objects)
+            
+            if choice not in choices:
+                choices.append(choice)
         
-#         degree = self.np_random.choice([90, 180, 270])
-#         graph.rotate_axis(degree)
-
-#         query_obj_idx, query_obj = self._get_query_object(room, target_name, "")
-        
-#         dir_pair_query = graph.get_direction(target_obj_idx, query_obj_idx)
-#         perspective = 'ego' if room.agent else 'allo'
-        
-#         self.eval_data.question = self.AGENT_TURN_ALLO_QUESTION_TEMPLATE.format(
-#             degree=degree,
-#             target_name=target_name,
-#             query_obj_name=query_obj.name
-#         )
-#         self.eval_data.answer = (
-#             DirectionSystem.to_string(dir_pair_query.horiz, perspective),
-#             DirectionSystem.to_string(dir_pair_query.vert, perspective)
-#         )
-#         self.eval_data.reasoning = self._generate_reasoning(room)
-#         return self.eval_data.question
-
-#     def _get_movement_details(self, room: Room) -> Tuple[int, str, np.ndarray, Any, str]:
-#         """Get movement details for non-turn movements"""
-#         anchor_obj_idx = self.np_random.integers(0, len(room.all_objects))
-#         anchor_obj = room.all_objects[anchor_obj_idx]
-#         anchor_name = anchor_obj.name
-        
-#         min_x, max_x, min_y, max_y = room.get_boundary()
-#         new_pos = np.array([self.np_random.uniform(min_x, max_x), self.np_random.uniform(min_y, max_y)])
-        
-#         dir_pair = DirectionSystem.get_direction(new_pos, anchor_obj.pos, anchor_obj.ori)
-#         dir_pair_str = DirectionSystem.to_string(dir_pair, perspective='ego' if room.agent else 'allo')
-        
-#         return anchor_obj_idx, anchor_name, new_pos, dir_pair, dir_pair_str
-
-#     def _get_query_object(self, room: Room, target_name: str, anchor_name: str) -> Tuple[int, Object]:
-#         """Get a query object that's different from target and anchor"""
-#         query_obj_idx = self.np_random.integers(0, len(room.all_objects))
-#         while room.all_objects[query_obj_idx].name in [target_name, anchor_name]:
-#             query_obj_idx = self.np_random.integers(0, len(room.all_objects))
-#         return query_obj_idx, room.all_objects[query_obj_idx]
-
-# class ReverseDirEvaluationTask(BaseEvaluationTask):
-#     """
-#     Evaluation task for reverse direction questions.
-    
-#     Q: which object is also <dir> to <new_obj>?
-#     A: <obj2>
-    
-#     Adds a new object and guarantees inferable direction.
-#     Given new_obj --> anchor_obj, asks which (target) object is also new_obj --> target_obj.
-#     """
-
-#     QUESTION_TEMPLATE = (
-#         "A new object, '{new_obj_name}', is placed {dir_pair_str} to '{anchor_obj_name}'.\n"
-#         "Which other object has the same spatial relationship ({dir_pair_str}) to '{new_obj_name}'?\n\n"
-#         "Answer Format:\n"
-#         "Provide the name of the object.\n\n"
-#         "Example:\n"
-#         "chair"
-#     )
-    
-#     def generate_question(self, room: Room) -> str:
-#         room = room.copy()
-        
-#         # Get new object name
-#         new_obj_name = room.objects[0].name
-#         while room.has_object(new_obj_name):
-#             new_obj_name = self.np_random.choice(CANDIDATE_OBJECTS)
-
-#         # Choose anchor and target objects
-#         anchor_obj_idx = self.np_random.integers(0, len(room.all_objects))
-#         target_obj_idx = self.np_random.integers(0, len(room.all_objects))
-#         while target_obj_idx == anchor_obj_idx:
-#             anchor_obj_idx = self.np_random.integers(0, len(room.all_objects))
-        
-#         target_obj = room.all_objects[target_obj_idx]
-#         anchor_obj = room.all_objects[anchor_obj_idx]
-
-#         # Get direction and find inferable objects
-#         dir_pair, dir_pair_str = room.get_direction(anchor_obj.name, target_obj.name)
-
-#         graph = DirectionalGraph(room.all_objects, is_explore=False)
-
-#         # Find all objects that anchor is also dir_pair to
-#         answer = []
-#         for i in range(len(room.all_objects)):
-#             if i != anchor_obj_idx:  # Skip the anchor object itself
-#                 anchor_dir_pair = graph.get_direction(anchor_obj_idx, i)
-#                 if (anchor_dir_pair.horiz == dir_pair.horiz and 
-#                     anchor_dir_pair.vert == dir_pair.vert):
-#                     answer.append(room.all_objects[i].name)
-
-#         self.eval_data.question = self.QUESTION_TEMPLATE.format(
-#             new_obj_name=new_obj_name, 
-#             dir_pair_str=dir_pair_str, 
-#             anchor_obj_name=anchor_obj.name
-#         )
-#         self.eval_data.answer = answer
-#         self.eval_data.reasoning = self._generate_reasoning(room)
-#         return self.eval_data.question
+        self.np_random.shuffle(choices)
+        correct_idx = choices.index(str(correct_answer) if isinstance(correct_answer, str) else f'{correct_answer[0]}, {correct_answer[1]}')
+        return choices, correct_idx
 
 
 
+
+def test_task(task_class, room, np_random):
+    task = task_class(np_random=np_random)
+    question = task.generate_question(room)
+    print(question)
+    print(f"Correct answer: {task.answer}")
+    correct, info = task.evaluate('B')
+    print(f"Self-evaluation: {correct}, Info: {info}")
 
 
 if __name__ == "__main__":
@@ -1077,193 +899,31 @@ if __name__ == "__main__":
     from ..utils.room_utils import generate_room
     from gymnasium.utils import seeding
 
+    # Simple test setup
     room_config = {
         'room_range': [-10, 10],
-        'n_objects': 4,
+        'n_objects': 3,
         'candidate_objects': CANDIDATE_OBJECTS,
         'generation_type': 'pov',
     }
-    np_random = seeding.np_random(12)[0]
+    np_random = seeding.np_random(2)[0]
     room = generate_room(**room_config, np_random=np_random)
-    room.plot('img')
-    print(room)
-
+    print(f"Room: {room}")
+    
     BaseAction.set_field_of_view(180)
 
-    # Test all pairs evaluation task
-    print("\n" + "="*50)
-    print("Testing AllPairsEvaluationTask:")
-    print("="*50)
-    all_pairs_task = AllPairsEvaluationTask(np_random=np_random, config={'num_pairs': 2})
-    all_pairs_question = all_pairs_task.generate_question(room)
-    print(all_pairs_question)
-    print(f"Expected answer: {all_pairs_task.answer}")
-    correct, info = all_pairs_task.evaluate("1. (east, south)\n2. (east, south)")
-    print(correct)
-    print(info)
-    
+    test_task(DirectionEvaluationTask, room, np_random)
 
-    # # Test evaluation with a sample answer
-    # print("\n" + "="*50)
-    # print("Testing ReverseDirEvaluationTask:")
-    # print("="*50)
-    # sample_answer = "1. (right, front)\n2. (left, back)\n3. (same, front)"
-    # correct, info = all_pairs_task.evaluate(sample_answer)
-    # print(f"Sample answer evaluation: {correct}, Info: {info}")
+    test_task(RotEvaluationTask, room, np_random)
 
-    
-    # # Test direction evaluation task
-    # print("\n" + "="*50)
-    # print("Testing ReverseDirEvaluationTask:")
-    # print("="*50)
-    # task = DirEvaluationTask(np_random=np_random, config={'movement': 'agent_turn'})
-    # question = task.generate_question(room)
-    # print(question)
-    # print(task.answer)
-    # correct, info = task.evaluate("(unknown, front)")
-    # print(correct)
+    test_task(RotDualEvaluationTask, room, np_random)
 
-    # # Test reverse direction evaluation task
-    # print("\n" + "="*50)
-    # print("Testing ReverseDirEvaluationTask:")
-    # print("="*50)
-    # reverse_dir_task = ReverseDirEvaluationTask(np_random=np_random)
-    # reverse_dir_question = reverse_dir_task.generate_question(room)
-    # print(reverse_dir_question)
-    # print(f"Expected answer: {reverse_dir_task.answer}")
+    test_task(CircularRotEvaluationTask, room, np_random)
 
-    # # Test rotation evaluation task
-    # print("\n" + "="*50)
-    # print("Testing RotEvaluationTask:")
-    # print("="*50)
-    # rotation_config = {
-    #     'turn_direction': 'counterclockwise',
-    #     'if_move': True,
-    #     'if_turn': True
-    # }
-    # rot_task = RotEvaluationTask(np_random=np_random, config=rotation_config)
-    # rot_question = rot_task.generate_question(room)
-    # print(rot_question)
-    # print(f"Expected answer: {rot_task.answer}")
+    test_task(PovEvaluationTask, room, np_random)
 
+    test_task(E2AEvaluationTask, room, np_random)
 
-    # # Test pov evaluation task
-    # print("\n" + "="*50)
-    # print("Testing PovEvaluationTask:")
-    # print("="*50)
-    # pov_task = PovEvaluationTask(np_random=np_random)
-    # pov_question = pov_task.generate_question(room)
-    # print(pov_question)
-    # print(f"Expected answer: {pov_task.answer}")
+    test_task(LocalizationEvaluationTask, room, np_random)
 
-
-    # # Test FalseBeliefEvaluationTask with different action types
-    # print("\n" + "="*50)
-    # print("Testing FalseBeliefEvaluationTask:")
-    # print("="*50)
-    
-    # # Test rotation only
-    # print("Rotation only:")
-    # config = {'action_type': 'rotation'}
-    # task = FalseBeliefEvaluationTask(np_random=np_random, config=config)
-    # question = task.generate_question(room)
-    # print(question)
-    # print(f"Answer: {task.answer}")
-    # correct, info = task.evaluate('("oven", "180")')
-    # print(f"Evaluation: {correct}, Info: {info}")
-    
-    # # Test movement only
-    # print("\nMovement only:")
-    # config = {'action_type': 'movement'}
-    # task = FalseBeliefEvaluationTask(np_random=np_random, config=config)
-    # question = task.generate_question(room)
-    # print(question)
-    # print(f"Answer: {task.answer}")
-    # correct, info = task.evaluate(task.answer)
-    # print(f"Evaluation: {correct}, Info: {info}")
-    
-    # # Test both
-    # print("\nBoth movement and rotation:")
-    # config = {'action_type': 'both'}
-    # task = FalseBeliefEvaluationTask(np_random=np_random, config=config)
-    # question = task.generate_question(room)
-    # print(question)
-    # print(f"Answer: {task.answer}")
-    # correct, info = task.evaluate(task.answer)
-    # print(f"Evaluation: {correct}, Info: {info}")
-
-    # # Test target localization task
-    # print("\n" + "="*50)
-    # print("Testing LocalizationEvaluationTask:")
-    # print("="*50)
-    # target_loc_task = LocalizationEvaluationTask(np_random=np_random)
-    # target_loc_question = target_loc_task.generate_question(room)
-    # print(target_loc_question)
-    # print(f"Expected answer: {target_loc_task.answer}")
-    # correct, info = target_loc_task.evaluate(target_loc_task.answer)
-    # print(f"Self-evaluation: {correct}, Info: {info}")
-
-
-    # # Test object presence evaluation task
-    # print("\n" + "="*50)
-    # print("Testing ObjectPresenceEvaluationTask:")
-    # print("="*50)
-    # obj_presence_task = ObjectPresenceEvaluationTask(np_random=np_random)
-    # obj_presence_question = obj_presence_task.generate_question(room)
-    # print(obj_presence_question)
-    # print(f"Expected answer: {obj_presence_task.answer}")
-    
-    # # Test with a correct answer
-    # pred_answer = ", ".join(obj_presence_task.answer)
-    # correct, info = obj_presence_task.evaluate(pred_answer)
-    # print(f"Test with correct answer: {correct}, Info: {info}")
-    
-    # # Test with a partial answer
-    # partial_answer = ", ".join(obj_presence_task.answer[:2])  # Only first 2 objects
-    # correct, info = obj_presence_task.evaluate(partial_answer)
-    # print(f"Test with partial answer: {correct}, Info: {info}")
-
-    # # Test rot dual evaluation task
-    # print("\n" + "="*50)
-    # print("Testing RotDualEvaluationTask:")
-    # print("="*50)
-    # rot_dual_task = RotDualEvaluationTask(np_random=np_random)
-    # rot_dual_question = rot_dual_task.generate_question(room)
-    # print(rot_dual_question)
-    # print(f"Expected answer: {rot_dual_task.answer}")
-    # correct, info = rot_dual_task.evaluate(rot_dual_task.answer)
-    # print(f"Self-evaluation: {correct}, Info: {info}")
-    
-    # # Test with wrong answer
-    # wrong_answer = "clockwise" if rot_dual_task.answer == "counterclockwise" else "counterclockwise"
-    # correct, info = rot_dual_task.evaluate(wrong_answer)
-    # print(f"Wrong answer test: {correct}, Info: {info}")
-
-    # # Test circular rot evaluation task
-    # print("\n" + "="*50)
-    # print("Testing CircularRotEvaluationTask:")
-    # print("="*50)
-    # circular_rot_task = CircularRotEvaluationTask(np_random=np_random)
-    # circular_rot_question = circular_rot_task.generate_question(room)
-    # print(circular_rot_question)
-    # print(f"Expected answer: {circular_rot_task.answer}")
-    # correct, info = circular_rot_task.evaluate(circular_rot_task.answer)
-    # print(f"Self-evaluation: {correct}, Info: {info}")
-    
-    # # Test with wrong answer
-    # wrong_answer = "clockwise" if circular_rot_task.answer == "counterclockwise" else "counterclockwise"
-    # correct, info = circular_rot_task.evaluate(wrong_answer)
-    # print(f"Wrong answer test: {correct}, Info: {info}")
-
-    # # Test e2a evaluation task
-    # print("\n" + "="*50)
-    # print("Testing E2AEvaluationTask:")
-    # print("="*50)
-    # e2a_task = E2AEvaluationTask(np_random=np_random)
-    # e2a_question = e2a_task.generate_question(room)
-    # print(e2a_question)
-    # print(f"Expected answer: {e2a_task.answer}")
-    # pred_answer = "'microwave', 'scanner', 'whiteboard', 'oven'"
-    # correct, info = e2a_task.evaluate(pred_answer)
-    # print(correct)
-    # print(info)
+    test_task(FalseBeliefEvaluationTask, room, np_random)

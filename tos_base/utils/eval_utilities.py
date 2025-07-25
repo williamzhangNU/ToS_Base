@@ -321,7 +321,7 @@ def obj_presence_eval_fn(pred: Any, answer: List[str]) -> Tuple[bool, Dict[str, 
     return correct_count == total_gt, info
 
 
-def multi_choice_eval_fn(pred: str, answer: List[str]) -> bool:
+def multi_choice_eval_fn(pred: str, answer: Union[List[str], str]) -> bool:
     """
     Evaluate if the predicted answer matches any of the valid answers (case-insensitive).
     
@@ -334,7 +334,7 @@ def multi_choice_eval_fn(pred: str, answer: List[str]) -> bool:
     """
     if not pred or not isinstance(pred, str):
         return False
-    
+    answer = [answer] if isinstance(answer, str) else answer
     pred_cleaned = pred.strip().lower()
     return pred_cleaned in [ans.strip().lower() for ans in answer]
 

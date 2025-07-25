@@ -9,17 +9,14 @@ class EvalTaskType(Enum):
     """Enum for all available evaluation task types."""
     
     # Task type definitions: (short_name, class_name)
-    ALL_PAIRS = ("all_pairs", "AllPairsEvaluationTask")
+    DIR = ("dir", "DirectionEvaluationTask")
     ROT = ("rot", "RotEvaluationTask")
     CIRCULAR_ROT = ("circular_rot", "CircularRotEvaluationTask")
     ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
     POV = ("pov", "PovEvaluationTask")
     E2A = ("e2a", "E2AEvaluationTask")
-    OBJECT_PRESENCE = ("obj_presence", "ObjectPresenceEvaluationTask")
     LOCALIZATION = ("loc", "LocalizationEvaluationTask")
     FALSE_BELIEF = ("false_belief", "FalseBeliefEvaluationTask")
-    # DIR = ("dir", "DirEvaluationTask") 
-    # REVERSE_DIR = ("rev", "ReverseDirEvaluationTask")
     
     def __init__(self, short_name: str, class_name: str):
         self.short_name = short_name
@@ -40,20 +37,19 @@ class EvalTaskType(Enum):
         """Get mapping from short names to task classes."""
         # Import here to avoid circular imports
         from .tasks import (
-            AllPairsEvaluationTask, RotEvaluationTask,
+            DirectionEvaluationTask, RotEvaluationTask,
             CircularRotEvaluationTask, RotDualEvaluationTask, PovEvaluationTask, 
-            E2AEvaluationTask, ObjectPresenceEvaluationTask, 
+            E2AEvaluationTask, 
             LocalizationEvaluationTask, FalseBeliefEvaluationTask
         )
         
         task_map = {
-            cls.ALL_PAIRS.short_name: AllPairsEvaluationTask,
+            cls.DIR.short_name: DirectionEvaluationTask,
             cls.ROT.short_name: RotEvaluationTask,
             cls.CIRCULAR_ROT.short_name: CircularRotEvaluationTask,
             cls.ROT_DUAL.short_name: RotDualEvaluationTask,
             cls.POV.short_name: PovEvaluationTask,
             cls.E2A.short_name: E2AEvaluationTask,
-            cls.OBJECT_PRESENCE.short_name: ObjectPresenceEvaluationTask,
             cls.LOCALIZATION.short_name: LocalizationEvaluationTask,
             cls.FALSE_BELIEF.short_name: FalseBeliefEvaluationTask,
         }
