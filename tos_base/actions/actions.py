@@ -112,8 +112,7 @@ class RotateAction(BaseAction):
         """Execute rotate action on room state."""
         if self.degrees is None or self.degrees not in self.VALID_DEGREES:
             return ActionResult(False, self.get_feedback(False, "invalid_degree"), str(self), 'rotate', {'degrees': self.degrees})
-        
-        self._rotate_agent(room, self.degrees)
+        self._rotate_agent(room, self.degrees)   
         return ActionResult(True, self.get_feedback(True), str(self), 'rotate', {'degrees': self.degrees})
     
     def __repr__(self):
