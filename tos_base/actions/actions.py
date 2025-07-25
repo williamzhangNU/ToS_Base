@@ -53,7 +53,7 @@ class MoveAction(BaseAction):
 
     def _move_agent_to_pos(self, room, target_pos):
         """Move agent to target position, shift coordinate system to keep agent at origin"""
-        for obj in room.objects:
+        for obj in [o for o in room.all_objects if o.name != room.agent.name]:
             obj.pos = obj.pos - target_pos
     
     def success_message(self, **kwargs) -> str:
@@ -96,7 +96,7 @@ class RotateAction(BaseAction):
     def _rotate_agent(self, room, degrees: int):
         """Rotate agent by specified degrees, shift coordinate system to keep agent at origin"""
         rotation_matrix = self._get_rotation_matrix(degrees)
-        for obj in room.objects:
+        for obj in [o for o in room.all_objects if o.name != room.agent.name]:
             obj.pos = obj.pos @ rotation_matrix
             obj.ori = obj.ori @ rotation_matrix
     
@@ -135,15 +135,13 @@ class ReturnAction(BaseAction):
     
     def execute(self, room, **kwargs) -> ActionResult:
         """Execute return action on room state."""
-        agent_anchor = kwargs['agent_anchor']
-        
         ori_to_deg = {(0, 1): 0, (0, -1): 180, (1, 0): 90, (-1, 0): 270}
-        target_deg = ori_to_deg[tuple(agent_anchor.ori)]
+        target_deg = ori_to_deg[tuple(room.initial_pos.ori)]
         
-        MoveAction(agent_anchor.name).execute(room)
+        MoveAction(room.initial_pos.name).execute(room)
         RotateAction(target_deg).execute(room)
         
-        return ActionResult(True, self.get_feedback(True), str(self), 'return', {'target_name': agent_anchor.name, 'degrees': target_deg})
+        return ActionResult(True, self.get_feedback(True), str(self), 'return', {'target_name': room.initial_pos.name, 'degrees': target_deg})
     
     def __repr__(self):
         return "Return()"
@@ -331,55 +329,16 @@ if __name__ == "__main__":
     agent = Agent()
     table = Object("table", np.array([1, 2]), np.array([0, 1]))
     chair = Object("chair", np.array([-2, 1]), np.array([0, 1]))
-    agent_anchor = Object("agent_anchor", np.array([0, 0]), np.array([0, 1]))
-    room = Room([table, chair, agent_anchor], "test_room", agent)
+    room = Room(agent, [table, chair], "test_room")
 
     print(f"Room: {room}")
     
     print("=== Testing Action Parsing ===")
     
-    # # Test Case 1: Simple final action only
-    # test1 = "Movement: []\nFinal: Observe()"
-    # result1 = ActionSequence.parse(test1)
-    # print(f"Test 1 - Simple final: {'✓ PASS' if result1 else '✗ FAIL'}")
-    # print(f"  Input: {test1.replace(chr(10), ' | ')}")
-    # print(f"  Result: {result1}")
-    
-    # # Test Case 2: Movement with final action
-    # test2 = "Movement: [Move(table), Rotate(90)]\nFinal: Observe()"
-    # result2 = ActionSequence.parse(test2)
-    # print(f"\nTest 2 - Movement + Final: {'✓ PASS' if result2 else '✗ FAIL'}")
-    # print(f"  Input: {test2.replace(chr(10), ' | ')}")
-    # print(f"  Result: {result2}")
-    
-    # # Test Case 3: Term action (should be alone)
-    # test3 = "Movement: []\nFinal: Term()"
-    # result3 = ActionSequence.parse(test3)
-    # print(f"\nTest 3 - Term action: {'✓ PASS' if result3 else '✗ FAIL'}")
-    # print(f"  Input: {test3.replace(chr(10), ' | ')}")
-    # print(f"  Result: {result3}")
-    
-    # # Test Case 4: Wrong order (should fail)
-    # test4 = "Final: Observe()\nMovement: []"
-    # result4 = ActionSequence.parse(test4)
-    # print(f"\nTest 4 - Wrong order: {'✓ PASS' if not result4 else '✗ FAIL'}")
-    # print(f"  Input: {test4.replace(chr(10), ' | ')}")
-    # print(f"  Expected: None (should fail)")
-    # print(f"  Result: {result4}")
-    
-
-    # # Test Case 4: Wrong order (should fail)
-    # test5 = "Movement: [Observe()] \nFinal: Term()"
-    # result5 = ActionSequence.parse(test5)
-    # print(f"\nTest 5 - Wrong order: {'✓ PASS' if not result5 else '✗ FAIL'}")
-    # print(f"  Input: {test5.replace(chr(10), ' | ')}")
-    # print(f"  Expected: None (should fail)")
-    # print(f"  Result: {result5}")
-
     print("=== Testing Action Execution ===")
     
     # Test Case 1: Simple final action only
-    test1 = "Movement: []\nFinal: Observe()"
+    test1 = "Movement: [];\nFinal: Observe()"
     result1 = ActionSequence.parse(test1)
     print(f"Test 1 - Simple final: {'✓ PASS' if result1 else '✗ FAIL'}")
     print(f"  Input: {test1.replace(chr(10), ' | ')}")
@@ -390,7 +349,11 @@ if __name__ == "__main__":
     action = ObserveAction()
     result = action.execute(room, with_orientation=True)
     print(f"  Result: {result.message}")
-    # expected_msg = "table is (right, front) of you and faces away from you, chair is (left, front) of you and faces away from you"
-    # assert expected_msg in result.message
-    # print(f"  ✓ PASS")
+    
+    # Test Case 3: Return action
+    print("\nTest 3 - Return action")
+    return_action = ReturnAction()
+    result = return_action.execute(room)
+    print(f"  Result: {result.message}")
+    print(f"  Success: {result.success}")
     

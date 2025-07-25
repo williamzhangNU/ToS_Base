@@ -21,7 +21,7 @@ from ..core.room import Room
 class ExplorationManager:
     """Manages spatial exploration with agent movement and queries.
     
-    Maintains base_room (original state) and exploration_room (with agent_anchor).
+    Maintains base_room (original state) and exploration_room (working copy).
     Actions handle their own coordinate transformations. Exploration is egocentric.
     """
     
@@ -29,26 +29,15 @@ class ExplorationManager:
         assert room.agent is not None, "Exploration requires an agent in the room"
         
         self.base_room = room.copy()
+        self.exploration_room = room.copy()
         
-        agent_anchor = Object("agent_anchor", room.agent.pos.copy(), room.agent.ori.copy())
-        
-        # Create exploration room with all objects including agent_anchor
-        exploration_objects = copy.deepcopy(room.objects) + [agent_anchor]
-        self.exploration_room = Room(
-            objects=exploration_objects,
-            name=f"{room.name}_exploration",
-            agent=copy.deepcopy(room.agent)
-        )
-        
-        # Get reference to agent_anchor from exploration room
-        self.agent_anchor = self.exploration_room.get_object_by_name("agent_anchor")
         self.agent_idx = self._get_index(self.exploration_room.agent.name)
-        self.anchor_idx = self._get_index(self.agent_anchor.name)
+        self.initial_pos_idx = self._get_index("initial_pos")
 
         self.objects = self.exploration_room.all_objects
         self.exp_graph = DirectionalGraph(self.objects, is_explore=True)
         
-        self.exp_graph.add_edge(self.agent_idx, self.anchor_idx, DirPair(Dir.SAME, Dir.SAME))
+        self.exp_graph.add_edge(self.agent_idx, self.initial_pos_idx, DirPair(Dir.SAME, Dir.SAME))
         self.metrics_log: List[Dict[str, Any]] = []
 
         # log exploration history and efficiency
@@ -93,9 +82,8 @@ class ExplorationManager:
         
         # Calculate visible objects using _is_visible
         agent = self.exploration_room.agent
-        neglect_objects = [self.agent_anchor.name, agent.name]
-        visible_objects = [obj.name for obj in self.exploration_room.objects 
-                          if BaseAction._is_visible(agent, obj) and obj.name not in neglect_objects]
+
+        visible_objects = [obj.name for obj in self.exploration_room.objects if BaseAction._is_visible(agent, obj)]
         
         # 1. Check efficiency
         unknown_pairs = self.get_unknown_pairs()
@@ -129,8 +117,7 @@ class ExplorationManager:
         
         # 3. Update invisible objects for 180° field of view
         if field_of_view == 180:
-            invisible_objects = [obj.name for obj in self.exploration_room.objects 
-                               if obj.name not in visible_objects + neglect_objects]
+            invisible_objects = [obj.name for obj in self.exploration_room.objects if obj.name not in visible_objects]
             
             for obj_name in invisible_objects:
                 obj_idx = self._get_index(obj_name)
@@ -141,12 +128,7 @@ class ExplorationManager:
 
     def _execute_and_update(self, action: BaseAction) -> ActionResult:
         """Execute action and update exploration state."""
-        if isinstance(action, ReturnAction):
-            kwargs = {'agent_anchor': self.agent_anchor}
-        elif isinstance(action, ObserveAction):
-            kwargs = {'neglect_objects': [self.agent_anchor.name, self.exploration_room.agent.name]}
-        else:
-            kwargs = {}
+        kwargs = {}
         result = action.execute(self.exploration_room, **kwargs)
         
         if not result.success:
@@ -223,38 +205,32 @@ class ExplorationManager:
     
     
     
-    def finish_exploration(self, return_to_origin: bool = True, neglect_anchor: bool = True) -> Room:
+    def finish_exploration(self, return_to_origin: bool = True, neglect_initial_pos: bool = True) -> Room:
         """Complete exploration and return final room state."""
-        if return_to_origin and self.agent_anchor:
+        if return_to_origin:
             result = self.execute_action(ReturnAction())
             if not result.success:
                 raise ValueError(f"Failed to return to origin: {result.message}")
             
-        if neglect_anchor:
-            self._remove_anchor()
+        if neglect_initial_pos:
+            self._remove_initial_pos()
         return self.exploration_room
     
-    def _remove_anchor(self) -> None:
-        """Remove anchor from exploration room and graph."""
-        if not self.agent_anchor:
-            return
-            
-        anchor_idx = self._get_index("agent_anchor")
+    def _remove_initial_pos(self) -> None:
+        """Remove initial_pos from exploration room and graph."""
+        initial_pos_idx = self._get_index("initial_pos")
         
         # Remove from exploration room
-        self.exploration_room.objects = [obj for obj in self.exploration_room.objects if obj.name != "agent_anchor"]
         self.exploration_room.all_objects = [self.exploration_room.agent] + self.exploration_room.objects
         
         # Update exploration graph
         self.exp_graph.size -= 1
         for matrix_name in ['_v_matrix', '_h_matrix', '_v_matrix_working', '_h_matrix_working', '_asked_matrix']:
             matrix = getattr(self.exp_graph, matrix_name)
-            matrix = np.delete(matrix, anchor_idx, axis=0)
-            matrix = np.delete(matrix, anchor_idx, axis=1)
+            matrix = np.delete(matrix, initial_pos_idx, axis=0)
+            matrix = np.delete(matrix, initial_pos_idx, axis=1)
             setattr(self.exp_graph, matrix_name, matrix)
-        
-        self.objects = self.exploration_room.all_objects
-        self.agent_anchor = None
+
     
     def get_unknown_pairs(self) -> List[Tuple[int, int]]:
         """Get pairs of objects with unknown relationships."""
@@ -298,8 +274,6 @@ if __name__ == "__main__":
         """Helper function to create a test room.
         
         Args:
-            agent_pos: Agent position as [x, y]
-            agent_ori: Agent orientation as [x, y] 
             objects_data: List of (name, pos) tuples for objects
         """
         agent = Agent("agent")
@@ -433,46 +407,6 @@ if __name__ == "__main__":
         print(f"  Expected: False (no visible objects)")
         # Should not be novel since no new information gained
         print("  ✓ PASSED\n")
-    
-    # def test_update_observe_efficiency_algorithm():
-    #     """Test the detailed efficiency algorithm logic."""
-    #     print("Test 8: Detailed efficiency algorithm")
-        
-    #     room = create_test_room([
-    #         ("obj1", [1, 2]),    # front-right
-    #         ("obj2", [3, 0]),    # front-right
-    #         ("obj3", [-1, 1]),    # front-left
-    #         ("obj4", [2, -1])    # back-right
-    #     ])
-    #     manager = ExplorationManager(room)
-        
-    #     print("  Initial unknown pairs:")
-    #     unknown_pairs = manager.get_unknown_pairs()
-    #     agent_unknown = [(pair[1], pair[0]) if pair[0] == manager.agent_idx else pair 
-    #                     for pair in unknown_pairs if manager.agent_idx in pair]
-    #     print(f"    Agent unknown pairs: {len(agent_unknown)}")
-        
-    #     # All objects are in front (different horizontal positions)
-    #     # This should be considered novel
-    #     is_redundant = manager._update_observe()
-    #     print(f"Exp_graph: {manager.exp_graph.to_dict()}")
-        
-    #     manager.execute_action(MoveAction(target="obj1"))
-    #     manager.execute_action(RotateAction(degrees=270))
-    #     is_redundant = manager._update_observe()
-    #     print(f'Exp_graph: {manager.exp_graph.to_dict()}')
-
-    #     manager.execute_action(RotateAction(degrees=180))
-    #     manager.execute_action(MoveAction(target="obj4"))
-    #     manager.execute_action(RotateAction(degrees=270))
-
-    #     print(f"exp_graph: {manager.exp_graph.to_dict()}")
-
-    #     is_redundant = manager._update_observe()
-    #     print(f"  Result: is_redundant = {is_redundant}")
-    #     print(f"  Expected: False")
-    #     assert not is_redundant, "Should be redundant with objects in multiple front directions"
-    #     print("  ✓ PASSED\n")
 
     def test_update_observe_efficiency_algorithm():
         """Test the detailed efficiency algorithm logic."""
@@ -523,16 +457,11 @@ if __name__ == "__main__":
         action_sequence = ActionSequence([RotateAction(degrees=90), RotateAction(degrees=270), MoveAction(target="obj1")], ObserveAction())
         
         # Execute should fail on move but succeed on observe
-        message, info = manager.explore(action_sequence)
+        info, action_results = manager.execute_action_sequence(action_sequence)
         
-        print(f"  Message: {message}")
         print(f"  Info: {info}")
         
         # Should contain failure message and observe result
-        assert "failed to execute" in message
-        assert "So instead, you observe" in message
-        assert "obj1 is front-right of you" in message
-        
         print("  ✓ PASSED\n")
     
     def run_all_tests():

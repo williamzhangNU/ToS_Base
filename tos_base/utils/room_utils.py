@@ -5,6 +5,21 @@ from ..core.room import Room
 from ..core.constant import CANDIDATE_OBJECTS, ObjectInfo
 from ..core.object import Object, Agent
 
+def set_initial_pos_as_origin(room: Room) -> Room:
+    """
+    Transform room so initial_pos becomes origin (0,0) with orientation as positive y-axis.
+    Returns a copy of the room with transformed coordinates.
+    """
+    room_copy = room.copy()
+    init_pos = room_copy.initial_pos.pos
+    ori_to_deg = {(0, 1): 0, (0, -1): 180, (1, 0): 90, (-1, 0): 270}
+    rotations = {0: [[1,0],[0,1]], 90: [[0,1],[-1,0]], 180: [[-1,0],[0,-1]], 270: [[0,-1],[1,0]]}
+    
+    for obj in room_copy.all_objects:
+        obj.pos = (obj.pos - init_pos) @ rotations[ori_to_deg[tuple(room_copy.initial_pos.ori)]]
+        obj.ori = obj.ori @ rotations[ori_to_deg[tuple(room_copy.initial_pos.ori)]]    
+    return room_copy
+
 def generate_room(
         room_range: tuple[int, int],
         n_objects: int,
@@ -42,11 +57,7 @@ def generate_room(
     else:
         raise ValueError(f"Invalid generation type: {generation_type}")
     
-    return Room(
-        objects=objects,
-        name=room_name,
-        agent=Agent()
-    )
+    return Room(agent=Agent(), objects=objects, name=room_name)
 
 
 
@@ -160,8 +171,20 @@ def generate_room_for_rotation_eval(
     return objects
 
 if __name__ == '__main__':
-    room = generate_room_for_rotation_eval(
-        n=10,
-        random_generator=np.random.default_rng(42),
+    room = generate_room(
+        room_range=[-10, 10],
+        n_objects=3,
+        generation_type='rand',
+        np_random=np.random.default_rng(42),
     )
+    print(room)
+
+
+    from ..actions.actions import MoveAction, RotateAction
+    result = MoveAction('printer').execute(room, move_anyway=True)
+    result = RotateAction(90).execute(room)
+    print(room)
+
+
+    room = set_initial_pos_as_origin(room)
     print(room)

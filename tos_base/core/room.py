@@ -15,15 +15,16 @@ class Room:
     Handles basic object management and spatial relationships.
     """
 
-    def __init__(self, objects: List[Object], name: str = 'room', agent: Agent = None):
+    def __init__(self, agent: Agent, objects: List[Object], name: str = 'room'):
         self.name = name
         self._init_objects(objects, agent)
 
-    def _init_objects(self, objects: List[Object], agent: Agent = None):
-        """Initialize objects, agent, and validate unique names"""
+    def _init_objects(self, objects: List[Object], agent: Agent):
+        """Initialize objects, agent, initial_pos and validate unique names"""
         self.objects = copy.deepcopy(objects)
-        self.agent = copy.deepcopy(agent) if agent is not None else None
-        self.all_objects = ([self.agent] + self.objects) if self.agent else self.objects
+        self.agent = copy.deepcopy(agent)
+        self.initial_pos = Object("initial_pos", self.agent.pos.copy(), self.agent.ori.copy())
+        self.all_objects = [self.agent] + self.objects + [self.initial_pos]
         self.gt_graph = DirectionalGraph(self.all_objects, is_explore=False)
         
         # Validate unique names
@@ -54,7 +55,7 @@ class Room:
         """Get spatial relationship between two objects"""
         obj1 = self.get_object_by_name(obj1_name)
         obj2 = self.get_object_by_name(obj2_name)
-        perspective = perspective or ('ego' if self.agent else 'allo')
+        perspective = perspective or 'ego'
         
         anchor_ori = None
         if anchor_name:
@@ -94,21 +95,16 @@ class Room:
             (-1, 0): "west",
         }
         info = "## Topdown Information\n"
-        if self.agent:
-            info += f"Yourself at ({self.agent.pos[0]}, {self.agent.pos[1]}) facing {ori_mapping[tuple(self.agent.ori)]}\n"
+        info += f"Yourself at ({self.agent.pos[0]}, {self.agent.pos[1]}) facing {ori_mapping[tuple(self.agent.ori)]}\n"
         for obj in self.objects:
             info += f"{obj.name} at ({obj.pos[0]}, {obj.pos[1]}) facing {ori_mapping[tuple(obj.ori)]}\n"
         return info
 
     def get_room_description(self, with_topdown: bool = False) -> str:
         """Get textual description of the room"""
-        if self.agent:
-            desc = f"Imagine yourself as {self.agent.name} in a room.\n"
-            desc += "You are facing north.\n"
-            desc += f"Objects in the room: {', '.join([obj.name for obj in self.objects])}\n"
-        else:
-            desc = "Imagine looking at a room from above.\n"
-            desc += f"Objects in the room: {', '.join([obj.name for obj in self.objects])}\n"
+        desc = f"Imagine yourself as {self.agent.name} in a room.\n"
+        desc += "You are facing north.\n"
+        desc += f"Objects in the room: {', '.join([obj.name for obj in self.objects])}\n"
         
         if with_topdown:
             desc += "\n" + self._get_topdown_info()
@@ -149,18 +145,23 @@ class Room:
 
     def copy(self) -> 'Room':
         """Create a deep copy of the room"""
-        return Room(
+        room = Room(
             objects=copy.deepcopy(self.objects),
             name=self.name,
             agent=copy.deepcopy(self.agent)
         )
+        room.initial_pos = self.initial_pos.copy()
+        room.all_objects = [room.agent] + room.objects + [room.initial_pos]
+        room.gt_graph = self.gt_graph.copy()
+        return room
+    
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize room to dictionary"""
         return {
             'name': self.name,
             'objects': [obj.to_dict() for obj in self.objects],
-            'agent': self.agent.to_dict() if self.agent else None,
+            'agent': self.agent.to_dict(),
             'all_objects': [obj.to_dict() for obj in self.all_objects]
         }
 
@@ -168,7 +169,7 @@ class Room:
     def from_dict(cls, data: Dict[str, Any]) -> 'Room':
         """Deserialize room from dictionary"""
         objects = [Object.from_dict(obj_data) for obj_data in data['objects']]
-        agent = Agent.from_dict(data['agent']) if data['agent'] else None
+        agent = Agent.from_dict(data['agent'])
         return cls(objects=objects, name=data['name'], agent=agent)
     
     def plot(self, render_mode: str = 'text', save_path: str = None):
@@ -191,9 +192,9 @@ class Room:
         ori_map = {(0,1):'^', (0,-1):'v', (1,0):'>', (-1,0):'<'}
         labels = []
         
-        for i, obj in enumerate(self.all_objects):
+        for i, obj in enumerate([self.agent] + self.objects):  # Don't show initial_pos in plot
             x, y = int(obj.pos[0]) - min_x, max_y - int(obj.pos[1])
-            symbol = 'A' if obj == self.agent else str(i if self.agent is None else i-1)
+            symbol = 'A' if obj == self.agent else str(i-1)
             labels.append(f"{symbol}:{obj.name}")
             
             if 0 <= y < height and 0 <= x < width:
@@ -224,7 +225,8 @@ class Room:
         fig, ax = plt.subplots(figsize=(8, 6))
         min_x, max_x, min_y, max_y = self.get_boundary()
         
-        for i, obj in enumerate(self.all_objects):
+        plot_objects = [self.agent] + self.objects  # Don't plot initial_pos
+        for i, obj in enumerate(plot_objects):
             x, y = obj.pos
             color = plt.cm.tab10(i)
             marker = 's' if obj == self.agent else 'o'
@@ -247,8 +249,8 @@ class Room:
 
     def __repr__(self):
         objects_details = [f"{obj.name}@{tuple(obj.pos)}:{tuple(obj.ori)}" for obj in self.objects]
-        agent_detail = f"{self.agent.name}@{tuple(self.agent.pos)}:{tuple(self.agent.ori)}" if self.agent else None
-        return f"Room(name={self.name}, objects=[{', '.join(objects_details)}], agent={agent_detail})"
+        agent_detail = f"{self.agent.name}@{tuple(self.agent.pos)}:{tuple(self.agent.ori)}"
+        return f"Room(name={self.name}, objects=[{', '.join(objects_details)}], agent={agent_detail}, initial_pos={self.initial_pos.name}@{tuple(self.initial_pos.pos)}:{tuple(self.initial_pos.ori)})"
 
 
 
@@ -264,35 +266,13 @@ if __name__ == '__main__':
         Object(name="lamp", pos=np.array([1, -2]), ori=np.array([0, 1])),  # facing north
     ]
     
-    # Test with agent
+    # Test with agent (now required)
     agent = Agent(name="agent")
     agent.pos = np.array([0, 0])
     agent.ori = np.array([0, 1])  # facing north
     
     room_with_agent = Room(objects=objects, name="test_room_with_agent", agent=agent)
     
-    # print("\n=== Room with Agent - Text ===")
-    # room_with_agent.plot('text')
-    
-    # print("\n=== Room with Agent - Image ===")
-    # room_with_agent.plot('img', 'test_with_agent.pdf')
-    
-    # # Test without agent
-    # room_no_agent = Room(objects=objects, name="test_room_no_agent", agent=None)
-    
-    # print("\n=== Room without Agent - Text ===")
-    # room_no_agent.plot('text')
-    
-    # print("\n=== Room without Agent - Image ===")
-    # room_no_agent.plot('img', 'test_no_agent.pdf')
-    
-    # # Test error handling
-    # print("\n=== Error Handling Test ===")
-    # try:
-    #     room_with_agent.plot('invalid_mode')
-    # except ValueError as e:
-    #     print(f"✓ Caught expected error: {e}")
-
     # test add and remove object
     print("\n=== Add and Remove Object Test ===")
     room_with_agent.plot('text')
