@@ -110,7 +110,7 @@ class ExplorationManager:
                 is_redundant = (
                     len(relationships) == 1 and 
                     not (list(relationships)[0].horiz == Dir.UNKNOWN and list(relationships)[0].vert == Dir.UNKNOWN) and
-                    not (list(relationships)[0].horiz == Dir.UNKNOWN and list(relationships)[0].vert == Dir.BACKWARD)
+                    not (list(relationships)[0].horiz == Dir.UNKNOWN and list(relationships)[0].vert == Dir.FORWARD)
                 )
         
         # 2. Update relationships for visible objects
