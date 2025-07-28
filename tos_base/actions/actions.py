@@ -17,20 +17,18 @@ Available Actions:
 {actions}
 
 Answer with following format:
-Movement: [<movement_action1>, <movement_action2>, ...]; Final: <final_action>
+Actions: [<movement_action1>, <movement_action2>, ... , <final_action>]
 
-Format Notes:
+Rules:
 - Use movement actions in Movement, and final action in Final.
-- If no movement is needed, use [] in Movement.
-- Actions in Movement will be executed in order.
-- Separated these two lines by a semicolon.
+- Actions will be executed in order.
+- There must be exactly one final action at a time.
+- Term() must be alone with no movement actions.
+- You have a field of view for observation: {field_of_view} degrees.
 
 Examples:
 {examples}
 
-Rules:
-- Term() must be alone (no movement actions)
-- You have a field of view for observation: {field_of_view} degrees.
 """
 
 
@@ -253,38 +251,59 @@ class ActionSequence:
 
     @classmethod
     def parse(cls, action_str: str) -> Optional['ActionSequence']:
-        """Parse action string into ActionSequence"""
-        lines = [line.strip() for line in action_str.strip().split(';') if line.strip()]
-        
-        # Must have exactly 2 lines: Movement then Final
-        if len(lines) != 2 or not lines[0].startswith('Movement:') or not lines[1].startswith('Final:'):
+        """
+        Parse action string into ActionSequence.
+        Adapted to new action format:
+        Actions: [<movement_action1>, <movement_action2>, ..., <final_action>]
+        """
+        action_str = action_str.strip()
+        bracket_start = action_str.find('[')
+        bracket_end = action_str.rfind(']')
+        if bracket_start == -1 or bracket_end == -1 or bracket_end < bracket_start:
             return None
-        motion_actions = []
-        
-        # Parse Movement line
-        bracket_content = lines[0][len('Movement:'):].strip()
-        if not (bracket_content.startswith('[') and bracket_content.endswith(']')):
+        actions_content = action_str[bracket_start + 1:bracket_end].strip()
+        if not actions_content:
             return None
-            
-        actions_str = bracket_content[1:-1].strip()
-        if actions_str:
-            for item in [i.strip() for i in actions_str.split(',') if i.strip()]:
-                action = cls._parse_single_action(item)
-                if not action or action.is_final():
+        # Split actions by comma, but ignore commas inside parentheses
+        actions = []
+        buf = ''
+        paren = 0
+        for c in actions_content:
+            if c == '(':
+                paren += 1
+            elif c == ')':
+                paren -= 1
+            if c == ',' and paren == 0:
+                if buf.strip():
+                    actions.append(buf.strip())
+                buf = ''
+            else:
+                buf += c
+        if buf.strip():
+            actions.append(buf.strip())
+        if not actions:
+            return None
+        # Last action must be final
+        parsed_actions = []
+        final_action = None
+        for i, act_str in enumerate(actions):
+            action = cls._parse_single_action(act_str)
+            if not action:
+                return None
+            if i < len(actions) - 1:
+                if action.is_final():
                     return None
-                motion_actions.append(action)
-        
-        # Parse Final line
-        final_action_str = lines[1][len('Final:'):].strip()
-        final_action = cls._parse_single_action(final_action_str)
-        
-        if not final_action or not final_action.is_final():
-            return None
-            
-        if isinstance(final_action, TermAction) and motion_actions:
-            return None
-            
-        return cls(motion_actions, final_action)
+                parsed_actions.append(action)
+            else:
+                if not action.is_final():
+                    return None
+                final_action = action
+        # Allow Term() and Return() together
+        if isinstance(final_action, TermAction):
+            # If Term() is used, allow ReturnAction as movement action, but not other final actions
+            if any((not isinstance(a, ReturnAction)) for a in parsed_actions):
+                return None
+        return cls(parsed_actions, final_action)
     
     @staticmethod
     def _parse_single_action(action_str: str) -> Optional[BaseAction]:
@@ -308,9 +327,11 @@ class ActionSequence:
             "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in final_actions)
         )
         examples = (
-            f"Valid Example:\nMovement: [Move(table), Rotate(90)]; Final: Observe()\n\n" +
-            f"Valid Example (no movement):\nMovement: []; Final: Observe()\n\n" +
-            f"Invalid Example (wrong order):\nFinal: Observe(); Movement: []\n\n"
+            f"Valid Example:\nActions: [Move(table), Rotate(90), Observe()]\n\n" +
+            f"Valid Example (no movement action):\nActions: [Observe()]\n\n" +
+            f"Invalid Example (no final action):\nActions: [Move(table)]\n\n"+
+            f"Invalid Example (more than exactly one final action):\nActions: [Observe(), Rotate(90), Observe()]\n\n"
+            
         )
         
         return ACTION_INSTRUCTION.format(
