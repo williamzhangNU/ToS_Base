@@ -1,5 +1,6 @@
 from typing import List, Dict, Union
 import numpy as np
+from typing import Any
 from dataclasses import dataclass, field
 
 
@@ -86,6 +87,16 @@ class Object:
 @dataclass
 class Agent(Object):
     name: str = 'agent'
-    pos: np.ndarray = field(default_factory=lambda: np.array([0, 0]), init=False)
-    ori: np.ndarray = field(default_factory=lambda: np.array([0, 1]), init=False)
-    has_orientation: bool = field(default=True, init=False)
+    pos: np.ndarray = field(default_factory=lambda: np.array([0, 0]), init=True)
+    ori: np.ndarray = field(default_factory=lambda: np.array([0, 1]), init=True)
+    has_orientation: bool = field(default=True, init=True)
+
+
+    """@classmethod
+    def from_dict(cls, obj_dict: Dict[str, Any]) -> 'Agent':
+        # only call __init__ with name, then set the rest
+        inst = cls(name=obj_dict['name'])
+        inst.pos = np.array(obj_dict['pos'])
+        inst.ori = np.array(obj_dict['ori'])
+        inst.has_orientation = obj_dict.get('has_orientation', True)
+        return inst"""
