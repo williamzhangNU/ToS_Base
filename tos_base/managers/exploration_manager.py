@@ -100,14 +100,18 @@ class ExplorationManager:
             if field_of_view == 90:
                 # for 90 degree, agent should not observe when all objects are back
                 # four possible directions: front, back, left, right
-                is_redundant = (len(relationships) == 1 and 
-                                list(relationships)[0].horiz == Dir.UNKNOWN and 
-                                list(relationships)[0].vert == Dir.BACKWARD)
+                is_redundant = (
+                    len(relationships) == 1 and 
+                    not (list(relationships)[0].horiz == Dir.UNKNOWN and list(relationships)[0].vert == Dir.UNKNOWN) and
+                    list(relationships)[0].horiz == Dir.UNKNOWN and list(relationships)[0].vert == Dir.BACKWARD
+                )
             else:
                 # for 180 degree, agent should observe when all objects are front
-                is_redundant = (len(relationships) == 1 and 
-                                (list(relationships)[0].horiz != Dir.UNKNOWN or 
-                                list(relationships)[0].vert != Dir.FORWARD))
+                is_redundant = (
+                    len(relationships) == 1 and 
+                    not (list(relationships)[0].horiz == Dir.UNKNOWN and list(relationships)[0].vert == Dir.UNKNOWN) and
+                    not (list(relationships)[0].horiz == Dir.UNKNOWN and list(relationships)[0].vert == Dir.BACKWARD)
+                )
         
         # 2. Update relationships for visible objects
         for obj_name in visible_objects:
