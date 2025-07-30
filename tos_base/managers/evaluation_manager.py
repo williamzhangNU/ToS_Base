@@ -46,7 +46,7 @@ class EvaluationManager:
         "unanswered_count": 0
     }
     
-    def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room = None):
+    def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room):
         self.eval_tasks = eval_tasks
         self.np_random = np_random
         self.room = room
@@ -75,7 +75,7 @@ class EvaluationManager:
     def get_current_question(self, room: Room) -> Optional[str]:
         """Get question for current task."""
         task = self._get_current_eval_task()
-        return None if task is None else task.question if task.question else task.generate_question(room.copy())
+        return None if task is None else task.question if task.question else task.generate_question()
     
     def evaluate_answer(self, answer: str) -> Tuple[bool, Dict[str, Any]]:
         """Evaluate answer for current task."""
