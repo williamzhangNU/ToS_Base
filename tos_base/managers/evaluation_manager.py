@@ -18,6 +18,16 @@ class EvaluationTurnLog:
     is_correct: bool
     evaluation_info: Dict[str, Any]
 
+    def to_dict(self):
+        return {
+            "task_type": self.task_type,
+            "question": self.question,
+            "user_answer": self.user_answer,
+            "correct_answer": self.correct_answer,
+            "is_correct": self.is_correct,
+            "evaluation_info": self.evaluation_info
+        }
+
 
 class EvaluationManager:
     """
@@ -87,11 +97,13 @@ class EvaluationManager:
         self.turn_logs.append(turn_log)
         
         return correct, info
-    def get_turn_logs(self) -> List[EvaluationTurnLog]:
-        """Get evaluation turn logs."""
-        return self.turn_logs
+
+    def next_task(self) -> bool:
+        """Move to next task. Returns True if there are more tasks."""
+        self.current_index += 1
+        return self.current_index < len(self.tasks)
     
-    def _calculate_evaluation_summary(self) -> Dict[str, Any]:
+    def get_eval_summary(self) -> Dict[str, Any]:
         """Calculate evaluation summary from turn logs."""
         total_tasks = len(self.tasks)
         answered_tasks = len(self.turn_logs)
@@ -106,15 +118,27 @@ class EvaluationManager:
             "incorrect_count": incorrect_count,
             "unanswered_count": unanswered_count
         }
-
-    def next_task(self) -> bool:
-        """Move to next task. Returns True if there are more tasks."""
-        self.current_index += 1
-        return self.current_index < len(self.tasks)
     
-    def get_eval_summary(self) -> Dict[str, Any]:
-        """Get evaluation summary (legacy method)."""
-        return self._calculate_evaluation_summary()
+    @staticmethod
+    def aggregate_group_performance(eval_summaries: List[Dict]) -> Dict[str, float]:
+        """Calculate evaluation performance for a group."""
+        if not eval_summaries:
+            return {"avg_accuracy": 0.0, "avg_correct_rate": 0.0, "avg_incorrect_rate": 0.0, "avg_unanswered_rate": 0.0}
+        
+        total_tasks = sum(m.get('total_tasks', 0) for m in eval_summaries)
+        if total_tasks == 0:
+            return {"avg_accuracy": 0.0, "avg_correct_rate": 0.0, "avg_incorrect_rate": 0.0, "avg_unanswered_rate": 0.0}
+        
+        total_correct = sum(m.get('correct_count', 0) for m in eval_summaries)
+        total_incorrect = sum(m.get('incorrect_count', 0) for m in eval_summaries)
+        total_unanswered = sum(m.get('unanswered_count', 0) for m in eval_summaries)
+        
+        return {
+            "avg_accuracy": sum(m.get('accuracy', 0) for m in eval_summaries) / len(eval_summaries),
+            "avg_correct_rate": total_correct / total_tasks,
+            "avg_incorrect_rate": total_incorrect / total_tasks,
+            "avg_unanswered_rate": total_unanswered / total_tasks
+        }
     
     def reset(self):
         """Reset to start."""

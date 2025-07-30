@@ -7,16 +7,7 @@ from dataclasses import dataclass
 from ..core.object import Object, Agent
 from ..core.relationship import DirPair, DirectionSystem, Dir
 from ..core.graph import DirectionalGraph
-from ..actions import (
-    BaseAction,
-    ActionResult,
-    ActionSequence,
-    MoveAction,
-    RotateAction,
-    ReturnAction,
-    ObserveAction,
-    TermAction,
-)
+from ..actions import *
 from ..core.room import Room
 
 @dataclass
@@ -28,6 +19,16 @@ class ExplorationTurnLog:
     n_redundant_queries: int
     is_redundant: bool
     action_info: Dict[str, Any]
+
+    def to_dict(self):
+        return {
+            "is_redundant": self.is_redundant,
+            "coverage": self.coverage,
+            "redundancy": self.redundancy,
+            "n_valid_queries": self.n_valid_queries,
+            "n_redundant_queries": self.n_redundant_queries,
+            "action_info": self.action_info
+        }
 
 class ExplorationManager:
     """Manages spatial exploration with agent movement and queries.
@@ -285,11 +286,18 @@ class ExplorationManager:
         """Get exploration summary."""
         return {**self._update_exp_summary(), "n_exploration_steps": len(self.turn_logs)}
     
-    def get_turn_logs(self) -> List[ExplorationTurnLog]:
-        """Get exploration turn logs."""
-        return self.turn_logs
+    @staticmethod
+    def aggregate_group_performance(exp_summaries: List[Dict]) -> Dict[str, float]:
+        """Calculate exploration performance for a group."""
+        if not exp_summaries:
+            return {"avg_coverage": 0.0, "avg_redundancy": 0.0, "avg_exploration_steps": 0.0}
+        
+        return {
+            "avg_coverage": sum(m.get('coverage', 0) for m in exp_summaries) / len(exp_summaries),
+            "avg_redundancy": sum(m.get('redundancy', 0) for m in exp_summaries) / len(exp_summaries),
+            "avg_exploration_steps": sum(m.get('n_exploration_steps', 0) for m in exp_summaries) / len(exp_summaries)
+        }
     
-
 
 if __name__ == "__main__":
     import sys
