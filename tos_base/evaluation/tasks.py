@@ -58,10 +58,11 @@ class EvaluationData:
 class BaseEvaluationTask(ABC):
     """Base class for all spatial evaluation tasks"""
     
-    def __init__(self, np_random: np.random.Generator, config: Dict[str, Any] = None):
+    def __init__(self, np_random: np.random.Generator, config: Dict[str, Any] = None, room: Room = None):
         """Initialize the evaluation task"""
         self.config = config or {}
         self.np_random = np_random
+        self.room = room.copy() if room else None
         self.eval_data = EvaluationData(
             question="",
             answer="",

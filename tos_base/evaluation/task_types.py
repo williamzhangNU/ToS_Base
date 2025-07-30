@@ -3,6 +3,7 @@ from typing import Dict, Type, TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
+    from ..core.room import Room
     from .tasks import BaseEvaluationTask
 
 class EvalTaskType(Enum):
@@ -79,13 +80,13 @@ class EvalTaskType(Enum):
         raise ValueError(f"Unknown task class name: {class_name}")
     
     @classmethod
-    def create_task(cls, task_name: str, np_random: np.random.Generator, config: dict = None) -> 'BaseEvaluationTask':
+    def create_task(cls, task_name: str, np_random: np.random.Generator, config: dict = None, room: 'Room' = None) -> 'BaseEvaluationTask':
         """Create an evaluation task instance from task name."""
         from .tasks import BaseEvaluationTask
         
         task_map = cls.get_task_map()
         if task_name in task_map:
             task_class = task_map[task_name]
-            return task_class(np_random, config or {})
+            return task_class(np_random, config or {}, room)
         else:
             raise ValueError(f"Unknown evaluation task: {task_name}") 

@@ -17,6 +17,7 @@ class EvaluationTurnLog:
     correct_answer: Any
     is_correct: bool
     evaluation_info: Dict[str, Any]
+    room_state: Optional['Room'] = None
 
     def to_dict(self):
         return {
@@ -25,7 +26,8 @@ class EvaluationTurnLog:
             "user_answer": self.user_answer,
             "correct_answer": self.correct_answer,
             "is_correct": self.is_correct,
-            "evaluation_info": self.evaluation_info
+            "evaluation_info": self.evaluation_info,
+            "room_state": self.room_state.to_dict() if self.room_state else {}
         }
 
 
@@ -44,9 +46,10 @@ class EvaluationManager:
         "unanswered_count": 0
     }
     
-    def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator):
+    def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room = None):
         self.eval_tasks = eval_tasks
         self.np_random = np_random
+        self.room = room
         self.results = []
         self.turn_logs: List[EvaluationTurnLog] = []
         
@@ -55,7 +58,7 @@ class EvaluationManager:
         for task_spec in eval_tasks:
             task_type = task_spec['task_type']
             task_kwargs = task_spec.get('task_kwargs', {})
-            task = EvalTaskType.create_task(task_type, np_random, task_kwargs)
+            task = EvalTaskType.create_task(task_type, np_random, task_kwargs, room)
             self.tasks.append(task)
             self.results.append({
                 "task_type": task.__class__.__name__,
@@ -92,7 +95,8 @@ class EvaluationManager:
             user_answer=answer,
             correct_answer=task.answer,
             is_correct=correct,
-            evaluation_info=info
+            evaluation_info=info,
+            room_state=task.room
         )
         self.turn_logs.append(turn_log)
         
@@ -177,5 +181,5 @@ if __name__ == "__main__":
     correct, info = eval_manager.evaluate_answer("['keyboard', 'sofa', 'microphone']")
     print(f"Result: correct={correct}, info={info}")
     
-    summary = eval_manager.get_evaluation_summary()
+    summary = eval_manager.get_eval_summary()
     print(f"Summary: {summary['accuracy']}") 

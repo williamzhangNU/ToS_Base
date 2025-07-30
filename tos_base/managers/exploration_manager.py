@@ -1,7 +1,7 @@
 import numpy as np
 import copy
 from copy import deepcopy
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass
 
 from ..core.object import Object, Agent
@@ -19,6 +19,7 @@ class ExplorationTurnLog:
     n_redundant_queries: int
     is_redundant: bool
     action_info: Dict[str, Any]
+    room_state: Optional['Room'] = None
 
     def to_dict(self):
         return {
@@ -27,7 +28,8 @@ class ExplorationTurnLog:
             "redundancy": self.redundancy,
             "n_valid_queries": self.n_valid_queries,
             "n_redundant_queries": self.n_redundant_queries,
-            "action_info": self.action_info
+            "action_info": self.action_info,
+            "room_state": self.room_state.to_dict() if self.room_state else {}
         }
 
 class ExplorationManager:
@@ -260,7 +262,8 @@ class ExplorationManager:
         turn_log = ExplorationTurnLog(
             **self._update_exp_summary(),
             is_redundant=info.get('redundant', False),
-            action_info=deepcopy(info)
+            action_info=deepcopy(info),
+            room_state=self.exploration_room.copy()
         )
         self.turn_logs.append(turn_log)
         self.history.append(action_sequence)
