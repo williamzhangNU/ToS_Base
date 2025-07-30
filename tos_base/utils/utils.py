@@ -289,70 +289,175 @@ def create_room_and_visualize(model_response: str, room_name: str = "extracted_r
         return None
 
 
+def compare_room_consistency(room1: Room, room2: Room):
+    """
+    比较两个房间中对象的相对关系和朝向一致性
+
+    Args:
+        room1: 第一个房间（通常是预测的房间）
+        room2: 第二个房间（通常是真实的grounded房间）
+
+    Returns:
+        tuple: (相对关系一致性比例, 朝向一致性比例)
+               - 相对关系一致性比例: 0.0-1.0，表示两两物体相对关系一致的比例
+               - 朝向一致性比例: 0.0-1.0，表示各物体朝向一致的比例
+    """
+
+    # 获取两个房间中共同的对象名称（包括agent，但排除initial_pos）
+    room1_obj_names = {obj.name for obj in room1.objects}
+    room2_obj_names = {obj.name for obj in room2.objects}
+    common_obj_names = room1_obj_names.intersection(room2_obj_names)
+
+    # 添加agent到共同对象列表中（agent总是存在于两个房间中）
+    common_obj_names.add('agent')
+
+    if len(common_obj_names) < 2:
+        print("警告: 共同对象少于2个，无法进行相对关系比较")
+        return 0.0, 0.0
+
+    # 计算相对关系一致性
+    total_pairs = 0
+    consistent_pairs = 0
+
+    # 遍历所有对象对
+    common_obj_list = list(common_obj_names)
+    for i in range(len(common_obj_list)):
+        for j in range(i + 1, len(common_obj_list)):
+            obj1_name = common_obj_list[i]
+            obj2_name = common_obj_list[j]
+
+            try:
+                # 获取两个房间中的相对关系
+                dir_pair1, _ = room1.get_direction(obj1_name, obj2_name, perspective='allo')
+                dir_pair2, _ = room2.get_direction(obj1_name, obj2_name, perspective='allo')
+
+                # 比较相对关系是否一致
+                if dir_pair1.horiz == dir_pair2.horiz and dir_pair1.vert == dir_pair2.vert:
+                    consistent_pairs += 1
+
+                total_pairs += 1
+
+            except Exception as e:
+                print(f"警告: 比较对象 {obj1_name} 和 {obj2_name} 的相对关系时出错: {e}")
+                continue
+
+    # 计算相对关系一致性比例
+    relation_consistency = consistent_pairs / total_pairs if total_pairs > 0 else 0.0
+
+    # 计算朝向一致性（排除agent）
+    total_orientations = 0
+    consistent_orientations = 0
+
+    for obj_name in common_obj_names:
+        # 跳过agent的朝向比较
+        if obj_name == 'agent':
+            continue
+
+        try:
+            obj1 = room1.get_object_by_name(obj_name)
+            obj2 = room2.get_object_by_name(obj_name)
+
+            # 只比较有朝向的对象
+            if obj1.has_orientation and obj2.has_orientation:
+                # 比较朝向向量是否相同
+                if np.array_equal(obj1.ori, obj2.ori):
+                    consistent_orientations += 1
+
+                total_orientations += 1
+
+        except Exception as e:
+            print(f"警告: 比较对象 {obj_name} 的朝向时出错: {e}")
+            continue
+
+    # 计算朝向一致性比例
+    orientation_consistency = consistent_orientations / total_orientations if total_orientations > 0 else 0.0
+    result = {}
+    result["directional_similarity"] = relation_consistency
+    result["facing_similarity"] = orientation_consistency
+    result["overall_similarity"] =  0.7 * relation_consistency + 0.3 * orientation_consistency
+    return result
+
+
 # 测试函数
 if __name__ == "__main__":
-    # 测试用例1: 标准JSON格式
-    test_response1 = '''
-    根据描述，房间布局如下：
+    print("\n=== 测试用例4: 房间一致性比较 ===")
+
+    # 创建两个相似的房间进行比较
+    # 房间A: 原始房间
+    test_response_a = '''
     ```json
     {
-      "whiteboard": {"position": [1, 1], "facing": "east"},
-      "oven": {"position": [0, 1], "facing": "east"},
-      "chair": {"position": [-1, 1], "facing": "east"}
+      "table": {"position": [2, 1], "facing": "north"},
+      "chair": {"position": [0, 1], "facing": "east"},
+      "lamp": {"position": [-1, 2], "facing": "south"}
     }
     ```
     '''
 
-    print("=== 测试用例1: 标准JSON格式 ===")
-    room1 = extract_json_and_create_room(test_response1, "test_room1")
-    if room1:
-        print("成功创建Room对象:")
-        print(room1)
-        print("\n原始可视化:")
-        room1.plot('text')
-        print("\n改进的可视化:")
-        plot_room_with_orientations(room1)
-    else:
-        print("创建Room对象失败")
-
-    # 测试用例2: 不同朝向
-    test_response2 = '''
-    房间中的物品位置：
+    # 房间B: 完全相同的房间
+    test_response_b = '''
     ```json
     {
-      "table": {"position": [2, 0], "facing": "north"},
-      "sofa": {"position": [-1, -1], "facing": "west"},
-      "lamp": {"position": [0, 2], "facing": "south"}
+      "table": {"position": [2, 1], "facing": "north"},
+      "chair": {"position": [0, 1], "facing": "east"},
+      "lamp": {"position": [-1, 2], "facing": "south"}
     }
     ```
     '''
 
-    print("\n=== 测试用例2: 不同朝向 ===")
-    room2 = extract_json_and_create_room(test_response2, "test_room2")
-    if room2:
-        print("成功创建Room对象:")
-        print(room2)
-        print("\n改进的可视化:")
-        plot_room_with_orientations(room2)
-    else:
-        print("创建Room对象失败")
-
-    # 测试用例3: 没有朝向信息
-    test_response3 = '''
+    # 房间C: 部分不同的房间（位置改变）
+    test_response_c = '''
     ```json
     {
-      "desk": {"position": [1, 0]},
-      "bookshelf": {"position": [-2, 1]}
+      "table": {"position": [1, 2], "facing": "north"},
+      "chair": {"position": [0, 1], "facing": "east"},
+      "lamp": {"position": [-1, 2], "facing": "south"}
     }
     ```
     '''
 
-    print("\n=== 测试用例3: 没有朝向信息 ===")
-    room3 = extract_json_and_create_room(test_response3, "test_room3")
-    if room3:
-        print("成功创建Room对象:")
-        print(room3)
-        print("\n改进的可视化:")
-        plot_room_with_orientations(room3)
+    # 房间D: 朝向不同的房间
+    test_response_d = '''
+    ```json
+    {
+      "table": {"position": [4, 1], "facing": "south"},
+      "chair": {"position": [0, 1], "facing": "west"},
+      "lamp": {"position": [-1, 2], "facing": "north"}
+    }
+    ```
+    '''
+
+    room_a = extract_json_and_create_room(test_response_a, "room_a")
+    room_b = extract_json_and_create_room(test_response_b, "room_b")
+    room_c = extract_json_and_create_room(test_response_c, "room_c")
+    room_d = extract_json_and_create_room(test_response_d, "room_d")
+    plot_room_with_orientations(room_a)
+    plot_room_with_orientations(room_b)
+    plot_room_with_orientations(room_c)
+    plot_room_with_orientations(room_d)
+    if all([room_a, room_b, room_c, room_d]):
+        print("成功创建所有测试房间")
+
+        # 测试完全相同的房间
+        result = compare_room_consistency(room_a, room_b)
+        print(f"\n房间A vs 房间B (完全相同):")
+        print(f"相对关系一致性: {result['directional_similarity']:.2f}")
+        print(f"朝向一致性: {result['facing_similarity']:.2f}")
+        print(f"总体相似度: {result['overall_similarity']:.2f}")
+
+        # 测试位置不同的房间
+        result = compare_room_consistency(room_a, room_c)
+        print(f"\n房间A vs 房间C (位置部分不同):")
+        print(f"相对关系一致性: {result['directional_similarity']:.2f}")
+        print(f"朝向一致性: {result['facing_similarity']:.2f}")
+        print(f"总体相似度: {result['overall_similarity']:.2f}")
+
+        # 测试朝向不同的房间
+        result = compare_room_consistency(room_a, room_d)
+        print(f"\n房间A vs 房间D (朝向不同):")
+        print(f"相对关系一致性: {result['directional_similarity']:.2f}")
+        print(f"朝向一致性: {result['facing_similarity']:.2f}")
+        print(f"总体相似度: {result['overall_similarity']:.2f}")
+
     else:
-        print("创建Room对象失败")
+        print("创建测试房间失败")
