@@ -2,6 +2,7 @@ import numpy as np
 import copy
 from copy import deepcopy
 from typing import List, Tuple, Dict, Any
+from dataclasses import dataclass
 
 from ..core.object import Object, Agent
 from ..core.relationship import DirPair, DirectionSystem, Dir
@@ -18,12 +19,28 @@ from ..actions import (
 )
 from ..core.room import Room
 
+@dataclass
+class ExplorationTurnLog:
+    """Log data for a single exploration turn."""
+    coverage: float
+    redundancy: float
+    n_valid_queries: int
+    n_redundant_queries: int
+    is_redundant: bool
+    action_info: Dict[str, Any]
+
 class ExplorationManager:
     """Manages spatial exploration with agent movement and queries.
     
     Maintains base_room (original state) and exploration_room (working copy).
     Actions handle their own coordinate transformations. Exploration is egocentric.
     """
+    DEFAULT_EXP_SUMMARY = {
+        "coverage": 0, # coverage of the exploration
+        "redundancy": 0, # redundancy of the exploration
+        "n_valid_queries": 0, # number of valid queries
+        "n_redundant_queries": 0, # number of redundant queries
+    }
     
     def __init__(self, room: Room):
         assert room.agent is not None, "Exploration requires an agent in the room"
@@ -38,15 +55,10 @@ class ExplorationManager:
         self.exp_graph = DirectionalGraph(self.objects, is_explore=True)
         
         self.exp_graph.add_edge(self.agent_idx, self.initial_pos_idx, DirPair(Dir.SAME, Dir.SAME))
-        self.metrics_log: List[Dict[str, Any]] = []
+        self.turn_logs: List[ExplorationTurnLog] = []
 
         # log exploration history and efficiency
-        self.exploration_efficiency = {
-            "coverage": 0, # coverage of the exploration
-            "redundancy": 0, # redundancy of the exploration
-            "n_valid_queries": 0, # number of valid queries
-            "n_redundant_queries": 0, # number of redundant queries
-        }
+        self.exp_summary = copy.deepcopy(self.DEFAULT_EXP_SUMMARY)
         self.history = [] 
         
     def _get_index(self, name: str) -> int:
@@ -156,18 +168,6 @@ class ExplorationManager:
     def execute_action(self, action: BaseAction) -> ActionResult:
         """Execute single action and return result."""
         return self._execute_and_update(action)
-    
-    def _log_exploration(self, action_sequence: ActionSequence, info: Dict[str, Any]) -> None:
-        """Log exploration history and efficiency."""
-        if info.get('redundant'):
-            self.exploration_efficiency['n_redundant_queries'] += 1
-        if not action_sequence.final_action.is_term():
-            self.exploration_efficiency['n_valid_queries'] += 1
-        self.metrics_log.append(deepcopy(self.exploration_efficiency))
-        self.metrics_log.append(deepcopy(info))
-        self.history.append(action_sequence)
-    def get_metrics_log(self) -> List[Dict[str, Any]]:
-        return self.metrics_log
 
     def execute_action_sequence(self, action_sequence: ActionSequence) -> Tuple[Dict[str, Any], List[ActionResult]]:
         """
@@ -207,8 +207,6 @@ class ExplorationManager:
         self._log_exploration(action_sequence, info)
         return info, action_results
     
-    
-    
     def finish_exploration(self, return_to_origin: bool = True, neglect_initial_pos: bool = True) -> Room:
         """Complete exploration and return final room state."""
         if return_to_origin:
@@ -235,6 +233,10 @@ class ExplorationManager:
             matrix = np.delete(matrix, initial_pos_idx, axis=1)
             setattr(self.exp_graph, matrix_name, matrix)
 
+
+
+
+
     
     def get_unknown_pairs(self) -> List[Tuple[int, int]]:
         """Get pairs of objects with unknown relationships."""
@@ -244,20 +246,48 @@ class ExplorationManager:
         """Get pairs of objects with inferable relationships."""
         return self.exp_graph.get_inferable_pairs()
     
-    def get_exploration_efficiency(self) -> Dict:
-        """Get exploration efficiency metrics."""
-        unknown_pairs = self.get_unknown_pairs()
+    def _log_exploration(self, action_sequence: ActionSequence, info: Dict[str, Any]) -> None:
+        """Log exploration history and efficiency."""
+        if info.get('redundant'):
+            self.exp_summary['n_redundant_queries'] += 1
+        if not action_sequence.final_action.is_term():
+            self.exp_summary['n_valid_queries'] += 1
+        
+        # Calculate current metrics using the function
+        
+        # Create turn log
+        turn_log = ExplorationTurnLog(
+            **self._update_exp_summary(),
+            is_redundant=info.get('redundant', False),
+            action_info=deepcopy(info)
+        )
+        self.turn_logs.append(turn_log)
+        self.history.append(action_sequence)
 
+    
+    def _update_exp_summary(self) -> Dict[str, Any]:
+        """Calculate current exploration efficiency."""
+        unknown_pairs = self.get_unknown_pairs()
         n_object = len(self.objects)
         max_rels = int(n_object * (n_object - 1) / 2)
         coverage = (max_rels - len(unknown_pairs)) / max_rels if max_rels > 0 else 0
-
-        self.exploration_efficiency['coverage'] = coverage
-        self.exploration_efficiency['redundancy'] = self.exploration_efficiency['n_redundant_queries'] / self.exploration_efficiency['n_valid_queries'] if self.exploration_efficiency['n_valid_queries'] > 0 else 0
-        self.exploration_efficiency['n_valid_queries'] = self.exploration_efficiency['n_valid_queries']
-        self.exploration_efficiency['n_redundant_queries'] = self.exploration_efficiency['n_redundant_queries']
-
-        return self.exploration_efficiency
+        redundancy = self.exp_summary['n_redundant_queries'] / self.exp_summary['n_valid_queries'] if self.exp_summary['n_valid_queries'] > 0 else 0
+        
+        self.exp_summary = {
+            "coverage": coverage,
+            "redundancy": redundancy,
+            "n_valid_queries": self.exp_summary['n_valid_queries'],
+            "n_redundant_queries": self.exp_summary['n_redundant_queries'],
+        }
+        return self.exp_summary
+    
+    def get_exp_summary(self) -> Dict[str, Any]:
+        """Get exploration summary."""
+        return {**self._update_exp_summary(), "n_exploration_steps": len(self.turn_logs)}
+    
+    def get_turn_logs(self) -> List[ExplorationTurnLog]:
+        """Get exploration turn logs."""
+        return self.turn_logs
     
 
 

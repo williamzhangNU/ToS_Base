@@ -34,8 +34,8 @@ from .actions.actions import (
 )
 
 # Managers
-from .managers.exploration_manager import ExplorationManager
-from .managers.evaluation_manager import EvaluationManager
+from .managers.exploration_manager import ExplorationManager, ExplorationTurnLog
+from .managers.evaluation_manager import EvaluationManager, EvaluationTurnLog
 
 # Evaluation tasks
 from .evaluation.tasks import BaseEvaluationTask

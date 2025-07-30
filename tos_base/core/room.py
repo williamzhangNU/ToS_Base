@@ -15,15 +15,15 @@ class Room:
     Handles basic object management and spatial relationships.
     """
 
-    def __init__(self, agent: Agent, objects: List[Object], name: str = 'room'):
+    def __init__(self, agent: Agent, objects: List[Object], initial_pos: Object = None, name: str = 'room'):
         self.name = name
-        self._init_objects(objects, agent)
+        self._init_objects(objects, agent, initial_pos)
 
-    def _init_objects(self, objects: List[Object], agent: Agent):
+    def _init_objects(self, objects: List[Object], agent: Agent, initial_pos: Object = None):
         """Initialize objects, agent, initial_pos and validate unique names"""
         self.objects = copy.deepcopy(objects)
         self.agent = copy.deepcopy(agent)
-        self.initial_pos = Object("initial_pos", self.agent.pos.copy(), self.agent.ori.copy())
+        self.initial_pos = initial_pos or Object("initial_pos", self.agent.pos.copy(), self.agent.ori.copy())
         self.all_objects = [self.agent] + self.objects + [self.initial_pos]
         self.gt_graph = DirectionalGraph(self.all_objects, is_explore=False)
         
@@ -33,11 +33,11 @@ class Room:
 
     def add_object(self, obj: Object):
         """Add an object to the room"""
-        self._init_objects(self.objects + [obj], self.agent)
+        self._init_objects(self.objects + [obj], self.agent, self.initial_pos)
     
     def remove_object(self, obj_name: str):
         """Remove an object from the room"""
-        self._init_objects([o for o in self.objects if o.name != obj_name], self.agent)
+        self._init_objects([o for o in self.objects if o.name != obj_name], self.agent, self.initial_pos)
 
     def get_object_by_name(self, name: str) -> Object:
         """Get object by name"""
@@ -145,32 +145,29 @@ class Room:
 
     def copy(self) -> 'Room':
         """Create a deep copy of the room"""
-        room = Room(
-            objects=copy.deepcopy(self.objects),
-            name=self.name,
-            agent=copy.deepcopy(self.agent)
-        )
-        room.initial_pos = self.initial_pos.copy()
-        room.all_objects = [room.agent] + room.objects + [room.initial_pos]
-        room.gt_graph = self.gt_graph.copy()
-        return room
+        return self.from_dict(self.to_dict())
     
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize room to dictionary"""
         return {
             'name': self.name,
-            'objects': [obj.to_dict() for obj in self.objects],
             'agent': self.agent.to_dict(),
+            'objects': [obj.to_dict() for obj in self.objects],
+            'initial_pos': self.initial_pos.to_dict(),
             'all_objects': [obj.to_dict() for obj in self.all_objects]
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Room':
         """Deserialize room from dictionary"""
-        objects = [Object.from_dict(obj_data) for obj_data in data['objects']]
-        agent = Agent.from_dict(data['agent'])
-        return cls(objects=objects, name=data['name'], agent=agent)
+        return cls(
+            objects=[Object.from_dict(obj_data) for obj_data in data['objects']],
+            agent=Agent.from_dict(data['agent']),
+            initial_pos=Object.from_dict(data['initial_pos']),
+            name=data['name']
+        )
+
     
     def plot(self, render_mode: str = 'text', save_path: str = None):
         """Plot the room with objects and orientations"""
@@ -192,7 +189,7 @@ class Room:
         ori_map = {(0,1):'^', (0,-1):'v', (1,0):'>', (-1,0):'<'}
         labels = []
         
-        for i, obj in enumerate([self.agent] + self.objects):  # Don't show initial_pos in plot
+        for i, obj in enumerate(self.all_objects):
             x, y = int(obj.pos[0]) - min_x, max_y - int(obj.pos[1])
             symbol = 'A' if obj == self.agent else str(i-1)
             labels.append(f"{symbol}:{obj.name}")
@@ -225,8 +222,7 @@ class Room:
         fig, ax = plt.subplots(figsize=(8, 6))
         min_x, max_x, min_y, max_y = self.get_boundary()
         
-        plot_objects = [self.agent] + self.objects  # Don't plot initial_pos
-        for i, obj in enumerate(plot_objects):
+        for i, obj in enumerate(self.all_objects):
             x, y = obj.pos
             color = plt.cm.tab10(i)
             marker = 's' if obj == self.agent else 'o'
@@ -282,6 +278,8 @@ if __name__ == '__main__':
     room_with_agent.remove_object(objects[0].name)
     print(room_with_agent.objects, room_with_agent.all_objects, room_with_agent.gt_graph._v_matrix)
     room_with_agent.plot('text')
+
+    room_with_agent.plot('img', save_path='test_room_with_agent.png')
     
     print("\nAll tests completed!")
 
