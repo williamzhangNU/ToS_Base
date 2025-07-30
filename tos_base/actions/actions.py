@@ -38,9 +38,10 @@ class MoveAction(BaseAction):
     format_desc = "Move(object_name)"
     description = (
         "Move to the same position as the object. "
+        "Your orientation does NOT change when you move."
         "You can ONLY move to object within your field of view. "
         "You can ONLY move to objects by name, not directions or others. "
-        "Invalid examples: Move(left), Move(forward), Move(back)"
+        "Invalid examples: Move(left), Move(forward), Move(back). "
     )
     example = "Move(table)"
     format_pattern = r"^Move\(([A-Za-z0-9_-]+)\)$"
@@ -82,7 +83,7 @@ class RotateAction(BaseAction):
     """Rotate by specified degrees"""
     
     format_desc = "Rotate(degrees)"
-    description = "Rotate by specified degrees, only valid degrees are 0, 90, 180, 270."
+    description = "Rotate clockwise by specified degrees relative to your current orientation, only valid degrees are 0, 90, 180, 270."
     example = "Rotate(90)"
     format_pattern = r"^Rotate\(([0-9-]+)\)$"
     VALID_DEGREES = [0, 90, 180, 270]
