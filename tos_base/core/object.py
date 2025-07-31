@@ -87,6 +87,6 @@ class Object:
 @dataclass
 class Agent(Object):
     name: str = 'agent'
-    pos: np.ndarray = field(default_factory=lambda: np.array([0, 0]), init=True)
-    ori: np.ndarray = field(default_factory=lambda: np.array([0, 1]), init=True)
-    has_orientation: bool = field(default=True, init=True)
+    pos: np.ndarray = field(default_factory=lambda: np.array([0, 0]))
+    ori: np.ndarray = field(default_factory=lambda: np.array([0, 1]))
+    has_orientation: bool = field(default=True)

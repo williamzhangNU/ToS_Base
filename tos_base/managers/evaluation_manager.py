@@ -6,28 +6,30 @@ from dataclasses import dataclass
 
 from ..evaluation.task_types import EvalTaskType
 from ..core.room import Room
-from ..evaluation.tasks import BaseEvaluationTask
+from ..evaluation.tasks import BaseEvaluationTask, EvaluationData
 
 @dataclass
 class EvaluationTurnLog:
     """Log data for a single evaluation turn."""
     task_type: str
-    question: str
     user_answer: str
-    correct_answer: Any
     is_correct: bool
     evaluation_info: Dict[str, Any]
+    evaluation_data: EvaluationData
     room_state: Optional['Room'] = None
 
     def to_dict(self):
+        evaluation_data = self.evaluation_data.to_dict()
+        if "question" in evaluation_data:
+            evaluation_data.pop("question")
+        evaluation_data['choices'] = '\n'.join([f"{chr(65+i)}. {choice}" for i, choice in enumerate(evaluation_data['choices'])])
         return {
             "task_type": self.task_type,
-            "question": self.question,
             "user_answer": self.user_answer,
-            "correct_answer": self.correct_answer,
             "is_correct": self.is_correct,
+            "room_state": self.room_state.to_dict() if self.room_state else {},
             "evaluation_info": self.evaluation_info,
-            "room_state": self.room_state.to_dict() if self.room_state else {}
+            "evaluation_data": evaluation_data
         }
 
 
@@ -91,12 +93,11 @@ class EvaluationManager:
         # Create turn log
         turn_log = EvaluationTurnLog(
             task_type=task.__class__.__name__,
-            question=task.question or "",
             user_answer=answer,
-            correct_answer=task.answer,
             is_correct=correct,
+            room_state=task.room,
             evaluation_info=info,
-            room_state=task.room
+            evaluation_data=task.eval_data
         )
         self.turn_logs.append(turn_log)
         
