@@ -74,7 +74,7 @@ class EvaluationManager:
         assert self.current_index < len(self.tasks), "No more tasks"
         return self.tasks[self.current_index]
     
-    def get_current_question(self, room: Room) -> Optional[str]:
+    def get_current_question(self) -> Optional[str]:
         """Get question for current task."""
         task = self._get_current_eval_task()
         return None if task is None else task.question if task.question else task.generate_question()
