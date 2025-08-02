@@ -164,7 +164,7 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         """Generate a question that asks about spatial relationship between one randomly chosen pair"""
         if self.room is None:
             raise ValueError("Room must be set before generating question")
-        n = len(self.room.all_objects)
+        n = len(self.room.objects)
         
         # Generate all pairs with random order
         pairs = [(i, j) if self.np_random.random() >= 0.5 else (j, i) 
@@ -172,7 +172,7 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         self.np_random.shuffle(pairs)
 
         pair = pairs[0]
-        obj1, obj2 = self.room.all_objects[pair[0]], self.room.all_objects[pair[1]]
+        obj1, obj2 = self.room.objects[pair[0]], self.room.objects[pair[1]]
         _, correct_answer = self.room.get_direction(obj1.name, obj2.name, perspective='allo')
         
         # Generate choices
@@ -489,16 +489,16 @@ class PovEvaluationTask(BaseEvaluationTask):
             raise ValueError("Room must be set before generating question")
         
         # Choose three different objects
-        obj_idx = self.np_random.integers(0, len(self.room.all_objects))
+        obj_idx = self.np_random.integers(0, len(self.room.objects))
         
         # Choose anchor object that has orientation
-        oriented_objects = [i for i, obj in enumerate(self.room.all_objects) if obj.has_orientation]
+        oriented_objects = [i for i, obj in enumerate(self.room.objects) if obj.has_orientation]
         assert len(oriented_objects) > 0, "No objects with orientation found for perspective taking task"
         anchor_obj_idx = self.np_random.choice(oriented_objects)
         
         while obj_idx == anchor_obj_idx:
-            obj_idx = self.np_random.integers(0, len(self.room.all_objects))
-        obj_name, anchor_obj_name = self.room.all_objects[obj_idx].name, self.room.all_objects[anchor_obj_idx].name
+            obj_idx = self.np_random.integers(0, len(self.room.objects))
+        obj_name, anchor_obj_name = self.room.objects[obj_idx].name, self.room.objects[anchor_obj_idx].name
 
         _, correct_answer = self.room.get_direction(obj_name, anchor_obj_name, anchor_name=anchor_obj_name)
         

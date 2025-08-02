@@ -25,6 +25,7 @@ class Room:
         self.agent = copy.deepcopy(agent)
         self.initial_pos = initial_pos or Object("initial_pos", self.agent.pos.copy(), self.agent.ori.copy())
         self.all_objects = [self.agent] + self.objects + [self.initial_pos]
+        self.valid_objects = [self.agent] + self.objects
         self.gt_graph = DirectionalGraph(self.all_objects, is_explore=False)
         
         # Validate unique names

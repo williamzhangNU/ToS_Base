@@ -50,17 +50,18 @@ class ExplorationManager:
         
         self.base_room = room.copy()
         self.exploration_room = room.copy()
+        self.objects = self.exploration_room.all_objects
         
         self.agent_idx = self._get_index(self.exploration_room.agent.name)
         self.initial_pos_idx = self._get_index("initial_pos")
 
-        self.objects = self.exploration_room.all_objects
-        self.exp_graph = DirectionalGraph(self.objects, is_explore=True)
+        self.exp_graph = DirectionalGraph(self.exploration_room.all_objects, is_explore=True)
         
         self.exp_graph.add_edge(self.agent_idx, self.initial_pos_idx, DirPair(Dir.SAME, Dir.SAME))
         self.turn_logs: List[ExplorationTurnLog] = []
 
         # log exploration history and efficiency
+        self.finished = False
         self.exp_summary = copy.deepcopy(self.DEFAULT_EXP_SUMMARY)
         self.history = [] 
         
@@ -218,36 +219,50 @@ class ExplorationManager:
                 raise ValueError(f"Failed to return to origin: {result.message}")
             
         if neglect_initial_pos:
-            self._remove_initial_pos()
+            self._remove_initial_pos(self.exp_graph)
+        self.finished = True
         return self.exploration_room
     
-    def _remove_initial_pos(self) -> None:
-        """Remove initial_pos from exploration room and graph."""
+    def get_exp_summary(self) -> Dict[str, Any]:
+        """Get exploration summary."""
+        assert self.finished, "Exploration is not finished"
+        return {**self._update_exp_summary(), "n_exploration_steps": len(self.turn_logs)}
+    
+    @staticmethod
+    def aggregate_group_performance(exp_summaries: List[Dict]) -> Dict[str, float]:
+        """Calculate exploration performance for a group."""
+        if not exp_summaries:
+            return {"avg_coverage": 0.0, "avg_redundancy": 0.0, "avg_exploration_steps": 0.0}
+        
+        return {
+            "avg_coverage": sum(m.get('coverage', 0) for m in exp_summaries) / len(exp_summaries),
+            "avg_redundancy": sum(m.get('redundancy', 0) for m in exp_summaries) / len(exp_summaries),
+            "avg_exploration_steps": sum(m.get('n_exploration_steps', 0) for m in exp_summaries) / len(exp_summaries)
+        }
+    
+    def get_unknown_pairs(self, neglect_initial_pos: bool = True) -> List[Tuple[int, int]]:
+        """Get pairs of objects with unknown relationships."""
+        return self._remove_initial_pos(self.exp_graph.copy()).get_unknown_pairs() if neglect_initial_pos and not self.finished else self.exp_graph.get_unknown_pairs()
+    
+    def get_inferable_pairs(self, neglect_initial_pos: bool = True) -> List[Tuple[int, int]]:
+        """Get pairs of objects with inferable relationships."""
+        return self._remove_initial_pos(self.exp_graph.copy()).get_inferable_pairs() if neglect_initial_pos and not self.finished else self.exp_graph.get_inferable_pairs()
+    
+
+
+    def _remove_initial_pos(self, exp_graph: DirectionalGraph) -> DirectionalGraph:
+        """Remove initial_pos from exploration graph."""
         initial_pos_idx = self._get_index("initial_pos")
-        
-        # Remove from exploration room
-        self.exploration_room.all_objects = [self.exploration_room.agent] + self.exploration_room.objects
-        
+    
         # Update exploration graph
-        self.exp_graph.size -= 1
+        assert exp_graph.size == len(self.exploration_room.all_objects), "Exploration graph size mismatch"
+        exp_graph.size -= 1
         for matrix_name in ['_v_matrix', '_h_matrix', '_v_matrix_working', '_h_matrix_working', '_asked_matrix']:
-            matrix = getattr(self.exp_graph, matrix_name)
+            matrix = getattr(exp_graph, matrix_name)
             matrix = np.delete(matrix, initial_pos_idx, axis=0)
             matrix = np.delete(matrix, initial_pos_idx, axis=1)
-            setattr(self.exp_graph, matrix_name, matrix)
-
-
-
-
-
-    
-    def get_unknown_pairs(self) -> List[Tuple[int, int]]:
-        """Get pairs of objects with unknown relationships."""
-        return self.exp_graph.get_unknown_pairs()
-    
-    def get_inferable_pairs(self) -> List[Tuple[int, int]]:
-        """Get pairs of objects with inferable relationships."""
-        return self.exp_graph.get_inferable_pairs()
+            setattr(exp_graph, matrix_name, matrix)
+        return exp_graph
     
     def _log_exploration(self, action_sequence: ActionSequence, info: Dict[str, Any]) -> None:
         """Log exploration history and efficiency."""
@@ -267,12 +282,11 @@ class ExplorationManager:
         )
         self.turn_logs.append(turn_log)
         self.history.append(action_sequence)
-
     
     def _update_exp_summary(self) -> Dict[str, Any]:
         """Calculate current exploration efficiency."""
         unknown_pairs = self.get_unknown_pairs()
-        n_object = len(self.objects)
+        n_object = len(self.exploration_room.valid_objects)
         max_rels = int(n_object * (n_object - 1) / 2)
         coverage = (max_rels - len(unknown_pairs)) / max_rels if max_rels > 0 else 0
         redundancy = self.exp_summary['n_redundant_queries'] / self.exp_summary['n_valid_queries'] if self.exp_summary['n_valid_queries'] > 0 else 0
@@ -284,22 +298,6 @@ class ExplorationManager:
             "n_redundant_queries": self.exp_summary['n_redundant_queries'],
         }
         return self.exp_summary
-    
-    def get_exp_summary(self) -> Dict[str, Any]:
-        """Get exploration summary."""
-        return {**self._update_exp_summary(), "n_exploration_steps": len(self.turn_logs)}
-    
-    @staticmethod
-    def aggregate_group_performance(exp_summaries: List[Dict]) -> Dict[str, float]:
-        """Calculate exploration performance for a group."""
-        if not exp_summaries:
-            return {"avg_coverage": 0.0, "avg_redundancy": 0.0, "avg_exploration_steps": 0.0}
-        
-        return {
-            "avg_coverage": sum(m.get('coverage', 0) for m in exp_summaries) / len(exp_summaries),
-            "avg_redundancy": sum(m.get('redundancy', 0) for m in exp_summaries) / len(exp_summaries),
-            "avg_exploration_steps": sum(m.get('n_exploration_steps', 0) for m in exp_summaries) / len(exp_summaries)
-        }
     
 
 if __name__ == "__main__":
