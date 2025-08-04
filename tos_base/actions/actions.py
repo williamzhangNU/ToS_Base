@@ -17,20 +17,18 @@ Available Actions:
 {actions}
 
 Answer with following format:
-Movement: [<movement_action1>, <movement_action2>, ...]; Final: <final_action>
+Actions: [<movement_action1>, <movement_action2>, ... , <final_action>]
 
-Format Notes:
+Rules:
 - Use movement actions in Movement, and final action in Final.
-- If no movement is needed, use [] in Movement.
-- Actions in Movement will be executed in order.
-- Separated these two lines by a semicolon.
+- Actions will be executed in order.
+- There must be exactly one final action at a time.
+- Term() must be alone with no movement actions except for Return().
+- You have a field of view for observation: {field_of_view} degrees.
 
 Examples:
 {examples}
 
-Rules:
-- Term() must be alone (no movement actions)
-- You have a field of view for observation: {field_of_view} degrees.
 """
 
 
@@ -40,9 +38,10 @@ class MoveAction(BaseAction):
     format_desc = "Move(object_name)"
     description = (
         "Move to the same position as the object. "
+        "Your orientation does NOT change when you move."
         "You can ONLY move to object within your field of view. "
         "You can ONLY move to objects by name, not directions or others. "
-        "Invalid examples: Move(left), Move(forward), Move(back)"
+        "Invalid examples: Move(left), Move(forward), Move(back). "
     )
     example = "Move(table)"
     format_pattern = r"^Move\(([A-Za-z0-9_-]+)\)$"
@@ -84,7 +83,7 @@ class RotateAction(BaseAction):
     """Rotate by specified degrees"""
     
     format_desc = "Rotate(degrees)"
-    description = "Rotate by specified degrees, only valid degrees are 0, 90, 180, 270."
+    description = "Rotate clockwise by specified degrees relative to your current orientation, only valid degrees are 0, 90, 180, 270."
     example = "Rotate(90)"
     format_pattern = r"^Rotate\(([0-9-]+)\)$"
     VALID_DEGREES = [0, 90, 180, 270]
@@ -253,38 +252,32 @@ class ActionSequence:
 
     @classmethod
     def parse(cls, action_str: str) -> Optional['ActionSequence']:
-        """Parse action string into ActionSequence"""
-        lines = [line.strip() for line in action_str.strip().split(';') if line.strip()]
-        
-        # Must have exactly 2 lines: Movement then Final
-        if len(lines) != 2 or not lines[0].startswith('Movement:') or not lines[1].startswith('Final:'):
+        m = re.search(r'\[(.*)\]', action_str.strip())
+        if not m:
             return None
-        motion_actions = []
-        
-        # Parse Movement line
-        bracket_content = lines[0][len('Movement:'):].strip()
-        if not (bracket_content.startswith('[') and bracket_content.endswith(']')):
+        # extract top-level actions like Move(table), Rotate(90), Term()
+        action_strs = re.findall(r'([A-Za-z]+\(.*?\))', m.group(1))
+        if not action_strs:
             return None
-            
-        actions_str = bracket_content[1:-1].strip()
-        if actions_str:
-            for item in [i.strip() for i in actions_str.split(',') if i.strip()]:
-                action = cls._parse_single_action(item)
-                if not action or action.is_final():
+
+        motions = []
+        final_action = None
+        for i, act_s in enumerate(action_strs):
+            act = cls._parse_single_action(act_s.strip())
+            if not act:
+                return None
+            if i == len(action_strs) - 1:
+                if not act.is_final():
                     return None
-                motion_actions.append(action)
-        
-        # Parse Final line
-        final_action_str = lines[1][len('Final:'):].strip()
-        final_action = cls._parse_single_action(final_action_str)
-        
-        if not final_action or not final_action.is_final():
-            return None
-            
-        if isinstance(final_action, TermAction) and motion_actions:
-            return None
-            
-        return cls(motion_actions, final_action)
+                final_action = act
+            else:
+                if act.is_final():
+                    return None
+                motions.append(act)
+        if isinstance(final_action, TermAction):
+            if any(not isinstance(a, ReturnAction) for a in motions):
+                return None
+        return cls(motions, final_action)
     
     @staticmethod
     def _parse_single_action(action_str: str) -> Optional[BaseAction]:
@@ -308,9 +301,11 @@ class ActionSequence:
             "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in final_actions)
         )
         examples = (
-            f"Valid Example:\nMovement: [Move(table), Rotate(90)]; Final: Observe()\n\n" +
-            f"Valid Example (no movement):\nMovement: []; Final: Observe()\n\n" +
-            f"Invalid Example (wrong order):\nFinal: Observe(); Movement: []\n\n"
+            f"Valid Example:\nActions: [Move(table), Rotate(90), Observe()]\n\n" +
+            f"Valid Example (no movement action):\nActions: [Observe()]\n\n" +
+            f"Invalid Example (no final action):\nActions: [Move(table)]\n\n"+
+            f"Invalid Example (more than exactly one final action):\nActions: [Observe(), Rotate(90), Observe()]\n\n"
+            
         )
         
         return ACTION_INSTRUCTION.format(
@@ -329,31 +324,54 @@ if __name__ == "__main__":
     agent = Agent()
     table = Object("table", np.array([1, 2]), np.array([0, 1]))
     chair = Object("chair", np.array([-2, 1]), np.array([0, 1]))
-    room = Room(agent, [table, chair], "test_room")
+    room = Room(agent, [table, chair], name="test_room")
 
     print(f"Room: {room}")
     
     print("=== Testing Action Parsing ===")
     
-    print("=== Testing Action Execution ===")
+    # Test individual action parsing
+    test_actions = [
+        "Move(table)",
+        "Rotate(90)",
+        "Rotate(-45)",
+        "Observe()",
+        "Query(table, chair)",
+        "Return()",
+        "Term()",
+        "InvalidAction()",
+        "Move()",
+        "Rotate(abc)",
+    ]
     
-    # Test Case 1: Simple final action only
-    test1 = "Movement: [];\nFinal: Observe()"
-    result1 = ActionSequence.parse(test1)
-    print(f"Test 1 - Simple final: {'✓ PASS' if result1 else '✗ FAIL'}")
-    print(f"  Input: {test1.replace(chr(10), ' | ')}")
-    print(f"  Result: {result1}")
+    print("Individual Action Parsing Tests:")
+    for action_str in test_actions:
+        action = ActionSequence._parse_single_action(action_str)
+        print(f"  '{action_str}' -> {action}")
     
-    # Test Case 2: Observe with orientation
-    print("\nTest 2 - Observe with orientation")
-    action = ObserveAction()
-    result = action.execute(room, with_orientation=True)
-    print(f"  Result: {result.message}")
+    print("\n=== Testing Action Sequence Parsing ===")
     
-    # Test Case 3: Return action
-    print("\nTest 3 - Return action")
-    return_action = ReturnAction()
-    result = return_action.execute(room)
-    print(f"  Result: {result.message}")
-    print(f"  Success: {result.success}")
+    # Test action sequence parsing
+    test_sequences = [
+        "Actions: [Move(table), Rotate(90), Observe()]",
+        "Actions: [Observe()]",
+        "Actions: [Move(table), Query(table, chair)]",
+        "Actions: [Return(), Term()]",
+        "Actions: [Term()]",
+        "Actions: [Move(table)]",  # Invalid: no final action
+        "Actions: [Observe(), Query(table, chair)]",  # Invalid: multiple final actions
+        "Actions: [Move(invalid_object), Observe(), Observe()]",
+        "Actions: [Rotate(90), Rotate(-45), Return()]",
+    ]
+    
+    print("Action Sequence Parsing Tests:")
+    for seq_str in test_sequences:
+        sequence = ActionSequence.parse(seq_str)
+        if sequence:
+            print(f"  '{seq_str}' -> SUCCESS")
+            print(f"    Motion: {sequence.motion_actions}")
+            print(f"    Final: {sequence.final_action}")
+        else:
+            print(f"  '{seq_str}' -> ERROR")
+    
     
