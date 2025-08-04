@@ -225,7 +225,6 @@ class ExplorationManager:
     
     def get_exp_summary(self) -> Dict[str, Any]:
         """Get exploration summary."""
-        assert self.finished, "Exploration is not finished"
         return {**self._update_exp_summary(), "n_exploration_steps": len(self.turn_logs)}
     
     @staticmethod
