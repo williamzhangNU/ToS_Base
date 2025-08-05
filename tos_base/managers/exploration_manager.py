@@ -181,7 +181,6 @@ class ExplorationManager:
         """
         
         assert action_sequence.final_action, "Action sequence requires a final action."
-        assert not (isinstance(action_sequence.final_action, TermAction) and action_sequence.motion_actions), "Term() action should not have motion actions."
 
         info = {'redundant': False}
         action_results = []

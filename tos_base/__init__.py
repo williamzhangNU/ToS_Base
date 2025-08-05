@@ -36,6 +36,7 @@ from .actions.actions import (
 # Managers
 from .managers.exploration_manager import ExplorationManager, ExplorationTurnLog
 from .managers.evaluation_manager import EvaluationManager, EvaluationTurnLog
+from .managers.cognitive_map_manager import CognitiveMapManager, CognitiveMapTurnLog
 
 # Evaluation tasks
 from .evaluation.tasks import BaseEvaluationTask
@@ -56,7 +57,7 @@ __all__ = [
     'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'TermAction',
     
     # Managers
-    'ExplorationManager', 'EvaluationManager',
+    'ExplorationManager', 'ExplorationTurnLog', 'EvaluationManager', 'EvaluationTurnLog', 'CognitiveMapManager', 'CognitiveMapTurnLog',
     
     # Evaluation
     'BaseEvaluationTask', 'EvalTaskType',
