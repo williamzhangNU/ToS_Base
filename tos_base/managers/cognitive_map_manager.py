@@ -121,10 +121,19 @@ class CognitiveMapManager:
         "n_evaluations": 0,
     }
     
-    def __init__(self):
+    def __init__(self, cogmap_type: str = "standard", grid_size: int = 5):
         """Initialize cognitive map manager with ground truth room."""
         self.turn_logs: List[CognitiveMapTurnLog] = []
         self.cogmap_summary = copy.deepcopy(self.DEFAULT_COGMAP_SUMMARY)
+
+        self.config = {
+            "cogmap_type": cogmap_type,
+            "grid_size": grid_size
+        }
+
+    def get_cognitive_map_instruction(self) -> str:
+        assert self.config['cogmap_type'] == "standard", "Only standard format is supported"
+        return COGMAP_INSTRUCTION.format(grid_size=self.config["grid_size"])
         
     def evaluate_cognitive_map(self, assistant_response: str, gt_room: Room) -> Optional[Dict[str, float]]:
         """
@@ -214,7 +223,7 @@ class CognitiveMapManager:
 
 
 
-
+    # =============================== Helper Functions =============================== 
 
     def _extract_json_and_create_room(self, model_response: str, room_name: str = "extracted_room") -> Optional[Room]:
         """Extract JSON from model response and create Room object."""
