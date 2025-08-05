@@ -103,7 +103,7 @@ class Room:
 
     def get_room_description(self, with_topdown: bool = False) -> str:
         """Get textual description of the room"""
-        desc = f"Imagine yourself as {self.agent.name} in a room.\n"
+        desc = f"Imagine yourself as {self.agent.name} (named as {self.agent.name}) in a room.\n"
         desc += "You are facing north.\n"
         desc += f"Objects in the room: {', '.join([obj.name for obj in self.objects])}\n"
         

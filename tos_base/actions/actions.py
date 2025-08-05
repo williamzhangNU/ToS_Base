@@ -20,10 +20,8 @@ Answer with following format:
 Actions: [<movement_action1>, <movement_action2>, ... , <final_action>]
 
 Rules:
-- Use movement actions in Movement, and final action in Final.
+- First use one or more movement actions, then end with exactly one final action.
 - Actions will be executed in order.
-- There must be exactly one final action at a time.
-- Term() must be alone with no movement actions except for Return().
 - You have a field of view for observation: {field_of_view} degrees.
 
 Examples:
@@ -210,7 +208,7 @@ class TermAction(BaseAction):
     """Terminate exploration"""
     
     format_desc = "Term()"
-    description = "Terminate the exploration phase"
+    description = "Terminate the exploration phase. Term() must be alone with no movement actions except for Return()."
     example = "Term()"
     format_pattern = r"^Term\(\)$"
     
@@ -302,9 +300,9 @@ class ActionSequence:
         )
         examples = (
             f"Valid Example:\nActions: [Move(table), Rotate(90), Observe()]\n\n" +
-            f"Valid Example (no movement action):\nActions: [Observe()]\n\n" +
+            f"Valid Example:\nActions: [Observe()]\n\n" +
             f"Invalid Example (no final action):\nActions: [Move(table)]\n\n"+
-            f"Invalid Example (more than exactly one final action):\nActions: [Observe(), Rotate(90), Observe()]\n\n"
+            f"Invalid Example (more than one final action):\nActions: [Observe(), Rotate(90), Observe()]\n\n"
             
         )
         
