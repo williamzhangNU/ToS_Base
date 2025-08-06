@@ -30,10 +30,10 @@ Maintain a global 2D cognitive map of the room.
 
 ### Update Notes
 - Record position as 2D coordinate and record orientation if given (north/south/east/west).
-- Set "sure" to "true" (confident), "partial" (some uncertainty), or "false" (low confidence). 
+- Confidence: Set "confidence" to "high" (very sure), "medium" (uncertain or estimated), or "low" (unknown).
 - Update current global map using local observations, note current global map may be incomplete or inaccurate.  
 - Assign coordinates based on their spatial relationships
-- Output full map: list **ALL** objects with `[x, y]` coordinates and orientation. For unobserved objects, use `[0, 0]` for position and `unknown` for orientation.
+- Output full map: list **ALL** objects with `[x, y]` coordinates and orientation. For unobserved objects, use `[0, 0]` for position, `unknown` for orientation, and `low` for confidence.
 
 ### Rules
 - An object can be anywhere at {grid_size}x{grid_size} grid.
@@ -43,7 +43,7 @@ Maintain a global 2D cognitive map of the room.
 You MUST include this exact JSON structure in your thinking:
 ```json
 {{
-  "object_name_1": {{"position": [x, y], "facing": "direction", "sure": "true/partial/false"}},
+  "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
 }}
 ```
 
@@ -51,16 +51,37 @@ You MUST include this exact JSON structure in your thinking:
 If a table is front right of you facing north:
 ```json
 {{
-  "table": {{"position": [3, 2], "facing": "north", "sure": "partial"}},
+  "table": {{"position": [3, 2], "facing": "north", "confidence": "medium"}},
+}}
+```
+"""
+
+COGMAP_INSTRUCTION_SHORTER = """\
+## Cognitive Map Creation
+
+**Objective**  
+Maintain a global 2D cognitive map of the room.
+
+- Grid: `{grid_size}×{grid_size}`, origin `[0,0]` is your initial position, facing +Y is your initial facing direction.
+- Example Input: chair is at front-left, estimate the object's `[x,y]` anywhere in that sector (e.g. front-left ⇒ x<0, y>0).
+- Record orientation if mentioned.
+- Assign a "confidence" of high (certain), medium (estimated), or low (unknown).
+- Merge into and update the global map; unobserved objects stay at `[0,0]`, orientation `unknown`, confidence `low`. 
+
+### JSON OUTPUT FORMAT:
+You MUST include this exact JSON structure in your thinking:
+```json
+{{
+  "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
 }}
 ```
 """
 
 COGMAP_REQUIRED_INSTRUCTION = """
-You must always output a json cognitive map in your thinking section, strictly follow the format below:
+You MUST always output a json cognitive map in your thinking section, strictly follow the format below:
 ```json
 {{
-  "object_name_1": {{"position": [x, y], "facing": "direction", "sure": "true/partial/false"}},
+  "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
 }}
 ```
 """
@@ -81,7 +102,7 @@ def get_cognitive_map_instruction(format_type: str = "standard", grid_size: int 
     if format_type != "standard":
         raise ValueError(f"Format type '{format_type}' not supported. Only 'standard' is currently implemented.")
     
-    return COGMAP_INSTRUCTION.format(grid_size=grid_size)
+    return COGMAP_INSTRUCTION_SHORTER.format(grid_size=grid_size)
 
 
 @dataclass
