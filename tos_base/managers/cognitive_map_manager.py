@@ -86,25 +86,6 @@ You MUST always output a json cognitive map in your thinking section, strictly f
 ```
 """
 
-
-
-def get_cognitive_map_instruction(format_type: str = "standard", grid_size: int = 5) -> str:
-    """
-    Generate cognitive map instruction with configurable format and grid size.
-    
-    Args:
-        format_type: JSON format type (currently only "standard" supported)
-        grid_size: Grid size for coordinate system
-    
-    Returns:
-        Formatted instruction string
-    """
-    if format_type != "standard":
-        raise ValueError(f"Format type '{format_type}' not supported. Only 'standard' is currently implemented.")
-    
-    return COGMAP_INSTRUCTION_SHORTER.format(grid_size=grid_size)
-
-
 @dataclass
 class CognitiveMapTurnLog:
     """Log data for a single cognitive map evaluation turn."""
@@ -154,7 +135,7 @@ class CognitiveMapManager:
 
     def get_cognitive_map_instruction(self) -> str:
         assert self.config['cogmap_type'] == "standard", "Only standard format is supported"
-        return COGMAP_INSTRUCTION.format(grid_size=self.config["grid_size"])
+        return COGMAP_INSTRUCTION_SHORTER.format(grid_size=self.config["grid_size"])
         
     def evaluate_cognitive_map(self, assistant_response: str, gt_room: Room) -> Optional[Dict[str, float]]:
         """
