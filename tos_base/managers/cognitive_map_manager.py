@@ -38,6 +38,7 @@ Maintain a global 2D cognitive map of the room.
 ### Rules
 - An object can be anywhere at {grid_size}x{grid_size} grid.
 - A at your right-front, it can be anywhere at your first quadrant, e.g., [1, 3], [4, 2], ...
+- Always first output cognitive map before reasoning about other tasks in your thinking; never reverse the order.
 
 ### REQUIRED JSON OUTPUT FORMAT:
 You MUST include this exact JSON structure in your thinking:
@@ -73,6 +74,9 @@ COGMAP_INSTRUCTION_SHORTER = """\
 - Update map with new observations
 - Default: unobserved objects at [0,0], orientation unknown, confidence low
 
+### Output Rules
+- Always first output cognitive map before reasoning about other tasks in your thinking; never reverse the order.
+
 ### JSON OUTPUT FORMAT:
 You MUST include this exact JSON structure in your thinking:
 ```json
@@ -84,7 +88,7 @@ You MUST include this exact JSON structure in your thinking:
 """
 
 COGMAP_REQUIRED_INSTRUCTION = """
-You MUST always output a json cognitive map in your thinking section, strictly follow the format below:
+In your thinking, you should first reason about cognitive map, then other tasks. You MUST include this exact JSON structure in your thinking:
 ```json
 {{
   "agent": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
