@@ -88,23 +88,25 @@ You MUST include this exact JSON structure in your thinking:
 """
 
 COGMAP_EXP_REQUIRED_INSTRUCTION = """
-In your thinking, you should first reason about cognitive map, then reason about exploration. You MUST include this exact JSON structure in your thinking:
+In your thinking, you MUST first include this exact JSON structure in your thinking:
 ```json
 {{
   "agent": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
   "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
 }}
 ```
+Then reason about exploration and take next action.
 """
 
 COGMAP_EVAL_REQUIRED_INSTRUCTION = """
-In your thinking, you should first reason about cognitive map, then reason about the question. You MUST include this exact JSON structure in your thinking:
+In your thinking, you MUST first include this exact JSON structure in your thinking:
 ```json
 {{
   "agent": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
   "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
 }}
 ```
+Then reason about the question and answer it.
 """
 
 @dataclass
