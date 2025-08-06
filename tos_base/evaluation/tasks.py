@@ -191,18 +191,16 @@ class DirectionEvaluationTask(BaseEvaluationTask):
     
     def generate_choices(self, correct_answer: str) -> Tuple[List[str], int]:
         """Generate 4 direction choices"""
-        h_dirs = ['west', 'east', 'same']
-        v_dirs = ['north', 'south', 'same']
+        h_dirs = [Dir.LEFT, Dir.RIGHT, Dir.SAME]
+        v_dirs = [Dir.FORWARD, Dir.BACKWARD, Dir.SAME]
         choices = [correct_answer]
         while len(choices) < 4:
-            random_h = self.np_random.choice(h_dirs)
-            random_v = self.np_random.choice(v_dirs)
-            choice = f"({random_h}, {random_v})"
+            wrong_dir = DirPair(self.np_random.choice(h_dirs), self.np_random.choice(v_dirs))
+            choice = f"{DirectionSystem.to_string(wrong_dir, perspective='allo')}"
             if choice not in choices:
                 choices.append(choice)
-        
         self.np_random.shuffle(choices)
-        correct_idx = choices.index(str(correct_answer))
+        correct_idx = choices.index(correct_answer)
         return choices, correct_idx
 
 
@@ -518,18 +516,17 @@ class PovEvaluationTask(BaseEvaluationTask):
     
     def generate_choices(self, correct_answer: str) -> Tuple[List[str], int]:
         """Generate 4 direction choices"""
-        h_dirs = ['west', 'east', 'same']
-        v_dirs = ['north', 'south', 'same']
+        h_dirs = [Dir.LEFT, Dir.RIGHT, Dir.SAME]
+        v_dirs = [Dir.FORWARD, Dir.BACKWARD, Dir.SAME]
         choices = [correct_answer]
         while len(choices) < 4:
-            random_h = self.np_random.choice(h_dirs)
-            random_v = self.np_random.choice(v_dirs)
-            choice = f"({random_h}, {random_v})"
+            wrong_dir = DirPair(self.np_random.choice(h_dirs), self.np_random.choice(v_dirs))
+            choice = f"{DirectionSystem.to_string(wrong_dir, perspective='allo')}"
             if choice not in choices:
                 choices.append(choice)
         
         self.np_random.shuffle(choices)
-        correct_idx = choices.index(str(correct_answer))
+        correct_idx = choices.index(correct_answer)
         return choices, correct_idx
 
 
@@ -729,11 +726,7 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
         # Calculate answer (direction + orientation)
         dir_pair, _ = self.room.get_direction(target_name, self.room.agent.name, perspective='ego')
         _, orientation_str = self.room.get_orientation(target_name, self.room.agent.name)
-        correct_answer = [
-            DirectionSystem.to_string(dir_pair.horiz, perspective='ego'), 
-            DirectionSystem.to_string(dir_pair.vert, perspective='ego'), 
-            orientation_str
-        ]
+        correct_answer = [DirectionSystem.to_string(dir_pair, perspective='ego'), orientation_str]
         
         # Generate choices
         choices, correct_idx = self.generate_choices(correct_answer)
@@ -752,19 +745,19 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
     
     def generate_choices(self, correct_answer: tuple) -> Tuple[List[str], int]:
         """Generate 4 localization choices"""
-        h_dirs = ['left', 'right', 'same']
-        v_dirs = ['front', 'back', 'same']
+        h_dirs = [Dir.LEFT, Dir.RIGHT, Dir.SAME]
+        v_dirs = [Dir.FORWARD, Dir.BACKWARD, Dir.SAME]
         orientations = ['forward', 'backward', 'right', 'left']
-        choices = [f'({correct_answer[0]}, {correct_answer[1]}), {correct_answer[2]}']
+        choices = [f'{correct_answer[0]}, {correct_answer[1]}']
         
         while len(choices) < 4:
-            wrong_h, wrong_v, wrong_o = self.np_random.choice(h_dirs), self.np_random.choice(v_dirs), self.np_random.choice(orientations)
-            choice = f"({wrong_h}, {wrong_v}), {wrong_o}"
+            wrong_dir = DirPair(self.np_random.choice(h_dirs), self.np_random.choice(v_dirs))
+            choice = f"{DirectionSystem.to_string(wrong_dir, perspective='ego')}, {orientations[self.np_random.choice(range(len(orientations)))]}"
             if choice not in choices:
                 choices.append(choice)
         
         self.np_random.shuffle(choices)
-        correct_idx = choices.index(f'({correct_answer[0]}, {correct_answer[1]}), {correct_answer[2]}')
+        correct_idx = choices.index(f'{correct_answer[0]}, {correct_answer[1]}')
         return choices, correct_idx
 
 
