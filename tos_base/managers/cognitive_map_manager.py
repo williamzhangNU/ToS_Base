@@ -60,13 +60,14 @@ COGMAP_INSTRUCTION_SHORTER = """\
 ## Cognitive Map Creation
 
 **Objective**  
-Maintain a global 2D cognitive map of the room.
+Maintain a **global** 2D cognitive map of the room.
 
 - Grid: `{grid_size}×{grid_size}`, origin `[0,0]` is your initial position, facing +Y is your initial facing direction.
 - Example Input: chair is at front-left, estimate the object's `[x,y]` anywhere in that sector (e.g. front-left ⇒ x<0, y>0).
-- Record orientation if mentioned.
+- Record facing direction if mentioned. Convert egocentric terms (e.g., forward, left) to global directions (e.g., north, west).
 - Assign a "confidence" of high (certain), medium (estimated), or low (unknown).
-- Merge into and update the global map; unobserved objects stay at `[0,0]`, orientation `unknown`, confidence `low`. 
+- Update global map using local observations
+- Unobserved objects stay at `[0,0]`, orientation `unknown`, confidence `low`. 
 
 ### JSON OUTPUT FORMAT:
 You MUST include this exact JSON structure in your thinking:
