@@ -157,7 +157,6 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         "Choose the correct answer:\n"
         "{choices_text}\n\n"
         "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
-        "Answer: "
     )
     
     def generate_question(self) -> str:
@@ -229,7 +228,6 @@ class RotEvaluationTask(BaseEvaluationTask):
         "Choose the correct sequence:\n"
         "{choices_text}\n\n"
         "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
-        "Answer: "
     )
     MOVEMENT_TEMPLATE = (
         "You moved to the same position as {move_obj_name}.\n"
@@ -329,7 +327,6 @@ class CircularRotEvaluationTask(BaseEvaluationTask):
         "Choose the correct sequence:\n"
         "{choices_text}\n\n"
         "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
-        "Answer: "
     )
     
     def generate_question(self) -> str:
@@ -412,7 +409,6 @@ class RotDualEvaluationTask(BaseEvaluationTask):
         "Choose the correct answer:\n"
         "{choices_text}\n\n"
         "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
-        "Answer: "
     )
     
     def generate_question(self) -> str:
@@ -479,7 +475,6 @@ class PovEvaluationTask(BaseEvaluationTask):
         "Choose the correct answer:\n"
         "{choices_text}\n\n"
         "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
-        "Answer: "
     )
     
     def generate_question(self) -> str:
@@ -550,7 +545,6 @@ class E2AEvaluationTask(BaseEvaluationTask):
         "Choose the correct answer:\n"
         "{choices_text}\n\n"
         "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
-        "Answer: "
     )
     
     def generate_question(self) -> str:
@@ -696,7 +690,6 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
         "Choose the correct answer:\n"
         "{choices_text}\n\n"
         "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
-        "Answer: "
     )
     
     def generate_question(self) -> str:
@@ -778,7 +771,6 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
         "Choose the correct answer:\n"
         "{choices_text}\n\n"
         "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
-        "Answer: "
     )
     
     MOVEMENT_TEMPLATE = (
@@ -790,7 +782,6 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
         "Choose the correct answer:\n"
         "{choices_text}\n\n"
         "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
-        "Answer: "
     )
     
     def generate_question(self) -> str:
