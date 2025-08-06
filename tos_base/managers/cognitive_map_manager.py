@@ -77,6 +77,7 @@ COGMAP_INSTRUCTION_SHORTER = """\
 You MUST include this exact JSON structure in your thinking:
 ```json
 {{
+  "agent": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
   "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
 }}
 ```
@@ -86,6 +87,7 @@ COGMAP_REQUIRED_INSTRUCTION = """
 You MUST always output a json cognitive map in your thinking section, strictly follow the format below:
 ```json
 {{
+  "agent": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
   "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
 }}
 ```
