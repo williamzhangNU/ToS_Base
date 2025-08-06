@@ -59,15 +59,19 @@ If a table is front right of you facing north:
 COGMAP_INSTRUCTION_SHORTER = """\
 ## Cognitive Map Creation
 
-**Objective**  
-Maintain a **global** 2D cognitive map of the room.
+**Task**: Maintain a global 2D cognitive map ({grid_size}×{grid_size}) of the room.
 
-- Grid: `{grid_size}×{grid_size}`, origin `[0,0]` is your initial position, facing +Y is your initial facing direction.
-- Example Input: chair is at front-left, estimate the object's `[x,y]` anywhere in that sector (e.g. front-left ⇒ x<0, y>0).
-- Record facing direction if mentioned. Convert egocentric terms (e.g., forward, left) to global directions (e.g., north, west).
-- Assign a "confidence" of high (certain), medium (estimated), or low (unknown).
-- Update global map using local observations
-- Unobserved objects stay at `[0,0]`, orientation `unknown`, confidence `low`. 
+### Setup
+- Origin [0,0] = initial position
+- +Y axis = initial facing direction
+- Track all objects including agent/yourself (position & orientation)
+
+### Mapping Rules
+- Convert relative positions to coordinates (e.g., front-left → x<0, y>0)
+- Convert egocentric directions to global (e.g., forward → north)
+- Assign confidence: high (certain), medium (estimated), low (unknown)
+- Update map with new observations
+- Default: unobserved objects at [0,0], orientation unknown, confidence low
 
 ### JSON OUTPUT FORMAT:
 You MUST include this exact JSON structure in your thinking:
