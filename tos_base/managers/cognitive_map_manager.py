@@ -73,12 +73,13 @@ COGMAP_INSTRUCTION_SHORTER = """\
 - Assign confidence: high (certain), medium (estimated), low (unknown)
 - Update map with new observations
 - Default: unobserved objects at [0,0], orientation unknown, confidence low
+- You won’t always be at the origin: every move or turn updates your position or orientation.
 
 ### Output Rules
 - Always first output cognitive map before reasoning about other tasks in your thinking; never reverse the order.
 
 ### JSON OUTPUT FORMAT:
-You MUST include this exact JSON structure in your thinking:
+MUST follow this format to output cognitive map:
 ```json
 {{
   "agent": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
@@ -88,25 +89,31 @@ You MUST include this exact JSON structure in your thinking:
 """
 
 COGMAP_EXP_REQUIRED_INSTRUCTION = """
-In your thinking, you MUST first include this exact JSON structure in your thinking:
+In your thinking (in <think> ... </think>), you MUST follow the following steps:
+Step 1: Briefly reason about cognitive map
+Step 2: Output it strictly following:
 ```json
 {{
   "agent": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
   "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
 }}
 ```
-Then reason about exploration and take next action.
+Step 3: Reason about exploration.
+Then provide only the answer in <answer> ... </answer>
 """
 
 COGMAP_EVAL_REQUIRED_INSTRUCTION = """
-In your thinking, you MUST first include this exact JSON structure in your thinking:
+In your thinking (in <think> ... </think>), you MUST follow the following steps:
+Step 1: Briefly reason about cognitive map
+Step 2: Output it strictly following:
 ```json
 {{
   "agent": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
   "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
 }}
 ```
-Then reason about the question and answer it.
+Step 3: Reason about the question.
+Then provide only the answer in <answer> ... </answer>
 """
 
 @dataclass

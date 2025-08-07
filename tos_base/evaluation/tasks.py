@@ -683,9 +683,10 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
     """
 
     QUESTION_TEMPLATE = (
-        "You observe the room from another view.\n"
+        "You now see the room from a new point, both your position and facing direction may have changed.\n"
         "{observations}\n"
         "Based on your observations, what is the direction and orientation of the {target_name} from your current perspective?\n\n"
+        "Hint: first reason about your current position and facing direction."
         "Answer format: (<horiz>, <vert>), <orientation>\n"
         "Choose the correct answer:\n"
         "{choices_text}\n\n"
