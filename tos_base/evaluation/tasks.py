@@ -634,7 +634,7 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
     """
 
     QUESTION_TEMPLATE = (
-        "You now see the room from a new point, both your position and facing direction may have changed.\n"
+        "You observe the room from another view with new location and orientation.\n"
         "{observations}\n"
         "Based on your observations, what is the direction and orientation of the {target_name} from your current perspective?\n\n"
         "Hint: first reason about your current position and facing direction."
@@ -714,7 +714,7 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
 
     ROTATION_TEMPLATE = (
         "One object in the room has rotated.\n"
-        "You observe the room from another view.\n"
+        "You observe the room from another view with new location and orientation.\n"
         "{observations}\n"
         "Which object rotated and by how many degrees clockwise?\n\n"
         "Answer format: <object_name>, <degrees>\n"
