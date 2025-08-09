@@ -11,7 +11,7 @@ This module provides the core components for spatial reasoning tasks including:
 # Core data structures
 from .core.object import Object, Agent
 from .core.room import Room
-from .core.relationship import DirPair, DirectionSystem, Dir
+from .core.relationship import DirPair, DirectionRel, Dir, TotalRelationship
 from .core.graph import DirectionalGraph
 from .core.constant import (
     AGENT_NAME, 
@@ -48,7 +48,7 @@ from .utils.eval_utilities import *
 
 __all__ = [
     # Core
-    'Object', 'Agent', 'Room', 'DirPair', 'DirectionSystem', 'Dir', 'DirectionalGraph',
+    'Object', 'Agent', 'Room', 'DirPair', 'DirectionRel', 'TotalRelationship', 'Dir', 'DirectionalGraph',
     'AGENT_NAME', 'CANDIDATE_OBJECTS', 'ADDITIONAL_CANDIDATE_OBJECTS',
     'easy_room_config', 'easy_room_config_2', 'easy_room_config_3',
     

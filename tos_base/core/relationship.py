@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from typing import Union
+from typing import Union, Optional
 import numpy as np
 from dataclasses import dataclass
 
@@ -56,14 +56,10 @@ class DirPair:
         raise IndexError(f"Index {i} out of range")
 
 
-class DirectionSystem:
-    """
-    Manages spatial relationships between objects in the environment.
-    
-    Provides conversion between internal direction representations and
-    human-readable strings in both egocentric and allocentric perspectives.
-    """
-    
+@dataclass(frozen=True)
+class DirectionRel:
+    pair: DirPair
+
     # Perspective mappings
     EGO_LABELS = {
         Dir.SAME: 'same',
@@ -73,7 +69,6 @@ class DirectionSystem:
         Dir.LEFT: 'left',
         Dir.UNKNOWN: 'unknown',
     }
-    
     ALLO_LABELS = {
         Dir.SAME: 'same',
         Dir.FORWARD: 'north', 
@@ -82,143 +77,126 @@ class DirectionSystem:
         Dir.LEFT: 'west',
         Dir.UNKNOWN: 'unknown',
     }
-    
-    # Orientation transformations for 90, 180, and 270 degrees rotation
     TRANSFORMS = {
-        # Identity (facing north)
         (0, 1): {dir_: dir_ for dir_ in Dir},
-        
-        # Facing east (90° counterclockwise)
-        (1, 0): {
-            Dir.FORWARD: Dir.LEFT,
-            Dir.BACKWARD: Dir.RIGHT,
-            Dir.RIGHT: Dir.FORWARD,
-            Dir.LEFT: Dir.BACKWARD,
-            Dir.SAME: Dir.SAME,
-            Dir.UNKNOWN: Dir.UNKNOWN,
-        },
-        
-        # Facing south (180° rotation)
-        (0, -1): {
-            Dir.FORWARD: Dir.BACKWARD,
-            Dir.BACKWARD: Dir.FORWARD,
-            Dir.RIGHT: Dir.LEFT,
-            Dir.LEFT: Dir.RIGHT,
-            Dir.SAME: Dir.SAME,
-            Dir.UNKNOWN: Dir.UNKNOWN,
-        },
-        
-        # Facing west (270° counterclockwise)
-        (-1, 0): {
-            Dir.FORWARD: Dir.RIGHT,
-            Dir.BACKWARD: Dir.LEFT,
-            Dir.RIGHT: Dir.BACKWARD,
-            Dir.LEFT: Dir.FORWARD,
-            Dir.SAME: Dir.SAME,
-            Dir.UNKNOWN: Dir.UNKNOWN,
-        },
+        (1, 0): {Dir.FORWARD: Dir.LEFT, Dir.BACKWARD: Dir.RIGHT, Dir.RIGHT: Dir.FORWARD, Dir.LEFT: Dir.BACKWARD, Dir.SAME: Dir.SAME, Dir.UNKNOWN: Dir.UNKNOWN},
+        (0, -1): {Dir.FORWARD: Dir.BACKWARD, Dir.BACKWARD: Dir.FORWARD, Dir.RIGHT: Dir.LEFT, Dir.LEFT: Dir.RIGHT, Dir.SAME: Dir.SAME, Dir.UNKNOWN: Dir.UNKNOWN},
+        (-1, 0): {Dir.FORWARD: Dir.RIGHT, Dir.BACKWARD: Dir.LEFT, Dir.RIGHT: Dir.BACKWARD, Dir.LEFT: Dir.FORWARD, Dir.SAME: Dir.SAME, Dir.UNKNOWN: Dir.UNKNOWN},
     }
-    
+
+    def to_string(self, perspective: str = 'ego') -> str:
+        return self.pair_to_string(self.pair, perspective)
+
     @classmethod
-    def to_string(cls, direction: Union[Dir, DirPair], perspective: str = 'ego') -> str:
-        """
-        Convert direction to a human-readable string based on perspective.
-        
-        Args:
-            direction: A single direction or a direction pair
-            perspective: 'ego' (egocentric) or 'allo' (allocentric)
-            
-        Returns:
-            String representation of the direction
-        """
+    def pair_to_string(cls, direction: Union[Dir, DirPair], perspective: str = 'ego') -> str:
         assert perspective in ('ego', 'allo'), f"Invalid perspective: {perspective}"
-            
         labels = cls.EGO_LABELS if perspective == 'ego' else cls.ALLO_LABELS
-        
         if isinstance(direction, Dir):
             return labels[direction]
-        elif isinstance(direction, DirPair):
-            h_str = labels[direction.horiz]
-            v_str = labels[direction.vert]
-            
-            return f"({h_str}, {v_str})"
-        else:
-            raise TypeError(f"Expected Dir or DirPair, got {type(direction)}")
-    
+        h_str = labels[direction.horiz]
+        v_str = labels[direction.vert]
+        if direction.horiz == Dir.UNKNOWN or direction.vert == Dir.UNKNOWN:
+            return 'unknown'
+        if direction.horiz == Dir.SAME and direction.vert == Dir.SAME:
+            return 'same'
+        if direction.horiz == Dir.SAME:
+            return v_str
+        if direction.vert == Dir.SAME:
+            return h_str
+        return f"{h_str}-{v_str}"
+
     @classmethod
     def transform(cls, dir_pair: DirPair, orientation: tuple) -> DirPair:
-        """
-        Transform direction based on an orientation.
-        
-        Args:
-            dir_pair: Direction pair to transform
-            orientation: Tuple of (x, y) representing orientation vector
-            
-        Returns:
-            Transformed direction pair
-        """
         ori_tuple = tuple(map(int, orientation))
         if ori_tuple not in cls.TRANSFORMS:
             raise ValueError(f"Invalid orientation: {ori_tuple}")
-            
-        transform = cls.TRANSFORMS[ori_tuple]
-        
-        # Transform and handle axis swapping if needed
-        horiz_transformed = transform[dir_pair.horiz]
-        vert_transformed = transform[dir_pair.vert]
-        
-        # Handle axis swapping
-        if (horiz_transformed in (Dir.FORWARD, Dir.BACKWARD) or 
-            vert_transformed in (Dir.RIGHT, Dir.LEFT)):
-            return DirPair(vert_transformed, horiz_transformed)
-            
-        return DirPair(horiz_transformed, vert_transformed)
-    
+        t = cls.TRANSFORMS[ori_tuple]
+        h = t[dir_pair.horiz]
+        v = t[dir_pair.vert]
+        if (h in (Dir.FORWARD, Dir.BACKWARD)) or (v in (Dir.RIGHT, Dir.LEFT)):
+            return DirPair(v, h)
+        return DirPair(h, v)
+
     @classmethod
     def get_direction(cls, pos1: tuple, pos2: tuple, orientation: tuple = None) -> DirPair:
-        """
-        Direction of pos1 relative to pos2
-        
-        Args:
-            pos1: Reference position (x, y)
-            pos2: Target position (x, y)
-            orientation: Optional orientation to transform the result
-            
-        Returns:
-            Direction pair representing the relationship
-        """
-        # Convert inputs to numpy arrays
         p1 = np.array(pos1)
         p2 = np.array(pos2)
-        
-        # Calculate difference vector
         diff = p1 - p2
-        
-        # Create direction pair
         h_dir = Dir.from_horizontal_delta(diff[0])
         v_dir = Dir.from_delta(diff[1])
-        dir_pair = DirPair(h_dir, v_dir)
-        
-        # Apply orientation transform if provided
-        if orientation is not None:
-            return cls.transform(dir_pair, orientation)
-            
-        return dir_pair
-    
+        pair = DirPair(h_dir, v_dir)
+        return cls.transform(pair, orientation) if orientation is not None else pair
+
     @classmethod
     def get_relative_orientation(cls, obj_ori: tuple, anchor_ori: tuple) -> DirPair:
-        """
-        Get object's orientation relative to an anchor orientation.
-        
-        Args:
-            obj_ori: Object's orientation vector
-            anchor_ori: Reference orientation vector
-            
-        Returns:
-            Direction pair describing relative orientation
-        """
-        # Calculate direction as if object was at origin
         base_dir = cls.get_direction(obj_ori, (0, 0))
-        
-        # Transform based on anchor orientation
         return cls.transform(base_dir, anchor_ori)
+
+
+@dataclass(frozen=True)
+class DegreeRel:
+    value: float
+    def to_string(self, perspective: str = 'ego') -> str:
+        if perspective == 'ego':
+            direction = "right" if self.value > 0 else "left"
+            return f"{abs(self.value):.1f} degrees to the {direction}"
+        return f"{self.value:.1f} degrees"
+    
+    @classmethod
+    def get_degree(cls, pos1: tuple, pos2: tuple, ref_ori: tuple = (0, 1)) -> 'DegreeRel':
+        """Signed angle deg from ref_ori to (pos1-pos2), clockwise/right positive."""
+        p1 = np.array(pos1, dtype=float)
+        p2 = np.array(pos2, dtype=float)
+        v = p1 - p2
+        if np.linalg.norm(v) < 1e-12:
+            return DegreeRel(0.0)
+        v = v / np.linalg.norm(v)
+        r = np.array(ref_ori, dtype=float)
+        r = r / (np.linalg.norm(r) or 1.0)
+        dot = float(np.clip(np.dot(r, v), -1.0, 1.0))
+        cross_z = float(r[0] * v[1] - r[1] * v[0])
+        ang_ccw = np.degrees(np.arctan2(cross_z, dot))
+        return DegreeRel(float(-ang_ccw))
+
+
+@dataclass(frozen=True)
+class DistanceRel:
+    value: float
+    def to_string(self, perspective: str = 'ego') -> str:
+        if perspective == 'ego':
+            return f"{self.value:.2f} away"
+        return f"{self.value:.2f} away"
+    
+    @classmethod
+    def get_distance(cls, pos1: tuple, pos2: tuple) -> 'DistanceRel':
+        p1 = np.array(pos1, dtype=float)
+        p2 = np.array(pos2, dtype=float)
+        return DistanceRel(float(np.linalg.norm(p1 - p2)))
+
+
+@dataclass(frozen=True)
+class TotalRelationship:
+    dir: DirectionRel
+    deg: Optional[DegreeRel] = None
+    dist: Optional[DistanceRel] = None
+
+    def to_string(self, perspective: str = 'ego') -> str:
+        if self.deg is None or self.dist is None:
+            return self.dir.to_string(perspective)
+        return f"({self.dir.to_string(perspective)}, {self.deg.to_string(perspective)}, {self.dist.to_string(perspective)})"
+
+    @classmethod
+    def relationship(
+        cls,
+        pos1: tuple,
+        pos2: tuple,
+        perspective: str = 'ego',
+        ref_ori: tuple = (0, 1),
+        full: bool = False,
+    ) -> 'TotalRelationship':
+        pair = DirectionRel.get_direction(pos1, pos2)
+        if not full:
+            return cls(dir=DirectionRel(pair))
+        deg_v = DegreeRel.get_degree(pos1, pos2, ref_ori)
+        dist_v = DistanceRel.get_distance(pos1, pos2)
+        return cls(dir=DirectionRel(pair), deg=deg_v, dist=dist_v)

@@ -4,7 +4,7 @@ from typing import List, Union, Dict, Any, Tuple
 import copy
 
 from .object import Object, Agent
-from .relationship import DirPair, DirectionSystem, Dir
+from .relationship import DirPair, DirectionRel, Dir, TotalRelationship
 from .graph import DirectionalGraph
     
 
@@ -64,8 +64,8 @@ class Room:
             assert anchor.has_orientation, "Anchor must have orientation"
             anchor_ori = anchor.ori
         
-        dir_pair = DirectionSystem.get_direction(obj1.pos, obj2.pos, anchor_ori)
-        dir_str = DirectionSystem.to_string(dir_pair, perspective=perspective)
+        dir_pair = DirectionRel.get_direction(obj1.pos, obj2.pos, anchor_ori)
+        dir_str = DirectionRel.pair_to_string(dir_pair, perspective=perspective)
         
         return dir_pair, dir_str
 
@@ -75,7 +75,7 @@ class Room:
         anchor = self.get_object_by_name(anchor_name)
         assert anchor.has_orientation, "Anchor must have orientation"
 
-        dir_pair = DirectionSystem.get_relative_orientation(tuple(obj.ori), tuple(anchor.ori))
+        dir_pair = DirectionRel.get_relative_orientation(tuple(obj.ori), tuple(anchor.ori))
 
         mapping = {DirPair(Dir.SAME, Dir.FORWARD): 'forward',
                    DirPair(Dir.SAME, Dir.BACKWARD): 'backward',
@@ -86,6 +86,14 @@ class Room:
         ori_str = mapping[dir_pair]
             
         return dir_pair, ori_str
+
+    def get_relationship(self, obj1_name: str, obj2_name: str, perspective: str = 'ego', full: bool = True) -> TotalRelationship:
+        """Return Relationship of obj1 relative to obj2."""
+        obj1 = self.get_object_by_name(obj1_name)
+        obj2 = self.get_object_by_name(obj2_name)
+        return TotalRelationship.relationship(
+            tuple(obj1.pos), tuple(obj2.pos), perspective=perspective, ref_ori=tuple(obj2.ori), full=full
+        )
 
     def _get_topdown_info(self) -> str:
         """Get topdown view showing object coordinates and orientations"""

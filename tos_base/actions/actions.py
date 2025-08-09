@@ -157,6 +157,8 @@ class ObserveAction(BaseAction):
 
     directional_template = "{obj_name} is {dir_str} of you"
     orientation_template = "{obj_name} faces {orientation}"
+    # MODE: 'dir' for direction-only, 'full' for (dir, deg, dist)
+    MODE: str = 'dir'
     
     def __init__(self):
         super().__init__()
@@ -171,6 +173,7 @@ class ObserveAction(BaseAction):
         """Execute observe action on room state. NOTE Also neglect same position objects."""
         neglect_objects = kwargs.get('neglect_objects', []) + [obj.name for obj in room.objects if np.allclose(obj.pos, room.agent.pos)]
         with_orientation = kwargs.get('with_orientation', True)
+        full = (self.MODE == 'full')
         visible_objects = [obj for obj in room.objects if self._is_visible(room.agent, obj) and obj.name not in neglect_objects]
         
         if not visible_objects:
@@ -181,9 +184,12 @@ class ObserveAction(BaseAction):
 
         relationships = []
         for obj in visible_objects:
-            _, dir_str = room.get_direction(obj.name, room.agent.name, perspective='ego')
-            # answer_str = f"{obj.name} is {dir_str} of you"
-            answer_str = f"{obj.name} is {dir_str}"
+            if full:
+                rel = room.get_relationship(obj.name, room.agent.name, perspective='ego', full=True)
+                answer_str = f"{obj.name} is {rel.to_string()}"
+            else:
+                _, dir_str = room.get_direction(obj.name, room.agent.name, perspective='ego')
+                answer_str = f"{obj.name} is {dir_str}"
             if with_orientation and obj.has_orientation:
                 _, orientation = room.get_orientation(obj.name, room.agent.name)
                 answer_str += f" and faces {orientation}"
@@ -202,6 +208,37 @@ class ObserveAction(BaseAction):
     
     def __repr__(self):
         return "Observe()"
+
+
+class ObserveRelAction(ObserveAction):
+    """Observe full relationships (dir, degree, distance) of all visible objects"""
+    format_desc = "ObserveRel()"
+    description = "Observe full relationships (direction, signed degree, distance) for all visible objects."
+    example = "ObserveRel()"
+    format_pattern = r"^ObserveRel\(\)$"
+    MODE = 'full'
+
+    @staticmethod
+    def is_final() -> bool:
+        return True
+
+    def __repr__(self):
+        return "ObserveRel()"
+
+class ObserveDirAction(ObserveAction):
+    """Observe direction-only relationships of all visible objects"""
+    format_desc = "ObserveDir()"
+    description = "Observe direction-only relationships for all visible objects."
+    example = "ObserveDir()"
+    format_pattern = r"^ObserveDir\(\)$"
+    MODE = 'dir'
+
+    @staticmethod
+    def is_final() -> bool:
+        return True
+
+    def __repr__(self):
+        return "ObserveDir()"
 
 
 class TermAction(BaseAction):
@@ -234,7 +271,7 @@ class TermAction(BaseAction):
         return "Term()"
 
 # Action registry for easy lookup
-ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveAction, TermAction]
+ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveAction, ObserveRelAction, ObserveDirAction, TermAction]
 
 
 class ActionSequence:

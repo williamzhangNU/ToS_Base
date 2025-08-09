@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from .object import Object
 from .relationship import (
     DirPair,
-    DirectionSystem,
     Dir,
+    DirectionRel,
 )
 
 @dataclass
@@ -138,7 +138,7 @@ class DirectionalGraph:
             for j, obj2 in enumerate(objects):
                 if i == j:
                     continue
-                dir_pair = DirectionSystem.get_direction(obj1.pos, obj2.pos)
+                dir_pair = DirectionRel.get_direction(obj1.pos, obj2.pos)
                 matrices.vertical[i, j] = self._dir_to_val(dir_pair.vert, 'vertical')
                 matrices.horizontal[i, j] = self._dir_to_val(dir_pair.horiz, 'horizontal')
 
@@ -188,7 +188,7 @@ class DirectionalGraph:
             for j in range(len(coordinates)):
                 if i == j:
                     continue
-                dir_pair = DirectionSystem.get_direction(coordinates[i], coordinates[j])
+                dir_pair = DirectionRel.get_direction(coordinates[i], coordinates[j])
                 _v_matrix[i, j] = DirectionalGraph._dir_to_val(dir_pair.vert, 'vertical')
                 _h_matrix[i, j] = DirectionalGraph._dir_to_val(dir_pair.horiz, 'horizontal')
         

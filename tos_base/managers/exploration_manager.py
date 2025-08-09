@@ -5,7 +5,7 @@ from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass
 
 from ..core.object import Object, Agent
-from ..core.relationship import DirPair, DirectionSystem, Dir
+from ..core.relationship import DirPair, DirectionRel, Dir
 from ..core.graph import DirectionalGraph
 from ..actions import *
 from ..core.room import Room

@@ -18,7 +18,7 @@ from ..utils.eval_utilities import (
 from ..core.constant import CANDIDATE_OBJECTS
 from ..core.graph import DirectionalGraph
 from ..core.object import Object, Agent
-from ..core.relationship import DirPair, Dir, DirectionSystem
+from ..core.relationship import DirPair, Dir, DirectionRel
 from ..actions import MoveAction, RotateAction, ObserveAction, BaseAction
 
 @dataclass
@@ -212,7 +212,7 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         choices = [correct_answer]
         while len(choices) < 4:
             wrong_dir = DirPair(self.np_random.choice(h_dirs), self.np_random.choice(v_dirs))
-            choice = f"{DirectionSystem.to_string(wrong_dir, perspective='allo' if self.MODE == 'dir' else 'ego')}"
+            choice = f"{DirectionRel.pair_to_string(wrong_dir, perspective='allo' if self.MODE == 'dir' else 'ego')}"
             if choice not in choices:
                 choices.append(choice)
         self.np_random.shuffle(choices)
@@ -672,7 +672,7 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
         # Calculate answer (direction + orientation)
         dir_pair, _ = self.room.get_direction(target_name, self.room.agent.name, perspective='ego')
         _, orientation_str = self.room.get_orientation(target_name, self.room.agent.name)
-        correct_answer = [DirectionSystem.to_string(dir_pair, perspective='ego'), orientation_str]
+        correct_answer = [DirectionRel.pair_to_string(dir_pair, perspective='ego'), orientation_str]
         
         # Generate choices
         choices, correct_idx = self.generate_choices(correct_answer)
@@ -698,7 +698,7 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
         
         while len(choices) < 4:
             wrong_dir = DirPair(self.np_random.choice(h_dirs), self.np_random.choice(v_dirs))
-            choice = f"{DirectionSystem.to_string(wrong_dir, perspective='ego')}, {orientations[self.np_random.choice(range(len(orientations)))]}"
+            choice = f"{DirectionRel.pair_to_string(wrong_dir, perspective='ego')}, {orientations[self.np_random.choice(range(len(orientations)))]}"
             if choice not in choices:
                 choices.append(choice)
         
