@@ -1,296 +1,230 @@
 import numpy as np
-import json
-from typing import List, Union, Dict, Any, Tuple
+from typing import List, Dict, Any
 import copy
 
-from .object import Object, Agent
-from .relationship import DirPair, DirectionRel, Dir, TotalRelationship
-from .graph import DirectionalGraph
-    
+from .object import Object, Gate
 
 
-class Room:
-    """
-    Simplified Room class focused on state representation.
-    Handles basic object management and spatial relationships.
-    """
+class BaseRoom:
+    """Minimal room without mask/gates input. Holds only name and objects."""
 
-    def __init__(self, agent: Agent, objects: List[Object], initial_pos: Object = None, name: str = 'room'):
+    def __init__(self, objects: List[Object], name: str = 'room'):
         self.name = name
-        self._init_objects(objects, agent, initial_pos)
+        self.mask = None
+        self._init_objects(objects, [])
 
-    def _init_objects(self, objects: List[Object], agent: Agent, initial_pos: Object = None):
-        """Initialize objects, agent, initial_pos and validate unique names"""
+    def _init_objects(self, objects: List[Object], gates: List[Object] | None = None):
         self.objects = copy.deepcopy(objects)
-        self.agent = copy.deepcopy(agent)
-        self.initial_pos = initial_pos or Object("initial_pos", self.agent.pos.copy(), self.agent.ori.copy())
-        self.all_objects = [self.agent] + self.objects + [self.initial_pos]
-        self.valid_objects = [self.agent] + self.objects
-        self.gt_graph = DirectionalGraph(self.all_objects, is_explore=False)
-        
-        # Validate unique names
+        self.gates = copy.deepcopy(gates or [])
+        self.object_map = None
+        self.all_objects = self.objects + self.gates
         names = [obj.name for obj in self.all_objects]
         assert len(names) == len(set(names)), "All object names must be unique"
 
     def add_object(self, obj: Object):
-        """Add an object to the room"""
-        self._init_objects(self.objects + [obj], self.agent, self.initial_pos)
-    
+        self._init_objects(self.objects + [obj], self.gates)
+
     def remove_object(self, obj_name: str):
-        """Remove an object from the room"""
-        self._init_objects([o for o in self.objects if o.name != obj_name], self.agent, self.initial_pos)
+        self._init_objects([o for o in self.objects if o.name != obj_name], self.gates)
 
     def get_object_by_name(self, name: str) -> Object:
-        """Get object by name"""
         for obj in self.all_objects:
             if obj.name == name:
                 return obj
         raise ValueError(f"Object '{name}' not found in room")
 
     def has_object(self, name: str) -> bool:
-        """Check if object exists in room"""
         return any(obj.name == name for obj in self.all_objects)
 
-    def get_direction(self, obj1_name: str, obj2_name: str, 
-                     anchor_name: str = None, perspective: str = None) -> Tuple[DirPair, str]:
-        """Get spatial relationship between two objects"""
-        obj1 = self.get_object_by_name(obj1_name)
-        obj2 = self.get_object_by_name(obj2_name)
-        perspective = perspective or 'ego'
-        
-        anchor_ori = None
-        if anchor_name:
-            anchor = self.get_object_by_name(anchor_name)
-            assert anchor.has_orientation, "Anchor must have orientation"
-            anchor_ori = anchor.ori
-        
-        dir_pair = DirectionRel.get_direction(obj1.pos, obj2.pos, anchor_ori)
-        dir_str = DirectionRel.pair_to_string(dir_pair, perspective=perspective)
-        
-        return dir_pair, dir_str
-
-    def get_orientation(self, obj_name: str, anchor_name: str) -> Tuple[DirPair, str]:
-        """Get orientation of an object relative to an anchor."""
-        obj = self.get_object_by_name(obj_name)
-        anchor = self.get_object_by_name(anchor_name)
-        assert anchor.has_orientation, "Anchor must have orientation"
-
-        dir_pair = DirectionRel.get_relative_orientation(tuple(obj.ori), tuple(anchor.ori))
-
-        mapping = {DirPair(Dir.SAME, Dir.FORWARD): 'forward',
-                   DirPair(Dir.SAME, Dir.BACKWARD): 'backward',
-                   DirPair(Dir.RIGHT, Dir.SAME): 'right',
-                   DirPair(Dir.LEFT, Dir.SAME): 'left'
-        }
-
-        ori_str = mapping[dir_pair]
-            
-        return dir_pair, ori_str
-
-    def get_relationship(self, obj1_name: str, obj2_name: str, perspective: str = 'ego', full: bool = True) -> TotalRelationship:
-        """Return Relationship of obj1 relative to obj2."""
-        obj1 = self.get_object_by_name(obj1_name)
-        obj2 = self.get_object_by_name(obj2_name)
-        return TotalRelationship.relationship(
-            tuple(obj1.pos), tuple(obj2.pos), perspective=perspective, ref_ori=tuple(obj2.ori), full=full
-        )
-
-    def _get_topdown_info(self) -> str:
-        """Get topdown view showing object coordinates and orientations"""
-        ori_mapping = {
-            (0, 1): "north",
-            (0, -1): "south",
-            (1, 0): "east",
-            (-1, 0): "west",
-        }
-        info = "## Topdown Information\n"
-        info += f"Yourself at ({self.agent.pos[0]}, {self.agent.pos[1]}) facing {ori_mapping[tuple(self.agent.ori)]}\n"
-        for obj in self.objects:
-            info += f"{obj.name} at ({obj.pos[0]}, {obj.pos[1]}) facing {ori_mapping[tuple(obj.ori)]}\n"
-        return info
-
-    def get_room_description(self, with_topdown: bool = False) -> str:
-        """Get textual description of the room"""
-        desc = f"Imagine yourself as {self.agent.name} (named as {self.agent.name}) in a room.\n"
-        desc += "You are facing north.\n"
-        desc += f"Objects in the room: {', '.join([obj.name for obj in self.objects])}\n"
-        
-        if with_topdown:
-            desc += "\n" + self._get_topdown_info()
-        return desc
-
-    
     def get_boundary(self):
-        """
-        Get the boundary of the room
-        """
         positions = np.array([obj.pos for obj in self.all_objects])
         min_x, min_y = np.min(positions, axis=0)
         max_x, max_y = np.max(positions, axis=0)
-        
-        # Generate random position within extended boundaries
-        # x ranges from (2*min_x - max_x) to (2*max_x - min_x)
-        # y ranges from (2*min_y - max_y) to (2*max_y - min_y)
         min_x_bound = min_x - min(max_x - min_x, 1)
         max_x_bound = max_x + min(max_x - min_x, 1)
         min_y_bound = min_y - min(max_y - min_y, 1)
         max_y_bound = max_y + min(max_y - min_y, 1)
         return min_x_bound, max_x_bound, min_y_bound, max_y_bound
-    
+
+    def get_random_point(self, rng: np.random.Generator, room_id: int | None = None) -> np.ndarray:
+        """Random coordinate around object bbox; room_id ignored (no mask)."""
+        if not self.all_objects:
+            return np.array([0, 0], dtype=int)
+        positions = np.array([obj.pos for obj in self.all_objects])
+        min_x, min_y = np.min(positions, axis=0)
+        max_x, max_y = np.max(positions, axis=0)
+        low_x, high_x = int(np.floor(min_x)) - 1, int(np.ceil(max_x)) + 1
+        low_y, high_y = int(np.floor(min_y)) - 1, int(np.ceil(max_y)) + 1
+        return np.array([rng.integers(low_x, high_x + 1), rng.integers(low_y, high_y + 1)], dtype=int)
+
     def get_objects_orientation(self):
-        """
-        Get the objects in the room with their orientation
-        """
-        ori_mapping = {
-            (0, 1): "north",
-            (0, -1): "south",
-            (1, 0): "east",
-            (-1, 0): "west",
-        }
+        ori_mapping = {(0, 1): "north", (0, -1): "south", (1, 0): "east", (-1, 0): "west"}
         desc = "Orientation of objects in the room are: \n"
         for obj in self.objects:
             desc += f"{obj.name} facing {ori_mapping[tuple(obj.ori)]}\n"
         return desc
 
-    def copy(self) -> 'Room':
-        """Create a deep copy of the room"""
+    def get_cell_info(self, x: int, y: int) -> Dict[str, Any]:
+        info: Dict[str, Any] = {"room_id": None, "object_name": None, "gate_name": None}
+        for g in self.gates:
+            if int(g.pos[0]) == int(x) and int(g.pos[1]) == int(y):
+                info["gate_name"] = g.name
+                return info
+        for o in self.objects:
+            if int(o.pos[0]) == int(x) and int(o.pos[1]) == int(y):
+                info["object_name"] = o.name
+                return info
+        return info
+
+    def copy(self) -> 'BaseRoom':
         return self.from_dict(self.to_dict())
-    
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize room to dictionary"""
         return {
             'name': self.name,
-            'agent': self.agent.to_dict(),
             'objects': [obj.to_dict() for obj in self.objects],
-            'initial_pos': self.initial_pos.to_dict(),
-            'all_objects': [obj.to_dict() for obj in self.all_objects]
+            'all_objects': [obj.to_dict() for obj in self.all_objects],
+            'gates': [obj.to_dict() for obj in self.gates],
+            'gates_by_room': {},
+            'rooms_by_gate': {},
+            'adjacent_rooms_by_room': {},
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Room':
-        """Deserialize room from dictionary"""
-        return cls(
-            objects=[Object.from_dict(obj_data) for obj_data in data['objects']],
-            agent=Agent.from_dict(data['agent']),
-            initial_pos=Object.from_dict(data['initial_pos']),
-            name=data['name']
-        )
-
-    
-    def plot(self, render_mode: str = 'text', save_path: str = None):
-        """Plot the room with objects and orientations"""
-        if render_mode == 'text':
-            self._plot_text()
-        elif render_mode == 'img':
-            self._plot_img(save_path)
-        else:
-            raise ValueError(f"render_mode must be 'text' or 'img', got '{render_mode}'")
-    
-    def _plot_text(self):
-        """Text grid visualization"""
-        min_x, max_x, min_y, max_y = self.get_boundary()
-        min_x, max_x, min_y, max_y = int(min_x)-1, int(max_x)+1, int(min_y)-1, int(max_y)+1
-        
-        width, height = max_x - min_x + 1, max_y - min_y + 1
-        grid = [[' '] * width for _ in range(height)]
-        
-        ori_map = {(0,1):'^', (0,-1):'v', (1,0):'>', (-1,0):'<'}
-        labels = []
-        
-        for i, obj in enumerate(self.all_objects):
-            x, y = int(obj.pos[0]) - min_x, max_y - int(obj.pos[1])
-            symbol = 'A' if obj == self.agent else str(i-1)
-            labels.append(f"{symbol}:{obj.name}")
-            
-            if 0 <= y < height and 0 <= x < width:
-                grid[y][x] = symbol
-                # Place orientation arrow
-                dx, dy = obj.ori
-                ax, ay = x + dx, y - dy
-                if 0 <= ay < height and 0 <= ax < width and grid[ay][ax] == ' ':
-                    grid[ay][ax] = ori_map.get(tuple(obj.ori), '?')
-        
-        print(f"\n--- {self.name} ---")
-        print("Legend:", " | ".join(labels))
-        for y in range(height):
-            print(f"{max_y-y:3d} " + "".join(f"{cell} " for cell in grid[y]))
-        print("    " + "".join(f"{min_x+x} " for x in range(width)))
-    
-    def _plot_img(self, save_path=None):
-        """Matplotlib visualization"""
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError:
-            print("matplotlib required for img mode")
-            return
-        
-        if save_path is None:
-            save_path = f"room_{self.name}.png"
-        
-        fig, ax = plt.subplots(figsize=(8, 6))
-        min_x, max_x, min_y, max_y = self.get_boundary()
-        
-        for i, obj in enumerate(self.all_objects):
-            x, y = obj.pos
-            color = plt.cm.tab10(i)
-            marker = 's' if obj == self.agent else 'o'
-            
-            ax.scatter(x, y, c=[color], s=120, marker=marker, edgecolor='black')
-            ax.annotate(obj.name, (x, y), xytext=(3, 3), textcoords='offset points')
-            ax.arrow(x, y, obj.ori[0]*0.7, obj.ori[1]*0.7, 
-                    head_width=0.15, fc=color, ec='black')
-        
-        ax.set_xlim(min_x-1, max_x+1)
-        ax.set_ylim(min_y-1, max_y+1)
-        ax.grid(True, alpha=0.3)
-        ax.set_aspect('equal')
-        ax.set_title(f'Room: {self.name}')
-        
-        # Save to specified file path
-        plt.savefig(save_path, bbox_inches='tight')
-        print(f"Room plot saved to: {save_path}")
-        plt.close()
+    def from_dict(cls, data: Dict[str, Any]) -> 'BaseRoom':
+        return cls(objects=[Object.from_dict(o) for o in data.get('objects', [])], name=data.get('name', 'room'))
 
     def __repr__(self):
         objects_details = [f"{obj.name}@{tuple(obj.pos)}:{tuple(obj.ori)}" for obj in self.objects]
-        agent_detail = f"{self.agent.name}@{tuple(self.agent.pos)}:{tuple(self.agent.ori)}"
-        return f"Room(name={self.name}, objects=[{', '.join(objects_details)}], agent={agent_detail}, initial_pos={self.initial_pos.name}@{tuple(self.initial_pos.pos)}:{tuple(self.initial_pos.ori)})"
+        return f"BaseRoom(name={self.name}, objects=[{', '.join(objects_details)}])"
+
+
+class Room(BaseRoom):
+    """Full room with required mask and optional gates; inherits BaseRoom."""
+
+    def __init__(self, objects: List[Object], mask: np.ndarray, name: str = 'room', gates: List[Gate] | None = None):
+        assert mask is not None, "mask must not be None"
+        self.name = name
+        self.mask = mask.copy()
+        self._init_objects(objects, gates or [])
+        self._init_map()
+        self._build_membership_from_mask()
+
+    def _init_map(self):
+        self.object_map = np.zeros_like(self.mask, dtype=int)
+        self.name_to_idx = {o.name: i + 1 for i, o in enumerate(self.all_objects)}
+        self.idx_to_name = {i + 1: o.name for i, o in enumerate(self.all_objects)}
+        for o in self.all_objects:
+            x, y = int(o.pos[0]), int(o.pos[1])
+            self.object_map[y, x] = self.name_to_idx[o.name]
+
+    def get_boundary(self):
+        """Bounds from mask shape: x in [0,w-1], y in [0,h-1]."""
+        h, w = self.mask.shape
+        return 0, w - 1, 0, h - 1
+
+    def get_random_point(self, rng: np.random.Generator, room_id: int | None = None) -> np.ndarray:
+        """Random valid mask coordinate; filter by room_id if provided."""
+        valid = np.argwhere(self.mask == int(room_id)) if room_id is not None else np.argwhere(self.mask != -1)
+        if valid.size == 0:
+            return np.array([0, 0], dtype=int)
+        y, x = valid[rng.integers(0, len(valid))]
+        return np.array([int(x), int(y)], dtype=int)
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = {
+            'name': self.name,
+            'objects': [obj.to_dict() for obj in self.objects],
+            'gates': [obj.to_dict() for obj in self.gates],
+            'all_objects': [obj.to_dict() for obj in self.all_objects],
+            'gates_by_room': getattr(self, 'gates_by_room', {}),
+            'rooms_by_gate': getattr(self, 'rooms_by_gate', {}),
+            'adjacent_rooms_by_room': getattr(self, 'adjacent_rooms_by_room', {}),
+        }
+        if self.mask is not None:
+            data['mask'] = self.mask.tolist()
+        if getattr(self, 'object_map', None) is not None:
+            data['object_map'] = self.object_map.tolist()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Room':
+        mask = np.array(data['mask'], dtype=np.int8)
+        return cls(
+            objects=[Object.from_dict(obj_data) for obj_data in data['objects']],
+            name=data['name'],
+            mask=mask,
+            gates=[Gate.from_dict(obj_data) for obj_data in data.get('gates', [])]
+        )
+
+    def _build_membership_from_mask(self) -> None:
+        # Assign room_id for non-gate objects from mask
+        for obj in self.objects:
+            x, y = int(obj.pos[0]), int(obj.pos[1])
+            rid = int(self.mask[y, x])
+            assert rid > 0, f"Object {obj.name} is not in a room"
+            obj.room_id = rid
+
+        # Build gate mappings and adjacency
+        gates_by_room: dict[int, list[str]] = {}
+        rooms_by_gate: dict[str, list[int]] = {}
+        adjacent_rooms_by_room: dict[int, list[int]] = {}
+        for g in self.gates:
+            assert isinstance(g.room_id, list) and len(g.room_id) == 2, f"Gate {g.name} must have room_id list set in generator"
+            a, b = int(g.room_id[0]), int(g.room_id[1])
+            rooms_by_gate[g.name] = [a, b]
+            gates_by_room.setdefault(a, []).append(g.name)
+            gates_by_room.setdefault(b, []).append(g.name)
+            adjacent_rooms_by_room.setdefault(a, []).append(b)
+            adjacent_rooms_by_room.setdefault(b, []).append(a)
+
+        # Deduplicate adjacency lists
+        for k in list(adjacent_rooms_by_room.keys()):
+            adjacent_rooms_by_room[k] = sorted(list(set(adjacent_rooms_by_room[k])))
+        self.gates_by_room, self.rooms_by_gate, self.adjacent_rooms_by_room = gates_by_room, rooms_by_gate, adjacent_rooms_by_room
+
+    def get_cell_info(self, x: int, y: int) -> Dict[str, Any]:
+        info: Dict[str, Any] = {"room_id": None, "object_name": None, "gate_name": None}
+        if self.mask is not None:
+            if 0 <= y < self.mask.shape[0] and 0 <= x < self.mask.shape[1]:
+                rid = int(self.mask[y, x])
+                info["room_id"] = rid if rid > 0 else None
+        if getattr(self, 'object_map', None) is not None and self.object_map is not None:
+            if 0 <= y < self.object_map.shape[0] and 0 <= x < self.object_map.shape[1]:
+                idx = int(self.object_map[y, x])
+                if idx > 0:
+                    name = self.idx_to_name.get(idx)
+                    if name is not None:
+                        if any(g.name == name for g in self.gates):
+                            info["gate_name"] = name
+                        else:
+                            info["object_name"] = name
+        return info
+
+    def __repr__(self):
+        objects_details = [f"{obj.name}@{tuple(obj.pos)}:{tuple(obj.ori)}" for obj in self.objects]
+        return f"Room(name={self.name}, objects=[{', '.join(objects_details)}])"
 
 
 
 if __name__ == '__main__':
-    # Test plot function
-    print("Testing Room plot function...")
-    
-    # Create test objects
-    objects = [
-        Object(name="table", pos=np.array([2, 1]), ori=np.array([1, 0])),   # facing east
-        Object(name="chair", pos=np.array([0, 3]), ori=np.array([0, -1])),  # facing south
-        Object(name="sofa", pos=np.array([-1, 0]), ori=np.array([-1, 0])), # facing west
-        Object(name="lamp", pos=np.array([1, -2]), ori=np.array([0, 1])),  # facing north
-    ]
-    
-    # Test with agent (now required)
-    agent = Agent(name="agent")
-    agent.pos = np.array([0, 0])
-    agent.ori = np.array([0, 1])  # facing north
-    
-    room_with_agent = Room(objects=objects, name="test_room_with_agent", agent=agent)
-    
-    # test add and remove object
-    print("\n=== Add and Remove Object Test ===")
-    room_with_agent.plot('text')
-    room_with_agent.add_object(Object(name="new_obj", pos=np.array([5, 5]), ori=np.array([0, 1])))
-    print(room_with_agent.objects, room_with_agent.all_objects, room_with_agent.gt_graph._v_matrix)
-    room_with_agent.plot('text')
-    room_with_agent.remove_object(objects[0].name)
-    print(room_with_agent.objects, room_with_agent.all_objects, room_with_agent.gt_graph._v_matrix)
-    room_with_agent.plot('text')
+    from ..utils.room_utils import RoomGenerator
+    room, agent = RoomGenerator.generate_room(
+        room_size=[10, 10],
+        n_objects=3,
+        generation_type='rand',
+        np_random=np.random.default_rng(42),
+    )
+    print(room)
+    print(agent)
+    print(room.get_random_point(np.random.default_rng(42)))
+    print(room.object_map)
+    print(room.get_boundary())
+    print(room.get_cell_info(2, 2))
+        # print(room.gates_by_room)
+        # print(room.rooms_by_gate)
+        # print(room.adjacent_rooms_by_room)
 
-    room_with_agent.plot('img', save_path='test_room_with_agent.png')
-    
-    print("\nAll tests completed!")
 
 
 

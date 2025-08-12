@@ -28,6 +28,8 @@ class Object:
     pos: np.ndarray = field(default_factory=lambda: np.zeros(2))
     ori: np.ndarray = field(default_factory=lambda: np.array([0, 1]))
     has_orientation: bool = True
+    # Room membership: int for single room, List[int] for multi-room objects (e.g., gates)
+    room_id: Union[int, List[int], None] = None
 
     def __post_init__(self):
         assert len(self.pos) == 2, "Position must be a 2D vector"
@@ -49,21 +51,23 @@ class Object:
                 f"got {self.ori.tolist()}"
             )
 
-    def to_dict(self) -> Dict[str, Union[str, List[float], bool]]:
+    def to_dict(self) -> Dict[str, Union[str, List[float], bool, int, List[int], None]]:
         return {
             'name': self.name,
             'pos': self.pos.tolist(),
             'ori': self.ori.tolist(),
-            'has_orientation': self.has_orientation
+            'has_orientation': self.has_orientation,
+            'room_id': self.room_id
         }
 
     @classmethod
-    def from_dict(cls, obj_dict: Dict[str, Union[str, List[float], bool]]) -> 'Object':
+    def from_dict(cls, obj_dict: Dict[str, Union[str, List[float], bool, int, List[int], None]]) -> 'Object':
         return cls(
             name=obj_dict['name'],
             pos=np.array(obj_dict['pos']),
             ori=np.array(obj_dict['ori']),
-            has_orientation=obj_dict.get('has_orientation', True)
+            has_orientation=obj_dict.get('has_orientation', True),
+            room_id=obj_dict.get('room_id')
         )
 
     def __repr__(self) -> str:
@@ -81,7 +85,8 @@ class Object:
             name=self.name,
             pos=self.pos.copy(),
             ori=self.ori.copy(),
-            has_orientation=self.has_orientation
+            has_orientation=self.has_orientation,
+            room_id=(list(self.room_id) if isinstance(self.room_id, list) else self.room_id)
         )
 
 @dataclass
@@ -90,3 +95,79 @@ class Agent(Object):
     pos: np.ndarray = field(default_factory=lambda: np.array([0, 0]))
     ori: np.ndarray = field(default_factory=lambda: np.array([0, 1]))
     has_orientation: bool = field(default=True)
+    init_pos: np.ndarray = None
+    init_ori: np.ndarray = None
+    # track current and initial room ids
+    room_id: Union[int, List[int], None] = None
+    init_room_id: Union[int, List[int], None] = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        # default initial pose to current if not explicitly set
+        if self.init_pos is None:
+            self.init_pos = self.pos.copy()
+        if self.init_ori is None:
+            self.init_ori = self.ori.copy()
+
+    def to_dict(self) -> Dict[str, Union[str, List[float], bool]]:
+        base = super().to_dict()
+        base.update({
+            'init_pos': self.init_pos.tolist(),
+            'init_ori': self.init_ori.tolist(),
+            'init_room_id': self.init_room_id
+        })
+        return base
+
+    @classmethod
+    def from_dict(cls, obj_dict: Dict[str, Union[str, List[float], bool, int, List[int], None]]) -> 'Agent':
+        return cls(
+            name=obj_dict.get('name', 'agent'),
+            pos=np.array(obj_dict.get('pos', [0, 0])),
+            ori=np.array(obj_dict.get('ori', [0, 1])),
+            has_orientation=obj_dict.get('has_orientation', True),
+            init_pos=np.array(obj_dict.get('init_pos', obj_dict.get('pos', [0, 0]))),
+            init_ori=np.array(obj_dict.get('init_ori', obj_dict.get('ori', [0, 1]))),
+            room_id=obj_dict.get('room_id'),
+            init_room_id=obj_dict.get('init_room_id', obj_dict.get('room_id'))
+        )
+
+    def copy(self) -> 'Agent':
+        return Agent(
+            name=self.name,
+            pos=self.pos.copy(),
+            ori=self.ori.copy(),
+            has_orientation=self.has_orientation,
+            init_pos=self.init_pos.copy(),
+            init_ori=self.init_ori.copy(),
+            room_id=(list(self.room_id) if isinstance(self.room_id, list) else self.room_id),
+            init_room_id=(list(self.init_room_id) if isinstance(self.init_room_id, list) else self.init_room_id),
+        )
+
+@dataclass
+class Gate(Object):
+    name: str
+    pos: np.ndarray = field(default_factory=lambda: np.array([0, 0]))
+    ori: np.ndarray = field(default_factory=lambda: np.array([0, 1]))
+    has_orientation: bool = field(default=True, init=False)
+    # room-id -> orientation (vector points into that room)
+    ori_by_room: Dict[int, np.ndarray] = field(default_factory=dict)
+
+    def get_ori_for_room(self, room_id: int) -> np.ndarray:
+        return self.ori_by_room.get(int(room_id), self.ori)
+
+    def to_dict(self) -> Dict[str, Union[str, List[float], bool, int, List[int], None]]:
+        base = super().to_dict()
+        base.update({
+            'ori_by_room': {str(k): v.tolist() for k, v in self.ori_by_room.items()}
+        })
+        return base
+
+    @classmethod
+    def from_dict(cls, obj_dict: Dict[str, Union[str, List[float], bool, int, List[int], None]]) -> 'Gate':
+        return cls(
+            name=obj_dict['name'],
+            pos=np.array(obj_dict.get('pos', [0, 0])),
+            ori=np.array(obj_dict.get('ori', [0, 1])),
+            room_id=obj_dict.get('room_id'),
+            ori_by_room={int(k): np.array(v) for k, v in obj_dict.get('ori_by_room', {}) or {}.items()},
+        )

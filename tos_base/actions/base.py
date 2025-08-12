@@ -57,11 +57,12 @@ class BaseAction(ABC):
         pass
     
     @abstractmethod
-    def execute(self, room, **kwargs) -> ActionResult:
+    def execute(self, room, agent, **kwargs) -> ActionResult:
         """Execute action on room state.
         
         Args:
             room: Room to execute action on
+            agent: Agent executing the action
             **kwargs: Additional execution context (e.g., coordinate system info)
             
         Returns:
@@ -89,6 +90,14 @@ class BaseAction(ABC):
             field_of_view = BaseAction._field_of_view
         
         assert field_of_view in [90, 180], "Invalid field of view"
+        # Require same room if room ids are present
+        from_room = getattr(from_obj, 'room_id', None)
+        to_room = getattr(to_obj, 'room_id', None)
+        if from_room is not None and to_room is not None:
+            def _as_set(v):
+                return set(v) if isinstance(v, list) else ({v} if v is not None else set())
+            if not _as_set(from_room).intersection(_as_set(to_room)):
+                return False
         direction_vec = to_obj.pos - from_obj.pos
         if np.allclose(direction_vec, 0):
             return True
@@ -98,10 +107,8 @@ class BaseAction(ABC):
     
     @staticmethod
     def _get_rotation_matrix(degrees: int) -> np.ndarray:
-        """Get rotation matrix for specified degrees.
-        NOTE agent rotates clockwise <==> other object rotates counterclockwise
-        """
-        rotations = {0: [[1,0],[0,1]], 90: [[0,1],[-1,0]], 180: [[-1,0],[0,-1]], 270: [[0,-1],[1,0]]}
+        """Get rotation matrix for specified degrees clockwise."""
+        rotations = {0: [[1,0],[0,1]], 90: [[0,-1],[1,0]], 180: [[-1,0],[0,-1]], 270: [[0,1],[-1,0]]}
         return np.array(rotations[degrees])
     
     @staticmethod

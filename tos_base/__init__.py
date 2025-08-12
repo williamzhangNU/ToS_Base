@@ -10,9 +10,8 @@ This module provides the core components for spatial reasoning tasks including:
 
 # Core data structures
 from .core.object import Object, Agent
-from .core.room import Room
+from .core.room import Room, BaseRoom
 from .core.relationship import DirPair, DirectionRel, Dir, TotalRelationship
-from .core.graph import DirectionalGraph
 from .core.constant import (
     AGENT_NAME, 
     CANDIDATE_OBJECTS, 
@@ -35,6 +34,7 @@ from .actions.actions import (
 
 # Managers
 from .managers.exploration_manager import ExplorationManager, ExplorationTurnLog
+from .managers.agent_proxy import AgentProxy, AutoExplore
 from .managers.evaluation_manager import EvaluationManager, EvaluationTurnLog
 from .managers.cognitive_map_manager import CognitiveMapManager, CognitiveMapTurnLog
 
@@ -43,12 +43,12 @@ from .evaluation.tasks import BaseEvaluationTask
 from .evaluation.task_types import EvalTaskType
 
 # Utilities
-from .utils.room_utils import generate_room
+from .utils.room_utils import RoomGenerator, get_topdown_info, get_room_description, RoomPlotter
 from .utils.eval_utilities import *
 
 __all__ = [
     # Core
-    'Object', 'Agent', 'Room', 'DirPair', 'DirectionRel', 'TotalRelationship', 'Dir', 'DirectionalGraph',
+    'Object', 'Agent', 'Room', 'BaseRoom', 'DirPair', 'DirectionRel', 'TotalRelationship', 'Dir',
     'AGENT_NAME', 'CANDIDATE_OBJECTS', 'ADDITIONAL_CANDIDATE_OBJECTS',
     'easy_room_config', 'easy_room_config_2', 'easy_room_config_3',
     
@@ -57,11 +57,11 @@ __all__ = [
     'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'TermAction',
     
     # Managers
-    'ExplorationManager', 'ExplorationTurnLog', 'EvaluationManager', 'EvaluationTurnLog', 'CognitiveMapManager', 'CognitiveMapTurnLog',
+    'ExplorationManager', 'ExplorationTurnLog', 'EvaluationManager', 'EvaluationTurnLog', 'CognitiveMapManager', 'CognitiveMapTurnLog', 'AgentProxy', 'AutoExplore',
     
     # Evaluation
     'BaseEvaluationTask', 'EvalTaskType',
     
     # Utils
-    'generate_room'
+    'RoomGenerator', 'get_topdown_info', 'get_room_description', 'RoomPlotter',
 ]

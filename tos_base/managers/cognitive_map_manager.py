@@ -12,9 +12,9 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 import copy
 
-from ..core.room import Room
+from ..core.room import Room, BaseRoom
 from ..core.object import Object, Agent
-from ..utils.room_utils import set_initial_pos_as_origin
+from ..core.relationship import TotalRelationship
 
 COGMAP_INSTRUCTION = """\
 ## Cognitive Map Creation
@@ -125,6 +125,7 @@ class CognitiveMapTurnLog:
     overall_sim: float = 0.0
     extraction_success: bool = False
     pred_room_state: Optional['Room'] = None
+    pred_agent_state: Optional['Agent'] = None
 
     def to_dict(self):
         return {
@@ -133,7 +134,8 @@ class CognitiveMapTurnLog:
             "pos_sim": self.pos_sim,
             "overall_sim": self.overall_sim,
             "extraction_success": self.extraction_success,
-            "pred_room_state": self.pred_room_state.to_dict() if self.pred_room_state else {}
+            "pred_room_state": self.pred_room_state.to_dict() if self.pred_room_state else {},
+            "pred_agent_state": self.pred_agent_state.to_dict() if self.pred_agent_state else {}
         }
 
 
@@ -167,7 +169,7 @@ class CognitiveMapManager:
         assert self.config['cogmap_type'] == "standard", "Only standard format is supported"
         return COGMAP_INSTRUCTION_SHORTER.format(grid_size=self.config["grid_size"])
         
-    def evaluate_cognitive_map(self, assistant_response: str, gt_room: Room) -> Optional[Dict[str, float]]:
+    def evaluate_cognitive_map(self, assistant_response: str, gt_room: Room, gt_agent: Agent) -> Optional[Dict[str, float]]:
         """
         Evaluate cognitive map from assistant response against ground truth.
         
@@ -178,18 +180,18 @@ class CognitiveMapManager:
             Dictionary with similarity metrics or None if extraction fails
         """
         # Extract cognitive map from response
-        extracted_room = self._extract_json_and_create_room(assistant_response)
+        extracted = self._extract_json_and_create_room(assistant_response)
         
-        if extracted_room is None or gt_room is None:
+        if extracted is None or gt_room is None:
             # Log failed extraction
             self.turn_logs.append(CognitiveMapTurnLog())
             return None
-        
-        # Compare with ground truth
-        metrics = self._compare_rooms(extracted_room, gt_room.copy())
+        pred_room, pred_agent = extracted
+        # Compare with ground truth using provided agent if any
+        metrics = self._compare_rooms((pred_room, pred_agent), (gt_room.copy(), gt_agent))
         
         # Log successful evaluation
-        turn_log = CognitiveMapTurnLog(**metrics, extraction_success=True, pred_room_state=extracted_room)
+        turn_log = CognitiveMapTurnLog(**metrics, extraction_success=True, pred_room_state=pred_room, pred_agent_state=pred_agent)
         self.turn_logs.append(turn_log)
         
         return metrics
@@ -257,8 +259,8 @@ class CognitiveMapManager:
 
     # =============================== Helper Functions =============================== 
 
-    def _extract_json_and_create_room(self, model_response: str, room_name: str = "extracted_room") -> Optional[Room]:
-        """Extract JSON from model response and create Room object."""
+    def _extract_json_and_create_room(self, model_response: str, room_name: str = "extracted_room") -> Optional[tuple[BaseRoom, Agent]]:
+        """Extract JSON from model response and create (Room, Agent)."""
         json_data = self._extract_json_from_text(model_response)
         if json_data is None:
             return None
@@ -284,8 +286,8 @@ class CognitiveMapManager:
                     continue
         return None
     
-    def _create_room_from_json(self, json_data: Dict[str, Any], room_name: str = "extracted_room") -> Optional[Room]:
-        """Create Room object from JSON data."""
+    def _create_room_from_json(self, json_data: Dict[str, Any], room_name: str = "extracted_room") -> Optional[tuple[BaseRoom, Agent]]:
+        """Create (Room, Agent) from JSON data."""
         try:
             objects = []
             direction_mapping = {
@@ -297,16 +299,12 @@ class CognitiveMapManager:
             agent = Agent(name="agent")
             
             for obj_name, obj_info in json_data.items():
-                
                 if 'position' not in obj_info:
                     continue
-                
                 position = obj_info['position']
                 if not isinstance(position, list) or len(position) != 2:
                     continue
-                
                 pos = np.array([float(position[0]), float(position[1])])
-                
                 facing = obj_info.get('facing', 'north')
                 has_orientation = True
                 if isinstance(facing, str):
@@ -315,32 +313,48 @@ class CognitiveMapManager:
                 else:
                     has_orientation = False
                     ori = np.array([0, 0])
-                
                 if obj_name.lower() in ['agent', 'you', 'player']:
                     agent = Agent(name='agent', pos=pos, ori=ori, has_orientation=has_orientation)
                 else:
                     obj = Object(name=obj_name, pos=pos, ori=ori, has_orientation=has_orientation)
                     objects.append(obj)
-            
             if not objects:
                 return None
-            
-            room = Room(agent=agent, objects=objects, name=room_name, initial_pos=Object(name='initial_pos', pos=np.array([0, 0]), ori=np.array([0, 1])))
-            
-            return room
+
+            room = BaseRoom(objects=objects, name=room_name)
+            return room, agent
             
         except Exception as e:
             print(f"Error creating Room object: {e}")
             return None
-    
-    def _compare_rooms(self, pred_room: Room, gt_room: Room) -> Dict[str, float]:
-        """Compare cognitive map room with ground truth room."""
-        norm_pred_room = set_initial_pos_as_origin(pred_room)
-        norm_gt_room = set_initial_pos_as_origin(gt_room)
 
-        dir_sim = self._calculate_dir_sim(norm_pred_room, norm_gt_room)
-        facing_sim = self._calculate_facing_sim(norm_pred_room, norm_gt_room)
-        pos_sim = self._calculate_pos_sim(norm_pred_room, norm_gt_room)
+    @staticmethod
+    def _transform_object_using_anchor(anchor: Object, target: Object) -> Object:
+        """Set origin to anchor.pos and +Y to anchor.ori; return transformed copy of target."""
+        target = target.copy()
+        ori_to_R = {
+            (0, 1): np.array([[1, 0], [0, 1]]),
+            (1, 0): np.array([[0, 1], [-1, 0]]),
+            (0, -1): np.array([[-1, 0], [0, -1]]),
+            (-1, 0): np.array([[0, -1], [1, 0]]),
+        }
+        R = ori_to_R.get(tuple(anchor.ori.tolist()), ori_to_R[(0, 1)])
+        p = (R @ (target.pos.astype(float) - anchor.pos.astype(float))).astype(float)
+        o = target.ori
+        if target.has_orientation:
+            o = (R @ target.ori.astype(float)).astype(int)
+        target.pos, target.ori = p, o
+        return target
+    
+    def _compare_rooms(self, pred: tuple[BaseRoom, Agent], gt: tuple[BaseRoom, Agent]) -> Dict[str, float]:
+        """Compare predicted and ground truth (room, agent)."""
+        anchor = Object(name="anchor", pos=gt[1].init_pos, ori=gt[1].init_ori)
+        pred_object_lists = [self._transform_object_using_anchor(anchor, obj) for obj in (pred[0].objects + [pred[1]])]
+        gt_object_lists = [self._transform_object_using_anchor(anchor, obj) for obj in (gt[0].objects + [gt[1]])]
+
+        dir_sim = self._calculate_dir_sim(pred_object_lists, gt_object_lists)
+        facing_sim = self._calculate_facing_sim(pred_object_lists, gt_object_lists)
+        pos_sim = self._calculate_pos_sim(pred_object_lists, gt_object_lists)
         
         overall_sim = 0.5 * dir_sim + 0.2 * facing_sim + 0.3 * pos_sim
         
@@ -351,52 +365,40 @@ class CognitiveMapManager:
             "overall_sim": overall_sim
         }
     
-    def _calculate_dir_sim(self, pred_room: Room, gt_room: Room) -> float:
+    def _calculate_dir_sim(self, pred_object_lists: List[Object], gt_object_lists: List[Object]) -> float:
         """
         Compute similarity between predicted and ground truth room based on directional relationships.
         """
-        obj_name_list = [obj.name for obj in gt_room.valid_objects]
-        total_pairs, correct_pairs = 0.0, 0.0
-        for i in range(len(obj_name_list)):
-            for j in range(i + 1, len(obj_name_list)):
-                obj1_name = obj_name_list[i]
-                obj2_name = obj_name_list[j]
-                dir_pair_gt, _ = gt_room.get_direction(obj1_name, obj2_name, perspective='allo')
+        pred = {o.name: o for o in pred_object_lists}
+        tot = cor = 0.0
+        for i in range(len(gt_object_lists)):
+            for j in range(i + 1, len(gt_object_lists)):
+                a, b = gt_object_lists[i], gt_object_lists[j]
+                gt_rel = TotalRelationship.get_direction(a.pos, b.pos)
+                p1, p2 = pred.get(a.name), pred.get(b.name)
+                if p1 and p2:
+                    pr = TotalRelationship.get_direction(p1.pos, p2.pos)
+                    if (pr.horiz, pr.vert) == (gt_rel.horiz, gt_rel.vert): cor += 1.0
+                tot += 1.0
+        return cor / tot if tot else 0.0
 
-                try:
-                    dir_pair_pred, _ = pred_room.get_direction(obj1_name, obj2_name, perspective='allo')
-                    if dir_pair_pred.horiz == dir_pair_gt.horiz and dir_pair_pred.vert == dir_pair_gt.vert:
-                        correct_pairs += 1.0
-                except Exception as e:
-                    print(f"Error calculating direction similarity: {e}")
-                    continue
-                total_pairs += 1.0
-        
-        return correct_pairs / total_pairs if total_pairs > 0 else 0.0
-
-    def _calculate_facing_sim(self, pred_room: Room, gt_room: Room) -> float:
-        """
-        Compute similarity between predicted and ground truth room based on orientation consistency.
-        """
-        obj_name_list = [obj.name for obj in gt_room.valid_objects]
-        total_ori, correct_ori = float(len(obj_name_list)), 0.0
-        
-        for obj_name in obj_name_list:
-            obj2 = gt_room.get_object_by_name(obj_name)
-            try:
-                obj1 = pred_room.get_object_by_name(obj_name)
-                if obj2.has_orientation:
-                    if np.array_equal(obj1.ori, obj2.ori):
-                        correct_ori += 1.0
-            except Exception as e:
-                print(f"Error calculating facing similarity: {e}")
+    def _calculate_facing_sim(self, pred_object_lists: List[Object], gt_object_lists: List[Object]) -> float:
+        pred = {o.name: o for o in pred_object_lists}
+        tot = cor = 0.0
+        for g in gt_object_lists:
+            if not getattr(g, "has_orientation", False): 
                 continue
-        
-        return correct_ori / total_ori if total_ori > 0 else 0.0
+            p = pred.get(g.name)
+            if p is None: 
+                return 0.0
+            tot += 1.0
+            if np.array_equal(p.ori, g.ori): 
+                cor += 1.0
+        return cor / tot if tot else 0.0
 
 
     
-    def _calculate_pos_sim(self, pred_room: Room, gt_room: Room) -> float:
+    def _calculate_pos_sim(self, pred_object_lists: List[Object], gt_object_lists: List[Object]) -> float:
         """
         Compute similarity between predicted and ground truth room.
 
@@ -408,49 +410,40 @@ class CognitiveMapManager:
         similarity = exp(−rmse/L)
 
         Args:
-            pred_room (Room): predicted room
-            gt_room (Room): ground truth room
-            common_obj_names (set): common object names
+            pred_object_lists (List[Object]): predicted object lists
+            gt_object_lists (List[Object]): ground truth object lists
 
         Returns:
             similarity (float): similarity between predicted and ground truth room.
         """
-        obj_name_list = [obj.name for obj in gt_room.valid_objects]
-        pred_obj_name_list = [obj.name for obj in pred_room.valid_objects]
-        if set(obj_name_list) != set(pred_obj_name_list): # TODO deal with incomplete objects
+        pred = {o.name: o for o in pred_object_lists}
+        gt_names = [o.name for o in gt_object_lists]
+        if any(n not in pred for n in gt_names):  # TODO deal with incomplete objects
             return 0.0
-        
-        P1 = np.array([pred_room.get_object_by_name(n).pos for n in pred_obj_name_list])
-        P2 = np.array([gt_room.get_object_by_name(n).pos for n in obj_name_list])
+
+        P1 = np.array([pred[n].pos for n in gt_names])
+        P2 = np.array([o.pos for o in gt_object_lists])
 
         # scale-only alignment s = argmin ||s·P1 − P2||
-        num = (P2 * P1).sum()
-        den = (P1 * P1).sum()
-        scale = num / den if den > 0 else 0.0
-        P1_scaled = P1 * scale
-
-        # RMSE between scaled estimates and ground truth
-        rmse = np.sqrt(((P1_scaled - P2)**2).sum(axis=1).mean())
-
-        # normalization length L = RMS distance of all objects from agent (origin)
-        L = np.sqrt((P2**2).sum(axis=1).mean())
-        
-        # similarity = exp(−rmse/L)
+        den = float((P1 * P1).sum())
+        if den == 0.0: 
+            return 0.0
+        scale = float((P2 * P1).sum()) / den
+        rmse = np.sqrt(((P1 * scale - P2) ** 2).sum(axis=1).mean())
+        L = np.sqrt((P2 ** 2).sum(axis=1).mean())
         return float(np.exp(-rmse / L)) if L > 0 else 0.0
     
 
 
 if __name__ == "__main__":
-    room = Room(
-        agent=Agent(name="agent", pos=np.array([0, 0]), ori=np.array([0, 1])),
+    room = BaseRoom(
         objects=[Object(name="table", pos=np.array([1, 1]), ori=np.array([0, 1])), Object(name="chair", pos=np.array([0, 1]), ori=np.array([0, 1]))],
         name="room"
     )
-    room2 = Room(
-        agent=Agent(name="agent", pos=np.array([0, 0]), ori=np.array([0, 1])),
+    room2 = BaseRoom(
         objects=[Object(name="table", pos=np.array([-1,-1]), ori=np.array([0, 1])), Object(name="chair", pos=np.array([0, 2]), ori=np.array([0, 1]))],
         name="room2"
     )
 
     common_obj_names = set(["table", "chair"])
-    print(CognitiveMapManager()._calculate_pos_sim(room, room2, common_obj_names))
+    print(CognitiveMapManager()._calculate_pos_sim(room, room2))

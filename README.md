@@ -42,14 +42,15 @@ Base/
 
 ### Basic Import
 ```python
-from ragen.env.spatial.Base import Room, ExplorationManager, generate_room
+from ragen.env.spatial.Base import Room, ExplorationManager, RoomGenerator
 ```
 
 ### Room Generation
 ```python
 import numpy as np
 np_random = np.random.RandomState(42)
-room = generate_room(n_objects=5, np_random=np_random)
+room, agent = RoomGenerator.generate_room(n_objects=5, np_random=np_random)
+"""Agent is decoupled from Room."""
 ```
 
 ### Exploration
@@ -82,3 +83,23 @@ score = eval_manager.submit_answer("north")
 2. Implement `generate_question()` method
 3. Add new task to `EvalTaskType` enum in `evaluation/task_types.py`
 4. Add configuration options as needed
+
+
+
+## TODO
+1. Change from single room to multiple rooms
+2. Modify action:
+    a. visibility of objects: can only see objects in same room; a field of view
+    b. add GoThroughDoor action: the action will: move agent to the door; move agent into another room
+3. Update exploration manager:
+    a. gates are also used in the graph
+
+Storyline:
+1. Use different exploration strategies as different agents:
+- (Oracle) passive agent with minimal queries: only distance queries --> minimal turns (unreachable lower bounds)
+- (Strategist) passive agent with best strtagey --> best turns
+- (Inquisitor) passive agent with all necessary queries --> maximum turns
+- active agent --> #turns for exploration efficiency
+2. Exploration efficiency is reformulated to:
+- Advantage over Inquisitor
+- Gap between Oracle/Strategist

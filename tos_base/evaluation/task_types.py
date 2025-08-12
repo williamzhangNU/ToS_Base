@@ -2,8 +2,9 @@ from enum import Enum
 from typing import Dict, Type, TYPE_CHECKING
 import numpy as np
 
+from ..core.room import Room
+from ..core.object import Agent
 if TYPE_CHECKING:
-    from ..core.room import Room
     from .tasks import BaseEvaluationTask
 
 class EvalTaskType(Enum):
@@ -80,13 +81,11 @@ class EvalTaskType(Enum):
         raise ValueError(f"Unknown task class name: {class_name}")
     
     @classmethod
-    def create_task(cls, task_name: str, np_random: np.random.Generator, config: dict = None, room: 'Room' = None) -> 'BaseEvaluationTask':
+    def create_task(cls, task_name: str, np_random: np.random.Generator, room: 'Room', agent: 'Agent', config: dict = None) -> 'BaseEvaluationTask':
         """Create an evaluation task instance from task name."""
-        from .tasks import BaseEvaluationTask
-        
         task_map = cls.get_task_map()
         if task_name in task_map:
             task_class = task_map[task_name]
-            return task_class(np_random, config or {}, room)
+            return task_class(np_random, room, agent, config or {})
         else:
             raise ValueError(f"Unknown evaluation task: {task_name}") 

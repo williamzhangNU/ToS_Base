@@ -118,18 +118,19 @@ class DirectionRel:
         return DirPair(h, v)
 
     @classmethod
-    def get_direction(cls, pos1: tuple, pos2: tuple, orientation: tuple = None) -> DirPair:
+    def get_direction(cls, pos1: tuple, pos2: tuple, orientation: tuple = None) -> 'DirectionRel':
         p1 = np.array(pos1)
         p2 = np.array(pos2)
         diff = p1 - p2
         h_dir = Dir.from_horizontal_delta(diff[0])
         v_dir = Dir.from_delta(diff[1])
         pair = DirPair(h_dir, v_dir)
-        return cls.transform(pair, orientation) if orientation is not None else pair
+        pair = cls.transform(pair, orientation) if orientation is not None else pair
+        return DirectionRel(pair)
 
     @classmethod
     def get_relative_orientation(cls, obj_ori: tuple, anchor_ori: tuple) -> DirPair:
-        base_dir = cls.get_direction(obj_ori, (0, 0))
+        base_dir = cls.get_direction(obj_ori, (0, 0)).pair
         return cls.transform(base_dir, anchor_ori)
 
 
@@ -140,18 +141,23 @@ class DegreeRel:
         if perspective == 'ego':
             direction = "right" if self.value > 0 else "left"
             return f"{abs(self.value):.1f} degrees to the {direction}"
-        return f"{self.value:.1f} degrees"
+        else:
+            # allo, default facing north
+            direction = "east" if self.value > 0 else "west"
+            return f"{abs(self.value):.1f} degrees to the {direction}"
     
     @classmethod
-    def get_degree(cls, pos1: tuple, pos2: tuple, ref_ori: tuple = (0, 1)) -> 'DegreeRel':
-        """Signed angle deg from ref_ori to (pos1-pos2), clockwise/right positive."""
+    def get_degree(cls, pos1: tuple, pos2: tuple, anchor_ori: tuple = (0, 1)) -> 'DegreeRel':
+        """Signed angle deg from anchor_ori to (pos1-pos2), clockwise/right positive.
+        By default, anchor_ori is (0, 1) facing north.
+        """
         p1 = np.array(pos1, dtype=float)
         p2 = np.array(pos2, dtype=float)
         v = p1 - p2
         if np.linalg.norm(v) < 1e-12:
             return DegreeRel(0.0)
         v = v / np.linalg.norm(v)
-        r = np.array(ref_ori, dtype=float)
+        r = np.array(anchor_ori, dtype=float)
         r = r / (np.linalg.norm(r) or 1.0)
         dot = float(np.clip(np.dot(r, v), -1.0, 1.0))
         cross_z = float(r[0] * v[1] - r[1] * v[0])
@@ -190,13 +196,53 @@ class TotalRelationship:
         cls,
         pos1: tuple,
         pos2: tuple,
-        perspective: str = 'ego',
-        ref_ori: tuple = (0, 1),
+        anchor_ori: Optional[tuple] = None,
         full: bool = False,
     ) -> 'TotalRelationship':
-        pair = DirectionRel.get_direction(pos1, pos2)
+        dir_rel = DirectionRel.get_direction(pos1, pos2, anchor_ori)
         if not full:
-            return cls(dir=DirectionRel(pair))
-        deg_v = DegreeRel.get_degree(pos1, pos2, ref_ori)
+            return dir_rel
+        deg_v = DegreeRel.get_degree(pos1, pos2, (anchor_ori if anchor_ori is not None else (0, 1)))
         dist_v = DistanceRel.get_distance(pos1, pos2)
-        return cls(dir=DirectionRel(pair), deg=deg_v, dist=dist_v)
+        return cls(dir=dir_rel, deg=deg_v, dist=dist_v)
+
+    # ---- Unified interface helpers ----
+    @classmethod
+    def get_direction(
+        cls,
+        pos1: tuple,
+        pos2: tuple,
+        anchor_ori: Optional[tuple] = None,
+    ) -> DirectionRel:
+        """Get directional relation between two positions.
+        
+        Optionally provide anchor_ori to transform according to the anchor orientation.
+        """
+        return DirectionRel.get_direction(pos1, pos2, anchor_ori)
+
+    @classmethod
+    def get_orientation(
+        cls,
+        obj_ori: tuple,
+        anchor_ori: tuple,
+    ) -> tuple[DirPair, str]:
+        """Get relative orientation of an object with respect to an anchor orientation.
+
+        Returns DirPair and orientation string among {'forward','backward','right','left'}.
+        """
+        dir_pair = DirectionRel.get_relative_orientation(tuple(obj_ori), tuple(anchor_ori))
+        mapping = {
+            DirPair(Dir.SAME, Dir.FORWARD): 'forward',
+            DirPair(Dir.SAME, Dir.BACKWARD): 'backward',
+            DirPair(Dir.RIGHT, Dir.SAME): 'right',
+            DirPair(Dir.LEFT, Dir.SAME): 'left',
+        }
+        return dir_pair, mapping[dir_pair]
+
+    @classmethod
+    def get_degree(cls, pos1: tuple, pos2: tuple, anchor_ori: tuple = (0, 1)) -> DegreeRel:
+        return DegreeRel.get_degree(pos1, pos2, anchor_ori)
+
+    @classmethod
+    def get_distance(cls, pos1: tuple, pos2: tuple) -> DistanceRel:
+        return DistanceRel.get_distance(pos1, pos2)

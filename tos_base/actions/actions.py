@@ -3,6 +3,8 @@ import re
 import numpy as np
 
 from .base import BaseAction, ActionResult
+from ..core.object import Gate
+from ..core.relationship import TotalRelationship
 
 """
 Specific action implementations for spatial exploration.
@@ -48,10 +50,9 @@ class MoveAction(BaseAction):
         super().__init__(target)
         self.target = target
 
-    def _move_agent_to_pos(self, room, target_pos):
-        """Move agent to target position, shift coordinate system to keep agent at origin"""
-        for obj in [o for o in room.all_objects if o.name != room.agent.name]:
-            obj.pos = obj.pos - target_pos
+    def _move_agent_to_pos(self, agent, target_pos):
+        """Move agent to target position (absolute coordinates)."""
+        agent.pos = target_pos.copy()
     
     def success_message(self, **kwargs) -> str:
         return f"You moved at {self.target}."
@@ -61,15 +62,15 @@ class MoveAction(BaseAction):
         errors = {"not_found": "object not found", "not_visible": "object not visible"}
         return f"Cannot move to '{self.target}': {errors.get(error_type, 'execution failed')}."
     
-    def execute(self, room, **kwargs) -> ActionResult:
+    def execute(self, room, agent, **kwargs) -> ActionResult:
         """Execute move action on room state."""
         if not room.has_object(self.target):
             return ActionResult(False, self.get_feedback(False, "not_found"), str(self), 'move', {'target_name': self.target})
         
         target_obj = room.get_object_by_name(self.target)
-        if not kwargs.get('move_anyway', False) and not self._is_visible(room.agent, target_obj):
+        if not kwargs.get('move_anyway', False) and not self._is_visible(agent, target_obj):
             return ActionResult(False, self.get_feedback(False, "not_visible"), str(self), 'move', {'target_name': self.target})        
-        self._move_agent_to_pos(room, target_obj.pos)
+        self._move_agent_to_pos(agent, target_obj.pos)
 
         return ActionResult(True, self.get_feedback(True), str(self), 'move', {'target_name': self.target})
     
@@ -90,12 +91,10 @@ class RotateAction(BaseAction):
         super().__init__(degrees)
         self.degrees = int(degrees)
 
-    def _rotate_agent(self, room, degrees: int):
-        """Rotate agent by specified degrees, shift coordinate system to keep agent at origin"""
+    def _rotate_agent(self, agent, degrees: int):
+        """Rotate agent by specified degrees (clockwise)."""
         rotation_matrix = self._get_rotation_matrix(degrees)
-        for obj in [o for o in room.all_objects if o.name != room.agent.name]:
-            obj.pos = obj.pos @ rotation_matrix
-            obj.ori = obj.ori @ rotation_matrix
+        agent.ori = agent.ori @ rotation_matrix
     
     def success_message(self, **kwargs) -> str:
         return f"You rotated clockwise {self.degrees}°."
@@ -105,11 +104,11 @@ class RotateAction(BaseAction):
             return f"Cannot rotate by {self.degrees}°: only {self.VALID_DEGREES} allowed."
         return f"Cannot rotate by {self.degrees}°: execution failed."
     
-    def execute(self, room, **kwargs) -> ActionResult:
+    def execute(self, room, agent, **kwargs) -> ActionResult:
         """Execute rotate action on room state."""
         if self.degrees is None or self.degrees not in self.VALID_DEGREES:
             return ActionResult(False, self.get_feedback(False, "invalid_degree"), str(self), 'rotate', {'degrees': self.degrees})
-        self._rotate_agent(room, self.degrees)   
+        self._rotate_agent(agent, self.degrees)   
         return ActionResult(True, self.get_feedback(True), str(self), 'rotate', {'degrees': self.degrees})
     
     def __repr__(self):
@@ -130,15 +129,17 @@ class ReturnAction(BaseAction):
     def error_message(self, error_type: str) -> str:
         return "Cannot return to anchor: execution failed."
     
-    def execute(self, room, **kwargs) -> ActionResult:
+    def execute(self, room, agent, **kwargs) -> ActionResult:
         """Execute return action on room state."""
-        ori_to_deg = {(0, 1): 0, (0, -1): 180, (1, 0): 90, (-1, 0): 270}
-        target_deg = ori_to_deg[tuple(room.initial_pos.ori)]
-        
-        MoveAction(room.initial_pos.name).execute(room)
-        RotateAction(target_deg).execute(room)
-        
-        return ActionResult(True, self.get_feedback(True), str(self), 'return', {'target_name': room.initial_pos.name, 'degrees': target_deg})
+        # move to initial position
+        agent.pos = agent.init_pos.copy()
+        # rotate to initial orientation (compute delta)
+        deg = {(0, 1): 0, (-1, 0): 90, (0, -1): 180, (1, 0): 270}[tuple(agent.ori)]
+        agent.ori = agent.init_ori.copy()
+        # restore room id if tracked
+        if agent.init_room_id is not None:
+            agent.room_id = agent.init_room_id
+        return ActionResult(True, self.get_feedback(True), str(self), 'return', {'target_name': 'initial_pos', 'degrees': deg})
     
     def __repr__(self):
         return "Return()"
@@ -169,12 +170,11 @@ class ObserveAction(BaseAction):
     def error_message(self, error_type: str) -> str:
         return "Cannot observe: execution failed."
     
-    def execute(self, room, **kwargs) -> ActionResult:
+    def execute(self, room, agent, **kwargs) -> ActionResult:
         """Execute observe action on room state. NOTE Also neglect same position objects."""
-        neglect_objects = kwargs.get('neglect_objects', []) + [obj.name for obj in room.objects if np.allclose(obj.pos, room.agent.pos)]
+        neglect_objects = kwargs.get('neglect_objects', []) + [obj.name for obj in room.objects if np.allclose(obj.pos, agent.pos)]
         with_orientation = kwargs.get('with_orientation', True)
-        full = (self.MODE == 'full')
-        visible_objects = [obj for obj in room.objects if self._is_visible(room.agent, obj) and obj.name not in neglect_objects]
+        visible_objects = [obj for obj in room.objects if self._is_visible(agent, obj) and obj.name not in neglect_objects]
         
         if not visible_objects:
             answer = "Nothing in your field of view."
@@ -184,14 +184,14 @@ class ObserveAction(BaseAction):
 
         relationships = []
         for obj in visible_objects:
-            if full:
-                rel = room.get_relationship(obj.name, room.agent.name, perspective='ego', full=True)
+            if self.MODE == 'full':
+                rel = TotalRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
                 answer_str = f"{obj.name} is {rel.to_string()}"
             else:
-                _, dir_str = room.get_direction(obj.name, room.agent.name, perspective='ego')
-                answer_str = f"{obj.name} is {dir_str}"
+                dir_rel = TotalRelationship.get_direction(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
+                answer_str = f"{obj.name} is {dir_rel.to_string('ego')}"
             if with_orientation and obj.has_orientation:
-                _, orientation = room.get_orientation(obj.name, room.agent.name)
+                _, orientation = TotalRelationship.get_orientation(tuple(obj.ori), tuple(agent.ori))
                 answer_str += f" and faces {orientation}"
             relationships.append(answer_str)
         final_answer = ", ".join(relationships)
@@ -255,7 +255,7 @@ class TermAction(BaseAction):
     def error_message(self, error_type: str) -> str:
         return "Cannot terminate exploration: execution failed."
     
-    def execute(self, room, **kwargs) -> ActionResult:
+    def execute(self, room, agent, **kwargs) -> ActionResult:
         """Execute term action on room state."""
         return ActionResult(True, self.get_feedback(True), str(self), 'term', {'terminated': True})
     
@@ -270,8 +270,56 @@ class TermAction(BaseAction):
     def __repr__(self):
         return "Term()"
 
+
+class GoThroughDoorAction(BaseAction):
+    """Go through a gate (door) connecting two rooms.
+    Valid only if agent is at the gate's position and the gate connects two rooms.
+    """
+
+    format_desc = "GoThroughDoor(door_name)"
+    description = "Go through a door when standing at it; switches agent's room to the other side."
+    example = "GoThroughDoor(door1)"
+    format_pattern = r"^GoThroughDoor\(([A-Za-z0-9_-]+)\)$"
+
+    def __init__(self, door_name: str):
+        super().__init__(door_name)
+        self.door_name = door_name
+
+    def success_message(self, **kwargs) -> str:
+        return f"You pass through {self.door_name}."
+
+    def error_message(self, error_type: str) -> str:
+        errors = {
+            "not_found": "door not found",
+            "not_gate": "target is not a door",
+            "not_at_door": "you are not at the door position",
+            "invalid_rooms": "door does not connect two rooms",
+        }
+        return f"Cannot go through '{self.door_name}': {errors.get(error_type, 'execution failed')}."
+
+    def execute(self, room, agent, **kwargs) -> ActionResult:
+        if not room.has_object(self.door_name):
+            return ActionResult(False, self.get_feedback(False, "not_found"), str(self), 'go_through_door', {})
+        door = room.get_object_by_name(self.door_name)
+        assert isinstance(door, Gate), "Door must be a Gate object"
+        # Treat as door if it is listed in room.gates by name
+        if self.door_name not in [g.name for g in room.gates]:
+            return ActionResult(False, self.get_feedback(False, "not_gate"), str(self), 'go_through_door', {})
+        if not np.allclose(agent.pos, door.pos):
+            return ActionResult(False, self.get_feedback(False, "not_at_door"), str(self), 'go_through_door', {})
+
+        # Determine next room id
+        # door.room_id may be List[int]; agent.room_id should be int
+        door_connected_room_ids = door.room_id
+        assert len(door_connected_room_ids) == 2, "Door must connect two rooms"
+        next_room_id = door_connected_room_ids[0] if door_connected_room_ids[0] != agent.room_id else door_connected_room_ids[1]
+        agent.room_id = next_room_id
+        # set orientation to door's orientation for the new room, if available
+        agent.ori = door.get_ori_for_room(int(next_room_id)).copy()
+        return ActionResult(True, self.get_feedback(True), str(self), 'go_through_door', {"door": self.door_name, "room_id": agent.room_id})
+
 # Action registry for easy lookup
-ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveAction, ObserveRelAction, ObserveDirAction, TermAction]
+ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveAction, ObserveRelAction, ObserveDirAction, GoThroughDoorAction, TermAction]
 
 
 class ActionSequence:
@@ -352,14 +400,14 @@ class ActionSequence:
 
 if __name__ == "__main__":
     # Test action parsing and execution
-    from ..core import Room, Object, Agent
+    from ..core import BaseRoom, Object, Agent
     import numpy as np
     
     # Create test room
     agent = Agent()
     table = Object("table", np.array([1, 2]), np.array([0, 1]))
     chair = Object("chair", np.array([-2, 1]), np.array([0, 1]))
-    room = Room(agent, [table, chair], name="test_room")
+    room = BaseRoom([table, chair], name="test_room")
 
     print(f"Room: {room}")
     
