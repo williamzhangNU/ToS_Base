@@ -246,6 +246,7 @@ class RotEvaluationTask(BaseEvaluationTask):
 
     
     QUESTION_TEMPLATE = (
+        "You return to your starting position and facing north.\n"
         "You will perform a full 360-degree rotation by continuously turning {turn_direction} in place.\n"
         "As you rotate, imagine a narrow spotlight beam projecting straight ahead from your current viewpoint.\n"
         "Your task is to identify the sequence of objects that become visible during the full rotation.\n\n"
@@ -342,6 +343,7 @@ class CircularRotEvaluationTask(BaseEvaluationTask):
     """
 
     QUESTION_TEMPLATE = (
+        "You return to your starting position and facing north.\n"
         "Assume your original position is the center of the room.\n"
         "Move {direction} from the center until you are farther away than any object in the room.\n"
         "Now face the center and walk {turn_direction} in a circle around it.\n"
@@ -426,6 +428,7 @@ class RotDualEvaluationTask(BaseEvaluationTask):
     """
 
     QUESTION_TEMPLATE = (
+        "You return to your starting position and facing north.\n"
         "You performed a complete 360-degree rotation at your position.\n"
         "During the rotation, these objects appeared directly in front of you in this order:\n"
         "{object_sequence}\n\n"
@@ -494,7 +497,7 @@ class E2AEvaluationTask(BaseEvaluationTask):
     """
 
     QUESTION_TEMPLATE = (
-        "You are at position (0, 0) and facing north.\n"
+        "You return to your starting position (0, 0) and facing north.\n"
         "Your front is the positive y-axis, your right is the positive x-axis.\n"
         "What are the coordinates and orientations of these objects: {object_names}?\n\n"
         "Answer format: [obj at (x, y) facing orientation, ...] where orientation is north/east/south/west\n"
@@ -634,7 +637,7 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
     """
 
     QUESTION_TEMPLATE = (
-        "You now see the room from a new point, both your position and facing direction may have changed.\n"
+        "You observe the room from another view with new location and orientation.\n"
         "{observations}\n"
         "Based on your observations, what is the direction and orientation of the {target_name} from your current perspective?\n\n"
         "Hint: first reason about your current position and facing direction."
@@ -714,7 +717,7 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
 
     ROTATION_TEMPLATE = (
         "One object in the room has rotated.\n"
-        "You observe the room from another view.\n"
+        "You observe the room from another view with new location and orientation.\n"
         "{observations}\n"
         "Which object rotated and by how many degrees clockwise?\n\n"
         "Answer format: <object_name>, <degrees>\n"
@@ -725,7 +728,7 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
     
     MOVEMENT_TEMPLATE = (
         "One object in the room has moved.\n" 
-        "You observe the room from another view.\n"
+        "You observe the room from another view with new location and orientation.\n"
         "{observations}\n"
         "Which object moved?\n\n"
         "Answer format: <object_name>\n"
