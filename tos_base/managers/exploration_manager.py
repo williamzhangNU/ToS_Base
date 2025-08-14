@@ -1,6 +1,7 @@
 import copy
 from copy import deepcopy
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Set
+import numpy as np
 from dataclasses import dataclass
 
 from ..core.object import Agent
@@ -10,22 +11,20 @@ from ..core.room import Room
 @dataclass
 class ExplorationTurnLog:
     """Log data for a single exploration turn."""
-    coverage: float
-    redundancy: float
-    n_valid_queries: int
-    n_redundant_queries: int
-    is_redundant: bool
+    node_coverage: float
+    edge_coverage: float
+    step: int
+    action_counts: Dict[str, int]
     action_info: Dict[str, Any]
     room_state: Optional['Room'] = None
     agent_state: Optional['Agent'] = None
 
     def to_dict(self):
         return {
-            "is_redundant": self.is_redundant,
-            "coverage": self.coverage,
-            "redundancy": self.redundancy,
-            "n_valid_queries": self.n_valid_queries,
-            "n_redundant_queries": self.n_redundant_queries,
+            "node_coverage": self.node_coverage,
+            "edge_coverage": self.edge_coverage,
+            "step": self.step,
+            "action_counts": dict(self.action_counts),
             "action_info": self.action_info,
             "room_state": self.room_state.to_dict() if self.room_state else {},
             "agent_state": self.agent_state.to_dict() if self.agent_state else {}
@@ -38,12 +37,7 @@ class ExplorationManager:
     - Executes actions and logs turns.
     - Graph-related metrics default to safe zeros.
     """
-    DEFAULT_EXP_SUMMARY = {
-        "coverage": 0, # coverage of the exploration
-        "redundancy": 0, # redundancy of the exploration
-        "n_valid_queries": 0, # number of valid queries
-        "n_redundant_queries": 0, # number of redundant queries
-    }
+    DEFAULT_EXP_SUMMARY = {"node_coverage": 0.0, "edge_coverage": 0.0, "n_exploration_steps": 0, "action_counts": {}}
     
     def __init__(self, room: Room, agent: Agent):
         self.base_room = room.copy()
@@ -56,38 +50,43 @@ class ExplorationManager:
         self.turn_logs: List[ExplorationTurnLog] = []
         self.history: List[ActionSequence] = []
         
-    # Graph utilities removed in simplified manager
-    
-    def _update_move(self, target_name: str):
-        """No-op in graph-free implementation."""
-        return None
+        # Coverage tracking (exclude gates)
+        self._init_node_name = "__init__"
+        self.init_pos = self.agent.init_pos.copy()
+        self._init_room_id = int(self.agent.init_room_id)
 
-    def _update_rotate(self, degrees: int):
-        """No-op in graph-free implementation."""
-        return None
-    
-    def _update_observe(self) -> bool:
-        """Graph-free observe update: return non-redundant by default."""
-        return False
+        # Node names: all objects in the exploration room
+        self.node_names: List[str] = [o.name for o in self.exploration_room.objects]
 
+        # Edge targets: per-room object pairs + (init, object-in-init-room)
+        self.target_edges: Set[frozenset] = set()
+        for _, names in self.exploration_room.objects_by_room.items():
+            if not names:
+                continue
+            for i, a in enumerate(names):
+                for b in names[i + 1:]:
+                    self.target_edges.add(frozenset({a, b}))
+        init_room_objects = self.exploration_room.objects_by_room.get(self._init_room_id, [])
+        for name in init_room_objects:
+            self.target_edges.add(frozenset({self._init_node_name, name}))
+        
+        self.observed_nodes: Set[str] = set()
+        self.known_edges: Set[frozenset] = set()
+
+        # Action counts
+        self.action_counts: Dict[str, int] = {}
+        
     def _execute_and_update(self, action: BaseAction) -> ActionResult:
         """Execute action and update exploration state."""
         kwargs = {}
         result = action.execute(self.exploration_room, self.agent, **kwargs)
-        
         if not result.success:
             return result
         
-        # success execution
-        if isinstance(action, MoveAction):
-            self._update_move(result.data.get('target_name', ''))
-        elif isinstance(action, RotateAction):
-            self._update_rotate(result.data.get('degrees', 0))
-        elif isinstance(action, ReturnAction):
-            self._update_move(result.data.get('target_name', ''))
-            self._update_rotate(result.data.get('degrees', 0))
-        elif isinstance(action, ObserveAction):
-            result.data['redundant'] = self._update_observe()
+        # Count action and update coverage
+        self.action_counts[result.action_type] = self.action_counts.get(result.action_type, 0) + 1
+        if isinstance(action, ObserveAction):
+            self._update_coverage_from_observe(result)
         
         return result
 
@@ -106,7 +105,7 @@ class ExplorationManager:
         
         assert action_sequence.final_action, "Action sequence requires a final action."
 
-        info = {'redundant': False}
+        info = {}
         action_results = []
         
         # Execute motion actions
@@ -134,7 +133,7 @@ class ExplorationManager:
         self._log_exploration(action_sequence, info)
         return info, action_results
     
-    def finish_exploration(self, return_to_origin: bool = True, keep_object_names: List[str] | None = None) -> Room:
+    def finish_exploration(self, return_to_origin: bool = True) -> Room:
         """Complete exploration and return final room state."""
         if return_to_origin:
             result = self.execute_action(ReturnAction())
@@ -145,44 +144,65 @@ class ExplorationManager:
     
     def get_exp_summary(self) -> Dict[str, Any]:
         """Get exploration summary."""
-        return {**self._update_exp_summary(), "n_exploration_steps": len(self.turn_logs)}
+        return dict(self._update_exp_summary())
     
     @staticmethod
     def aggregate_group_performance(exp_summaries: List[Dict]) -> Dict[str, float]:
         """Calculate exploration performance for a group."""
         if not exp_summaries:
-            return {"avg_coverage": 0.0, "avg_redundancy": 0.0, "avg_exploration_steps": 0.0}
+            return {"avg_coverage": 0.0, "avg_exploration_steps": 0.0, "avg_node_coverage": 0.0, "avg_edge_coverage": 0.0}
         
+        n = len(exp_summaries)
         return {
-            "avg_coverage": sum(m.get('coverage', 0) for m in exp_summaries) / len(exp_summaries),
-            "avg_redundancy": sum(m.get('redundancy', 0) for m in exp_summaries) / len(exp_summaries),
-            "avg_exploration_steps": sum(m.get('n_exploration_steps', 0) for m in exp_summaries) / len(exp_summaries)
+            "avg_coverage": sum(m.get('coverage', 0.0) for m in exp_summaries) / n,
+            "avg_exploration_steps": sum(m.get('n_exploration_steps', 0) for m in exp_summaries) / n,
+            "avg_node_coverage": sum(m.get('node_coverage', m.get('coverage', 0.0)) for m in exp_summaries) / n,
+            "avg_edge_coverage": sum(m.get('edge_coverage', 0.0) for m in exp_summaries) / n,
         }
     
-    def get_unknown_pairs(self, keep_object_names: List[str] | None = None) -> List[Tuple[str, str]]:
-        """Graph-free: no relationship tracking; return empty list."""
-        return []
+    # No passive history generation here; proxies produce text histories directly.
     
-    def get_inferable_pairs(self, keep_object_names: List[str] | None = None) -> List[Tuple[str, str]]:
-        """Graph-free: no inference; return empty list."""
-        return []
-    
-    def generate_passive_history(self, strategy: str = "oracle") -> str:
-        """Generate exploration history text using a proxy strategy.
-        Used when env is in passive mode.
-        """
-        from .agent_proxy import AutoExplore
-        return AutoExplore(self.base_room.copy(), self.agent.copy(), None, strategy=strategy).gen_exp_history()
-    
+    # === Coverage helpers ===
+    def _anchor_name(self) -> Optional[str]:
+        # If standing on an object position, use that object as anchor (exclude gates)
+        for obj in self.exploration_room.objects:
+            if np.allclose(obj.pos, self.agent.pos):
+                return obj.name
+        # Initial position anchor
+        if np.allclose(self.agent.pos, self.init_pos):
+            return self._init_node_name
+        return None
+
+    def _update_coverage_from_observe(self, observe_result: 'ActionResult') -> None:
+        visible = observe_result.data.get('visible_objects', []) or []
+        # node coverage
+        for name in visible:
+            if name in self.node_names:
+                self.observed_nodes.add(name)
+        # edge coverage: observe A from B (B is anchor)
+        anchor = self._anchor_name()
+        if not anchor:
+            return
+        for name in visible:
+            if name == anchor:
+                continue
+            pair = frozenset({anchor, name})
+            if pair in self.target_edges:
+                self.known_edges.add(pair)
+
 
     
     def _log_exploration(self, action_sequence: ActionSequence, info: Dict[str, Any]) -> None:
         """Log exploration history and efficiency."""
-        # Graph-free metrics stay zero; still log current turn
+        # Log current turn with coverage snapshot
         info['agent_room_id'] = getattr(self.agent, 'room_id', None)
+        self._update_exp_summary()
+        step_idx = len(self.turn_logs) + 1
         turn_log = ExplorationTurnLog(
-            **self._update_exp_summary(),
-            is_redundant=False,
+            node_coverage=self.exp_summary.get('node_coverage', 0.0),
+            edge_coverage=self.exp_summary.get('edge_coverage', 0.0),
+            step=step_idx,
+            action_counts=dict(self.exp_summary.get('action_counts', {})),
             action_info=deepcopy(info),
             room_state=self.exploration_room.copy(),
             agent_state=self.agent.copy()
@@ -191,16 +211,19 @@ class ExplorationManager:
         self.history.append(action_sequence)
     
     def _update_exp_summary(self) -> Dict[str, Any]:
-        """Calculate current exploration efficiency."""
-        # Graph-free: return safe defaults
+        """Calculate current coverage and summary stats."""
+        n_nodes = len(self.node_names) or 1
+        node_cov = len(self.observed_nodes) / n_nodes
+        edge_den = len(self.target_edges) or 1
+        edge_cov = len(self.known_edges) / edge_den
         self.exp_summary = {
-            "coverage": 0.0,
-            "redundancy": 0.0,
-            "n_valid_queries": 0,
-            "n_redundant_queries": 0,
+            "node_coverage": node_cov,
+            "edge_coverage": edge_cov,
+            "n_exploration_steps": len(self.turn_logs),
+            "action_counts": dict(self.action_counts),
         }
         return self.exp_summary
     
 
 if __name__ == "__main__":
-    print("ExplorationManager is graph-free. No tests to run here.")
+    pass

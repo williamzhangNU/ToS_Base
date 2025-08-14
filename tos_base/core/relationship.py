@@ -60,7 +60,7 @@ class DirPair:
 class DirectionRel:
     pair: DirPair
 
-    # Perspective mappings
+    # Perspective mappings for relative location (pairwise positions)
     EGO_LABELS = {
         Dir.SAME: 'same',
         Dir.FORWARD: 'front',
@@ -84,8 +84,17 @@ class DirectionRel:
         (-1, 0): {Dir.FORWARD: Dir.RIGHT, Dir.BACKWARD: Dir.LEFT, Dir.RIGHT: Dir.BACKWARD, Dir.LEFT: Dir.FORWARD, Dir.SAME: Dir.SAME, Dir.UNKNOWN: Dir.UNKNOWN},
     }
 
-    def to_string(self, perspective: str = 'ego') -> str:
-        return self.pair_to_string(self.pair, perspective)
+    def to_string(self, perspective: str = 'ego', kind: str = 'relation', gate_dir: 'DirectionRel' = None) -> str:
+        """Convert to string.
+
+        kind='relation' -> use front/back/left/right (ego) or north/south/east/west (allo) for position relations
+        kind='orientation' -> use forward/backward/right/left (ego) or north/south/east/west (allo) for facing
+        """
+        assert perspective in ('ego', 'allo'), f"Invalid perspective: {perspective}"
+        assert kind in ('relation', 'orientation'), f"Invalid kind: {kind}"
+        if kind == 'relation':
+            return self.pair_to_string(self.pair, perspective)
+        return self._orientation_to_string(self.pair, perspective, None if gate_dir is None else gate_dir.pair)
 
     @classmethod
     def pair_to_string(cls, direction: Union[Dir, DirPair], perspective: str = 'ego') -> str:
@@ -100,10 +109,44 @@ class DirectionRel:
         if direction.horiz == Dir.SAME and direction.vert == Dir.SAME:
             return 'same'
         if direction.horiz == Dir.SAME:
-            return v_str
+            return f'directly {v_str}'
         if direction.vert == Dir.SAME:
-            return h_str
-        return f"{h_str}-{v_str}"
+            return f'directly {h_str}'
+        # Prefer natural ordering: vertical first, then horizontal (e.g., front-right)
+        return f"{v_str}-{h_str}"
+
+    @classmethod
+    def _orientation_to_string(cls, orientation: DirPair, perspective: str = 'ego', gate_dir: DirPair = None) -> str:
+        """Orientation labels: ego -> forward/backward/right/left; allo -> north/south/east/west.
+        For gates and provided gate_dir (relative dir of gate wrt agent), return "gate at <side> wall".
+        """
+        assert perspective in ('ego', 'allo'), f"Invalid perspective: {perspective}"
+        # Gate phrasing
+        if gate_dir is not None:
+            if orientation.vert != Dir.SAME and orientation.horiz == Dir.SAME: # front/back wall
+                side = {Dir.FORWARD: 'front', Dir.BACKWARD: 'back'}.get(gate_dir.vert)
+                if side:
+                    return f"gate at {side} wall"
+            if orientation.horiz != Dir.SAME and orientation.vert == Dir.SAME: # right/left wall
+                side = {Dir.RIGHT: 'right', Dir.LEFT: 'left'}.get(gate_dir.horiz)
+                if side:
+                    return f"gate at {side} wall"
+        if orientation.horiz == Dir.SAME and orientation.vert == Dir.SAME:
+            # Degenerate orientation
+            return 'same'
+        # Determine the single facing direction
+        if orientation.horiz != Dir.SAME and orientation.vert == Dir.SAME:
+            primary = orientation.horiz  # RIGHT or LEFT
+        elif orientation.vert != Dir.SAME and orientation.horiz == Dir.SAME:
+            primary = orientation.vert   # FORWARD or BACKWARD
+        else:
+            raise ValueError(f"Invalid orientation: {orientation}")
+
+        if perspective == 'ego':
+            mapping = {Dir.FORWARD: 'forward', Dir.BACKWARD: 'backward', Dir.RIGHT: 'right', Dir.LEFT: 'left'}
+        else:
+            mapping = {Dir.FORWARD: 'north', Dir.BACKWARD: 'south', Dir.RIGHT: 'east', Dir.LEFT: 'west'}
+        return mapping.get(primary, 'unknown')
 
     @classmethod
     def transform(cls, dir_pair: DirPair, orientation: tuple) -> DirPair:
@@ -138,13 +181,8 @@ class DirectionRel:
 class DegreeRel:
     value: float
     def to_string(self, perspective: str = 'ego') -> str:
-        if perspective == 'ego':
-            direction = "right" if self.value > 0 else "left"
-            return f"{abs(self.value):.1f} degrees to the {direction}"
-        else:
-            # allo, default facing north
-            direction = "east" if self.value > 0 else "west"
-            return f"{abs(self.value):.1f} degrees to the {direction}"
+        sign = '+' if self.value > 0 else ('-' if self.value < 0 else '')
+        return f"{sign}{abs(self.value):.0f}°"
     
     @classmethod
     def get_degree(cls, pos1: tuple, pos2: tuple, anchor_ori: tuple = (0, 1)) -> 'DegreeRel':
@@ -169,9 +207,7 @@ class DegreeRel:
 class DistanceRel:
     value: float
     def to_string(self, perspective: str = 'ego') -> str:
-        if perspective == 'ego':
-            return f"{self.value:.2f} away"
-        return f"{self.value:.2f} away"
+        return f"{self.value:.2f}"
     
     @classmethod
     def get_distance(cls, pos1: tuple, pos2: tuple) -> 'DistanceRel':
@@ -189,7 +225,7 @@ class TotalRelationship:
     def to_string(self, perspective: str = 'ego') -> str:
         if self.deg is None or self.dist is None:
             return self.dir.to_string(perspective)
-        return f"({self.dir.to_string(perspective)}, {self.deg.to_string(perspective)}, {self.dist.to_string(perspective)})"
+        return f"{self.dir.to_string(perspective)}, {self.deg.to_string(perspective)}, {self.dist.to_string(perspective)}"
 
     @classmethod
     def relationship(
@@ -225,19 +261,10 @@ class TotalRelationship:
         cls,
         obj_ori: tuple,
         anchor_ori: tuple,
-    ) -> tuple[DirPair, str]:
-        """Get relative orientation of an object with respect to an anchor orientation.
-
-        Returns DirPair and orientation string among {'forward','backward','right','left'}.
-        """
+    ) -> DirectionRel:
+        """Get relative orientation as a DirectionRel (use to_string(kind='orientation'))."""
         dir_pair = DirectionRel.get_relative_orientation(tuple(obj_ori), tuple(anchor_ori))
-        mapping = {
-            DirPair(Dir.SAME, Dir.FORWARD): 'forward',
-            DirPair(Dir.SAME, Dir.BACKWARD): 'backward',
-            DirPair(Dir.RIGHT, Dir.SAME): 'right',
-            DirPair(Dir.LEFT, Dir.SAME): 'left',
-        }
-        return dir_pair, mapping[dir_pair]
+        return DirectionRel(dir_pair)
 
     @classmethod
     def get_degree(cls, pos1: tuple, pos2: tuple, anchor_ori: tuple = (0, 1)) -> DegreeRel:

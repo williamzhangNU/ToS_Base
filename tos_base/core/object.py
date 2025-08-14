@@ -158,7 +158,7 @@ class Gate(Object):
     def to_dict(self) -> Dict[str, Union[str, List[float], bool, int, List[int], None]]:
         base = super().to_dict()
         base.update({
-            'ori_by_room': {str(k): v.tolist() for k, v in self.ori_by_room.items()}
+            'ori_by_room': {str(k): v.tolist() for k, v in self.ori_by_room.items()},
         })
         return base
 
@@ -169,5 +169,5 @@ class Gate(Object):
             pos=np.array(obj_dict.get('pos', [0, 0])),
             ori=np.array(obj_dict.get('ori', [0, 1])),
             room_id=obj_dict.get('room_id'),
-            ori_by_room={int(k): np.array(v) for k, v in obj_dict.get('ori_by_room', {}) or {}.items()},
+            ori_by_room={int(k): np.array(v) for k, v in obj_dict.get('ori_by_room', {}).items()},
         )

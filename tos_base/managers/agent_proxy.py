@@ -1,19 +1,14 @@
+import copy
 from dataclasses import dataclass
 from typing import List, Dict, Set
 
 import numpy as np
 
-from ragen.env.spatial.Base.tos_base import (
-    Room,
-    BaseAction,
-    MoveAction,
-    RotateAction,
-    ObserveAction,
-    TermAction,
-    ExplorationManager,
-    Agent,
-)
-from ragen.env.spatial.Base.tos_base.actions import GoThroughDoorAction
+from ..core.room import Room
+from ..actions.base import BaseAction
+from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, GoThroughDoorAction
+from .exploration_manager import ExplorationManager
+from ..core.object import Agent
 from ..utils.action_utils import action_results_to_text
 
 
@@ -36,40 +31,45 @@ def _closest_cardinal(vec: np.ndarray) -> np.ndarray:
 
 
 class AgentProxy:
-    """Proxy agent supporting simple exploration strategies across rooms."""
+    """Base proxy that executes actions via ExplorationManager and logs a simple history."""
 
-    def __init__(self, room: Room, agent: Agent, strategy: str = "oracle"):
-        assert isinstance(room, Room), "AgentProxy requires Room"
+    def __init__(self, room: Room, agent: Agent):
         self.mgr = ExplorationManager(room, agent)
-        self.room, self.agent, self.strategy = self.mgr.exploration_room, self.mgr.agent, strategy
+        self.room, self.agent = self.mgr.exploration_room, self.mgr.agent
 
         self.gates_by_room: Dict[int, Set[str]] = {int(r): set(glist) for r, glist in self.room.gates_by_room.items()}
 
-        self.nodes_by_room: Dict[int, Set[str]] = {}
+        # nodes with and without gates
+        self.object_nodes_by_room: Dict[int, Set[str]] = {}
         for o in self.room.objects:
-            self.nodes_by_room.setdefault(int(o.room_id), set()).add(o.name)
-        self.known_nodes_by_room: Dict[int, Set[str]] = {rid: set() for rid in self.nodes_by_room}
+            self.object_nodes_by_room.setdefault(int(o.room_id), set()).add(o.name)
+        self.nodes_by_room: Dict[int, Set[str]] = {rid: set(names) | self.gates_by_room.get(int(rid), set()) for rid, names in self.object_nodes_by_room.items()}
+        self.known_nodes_by_room: Dict[int, Set[str]] = {int(rid): set() for rid in self.nodes_by_room}
 
         self.all_edges_by_room: Dict[int, Set[frozenset]] = {}
-        for rid, objs in self.nodes_by_room.items():
-            if not objs:
-                self.all_edges_by_room[rid] = set()
-                continue
-            gates = self.gates_by_room.get(rid, set())
+        for rid, names in self.nodes_by_room.items():
             pairs: Set[frozenset] = set()
-            for a in objs | gates:
-                for b in objs | gates:
+            for a in names:
+                for b in names:
                     if a != b:
                         pairs.add(frozenset({a, b}))
             self.all_edges_by_room[int(rid)] = pairs
         self.known_edges_by_room: Dict[int, Set[frozenset]] = {int(rid): set() for rid in self.all_edges_by_room}
 
-        self.total_nodes: int = sum(len(v) for v in self.nodes_by_room.values())
+        # add edges from initial position to objects in the starting room
+        self.initial_anchor: str = "__start__"
+        start_rid = self._current_room()
+        for obj_name in self.nodes_by_room.get(start_rid, set()):
+            self.all_edges_by_room[start_rid].add(frozenset({self.initial_anchor, obj_name}))
+
+        self.total_object_nodes: int = sum(len(v) for v in self.object_nodes_by_room.values())
 
         self.turns: List[Turn] = []
         self.visited: Set[int] = set()
         self.current_gate: str | None = None
+        self.anchor: str | None = None
 
+    # --- helpers ---
     def _current_room(self) -> int:
         return int(self.agent.room_id)
 
@@ -84,8 +84,15 @@ class AgentProxy:
 
     def _update_known_from_observe(self, last_result) -> None:
         rid = self._current_room()
-        for n in last_result.data.get("visible_objects", []):
+        vis = last_result.data.get("visible_objects", [])
+        for n in vis:
             self.known_nodes_by_room.setdefault(rid, set()).add(n)
+        # Also record edges if an anchor (gate or node) is set
+        if self.anchor:
+            known = self.known_edges_by_room.setdefault(rid, set())
+            for n in vis:
+                if n != self.anchor:
+                    known.add(frozenset({self.anchor, n}))
 
     def _rotate_to_face(self, target_pos: np.ndarray) -> List:
         vec = target_pos - self.agent.pos
@@ -116,16 +123,38 @@ class AgentProxy:
     def _unknown_nodes_in_room(self, rid: int) -> Set[str]:
         return self.nodes_by_room.get(rid, set()) - self.known_nodes_by_room.get(rid, set())
 
+    def _unknown_objects_in_room(self, rid: int) -> Set[str]:
+        return self.object_nodes_by_room.get(rid, set()) - self.known_nodes_by_room.get(rid, set())
+
     def _unknown_edges_in_room(self, rid: int) -> Set[frozenset]:
         return self.all_edges_by_room.get(rid, set()) - self.known_edges_by_room.get(rid, set())
 
-    def _score_rotation(self, rot: int, target_names: Set[str]) -> int:
-        if not target_names:
+    def _score_rotation_nodes(self, rot: int, unknown_nodes: Set[str]) -> int:
+        """How many unknown nodes become visible after rot."""
+        if not unknown_nodes:
             return 0
         objects = {o.name: o for o in self.room.all_objects}
         R = BaseAction._get_rotation_matrix(rot)
-        tmp_agent = self.agent.copy(); tmp_agent.ori = self.agent.ori @ R
-        return sum(1 for n in target_names if n in objects and BaseAction._is_visible(tmp_agent, objects[n]))
+        tmp = self.agent.copy(); tmp.ori = self.agent.ori @ R
+        return sum(1 for n in unknown_nodes if n in objects and BaseAction._is_visible(tmp, objects[n]))
+
+    def _score_rotation_edges(self, rot: int, anchor: str, unknown_edges: Set[frozenset]) -> int:
+        """How many unknown edges incident to anchor become visible after rot."""
+        anchored = {e for e in unknown_edges if anchor in e}
+        if not anchored:
+            return 0
+        objects = {o.name: o for o in self.room.all_objects}
+        R = BaseAction._get_rotation_matrix(rot)
+        tmp = self.agent.copy(); tmp.ori = self.agent.ori @ R
+        visible = {n for n, o in objects.items() if BaseAction._is_visible(tmp, o)}
+        return sum(1 for e in anchored if next(iter(e - {anchor})) in visible)
+
+    def _score_rotation(self, rot: int) -> int:
+        """Unified rotation score: edges if anchor set, otherwise nodes."""
+        rid = self._current_room()
+        if self.anchor:
+            return self._score_rotation_edges(rot, self.anchor, self._unknown_edges_in_room(rid))
+        return self._score_rotation_nodes(rot, self._unknown_nodes_in_room(rid))
 
     def _gate_between(self, a: int, b: int) -> str:
         for gate_name, rooms in self.room.rooms_by_gate.items():
@@ -138,146 +167,234 @@ class AgentProxy:
         gate_name = self._gate_between(cur, next_rid)
         gate_obj = self.room.get_object_by_name(gate_name)
         acts = []
-        acts += self._rotate_to_face(gate_obj.pos)
-        acts.append(self.mgr.execute_action(MoveAction(gate_name)))
+        # If already at the gate, skip moving and rotating
+        if not np.allclose(self.agent.pos, gate_obj.pos):
+            acts += self._rotate_to_face(gate_obj.pos)
+            acts.append(self.mgr.execute_action(MoveAction(gate_name)))
         go = self.mgr.execute_action(GoThroughDoorAction(gate_name))
         acts.append(go)
         self.current_gate = gate_name
+        self.known_nodes_by_room.setdefault(next_rid, set()).add(gate_name) # next room gate is known in next room
         return acts
 
-    def _entry_observe(self, is_initial: bool, prefix_actions: List = None) -> None:
+    def _allowed_rotations(self, is_initial: bool, continuous_rotation: bool = True) -> tuple:
         fov = BaseAction.get_field_of_view()
-        allowed = (0, 90, 180, 270) if is_initial else ((0,) if fov == 180 else (0, 90, 270))
-        rid = self._current_room()
+        if continuous_rotation:
+            # note continuous rotation: 0 -> (+90) -> 90 -> (+90) -> 180 -> (+90) -> 270
+            return (0, 90, 90, 90) if is_initial else ((0,) if fov == 180 else (0, 90, 180))
+        else:
+            # not continuous: 0, 0 -> 90, 0 -> 180, 0 -> 270
+            return (0, 90, 180, 270) if is_initial else ((0,) if fov == 180 else (0, 90, 270))
 
-        def _mark_current_gate_edges_known():
-            if self.strategy != 'inquisitor' or not self.current_gate:
-                return
-            last_obs = self.turns[-1].actions[-1]
-            vis = last_obs.data.get('visible_objects', [])
-            known = self.known_edges_by_room.setdefault(rid, set())
-            for n in vis:
-                known.add(frozenset({self.current_gate, n}))
-
-        if self.strategy == 'oracle':
-            while self._unknown_nodes_in_room(rid):
-                targets = self._unknown_nodes_in_room(rid)
-                scores = {d: self._score_rotation(d, targets) for d in allowed}
-                best, best_score = max(scores.items(), key=lambda kv: kv[1]) if scores else (0, 0)
-                if best_score == 0:
-                    break
-                self._observe((prefix_actions or []) + self._rotate_by(best))
-                prefix_actions = []
-            return
-
-        for d in allowed:
-            if self._all_nodes_known_globally():
-                break
-            self._observe((prefix_actions or []) + self._rotate_by(d))
-            prefix_actions = []
-            _mark_current_gate_edges_known()
-
-    def _inquisitor_edges(self) -> None:
-        rid = self._current_room()
-        unknown = self._unknown_edges_in_room(rid)
-        if not unknown:
-            return
-        anchors = sorted(self.nodes_by_room[rid] | self.gates_by_room[rid])
-        for anchor in anchors:
-            if not any(anchor in p for p in unknown):
-                continue
-            self._observe(self._move_to(anchor))
-            for d in (0, 90, 180, 270):
-                if d == 0:
-                    continue
-                self._observe(self._rotate_by(d))
-                last_obs = self.turns[-1].actions[-1]
-                for n in last_obs.data.get('visible_objects', []):
-                    if n == anchor:
-                        continue
-                    e = frozenset({anchor, n})
-                    self.known_edges_by_room.setdefault(rid, set()).add(e)
-                    if e in unknown:
-                        unknown.discard(e)
-                if not any(anchor in p for p in unknown):
-                    break
-        assert unknown == set(), f"Unknown pairs not resolved: {unknown}"
-
-    def _all_nodes_known_globally(self) -> bool:
-        known_total = sum(len(v) for v in self.known_nodes_by_room.values())
-        return known_total >= self.total_nodes
+    def _all_objects_known_globally(self) -> bool:
+        # early stop when all objects (exclude gates) are known
+        known_total = 0
+        for rid, objs in self.object_nodes_by_room.items():
+            known_total += len(objs & self.known_nodes_by_room.get(int(rid), set()))
+        return known_total >= self.total_object_nodes
 
     def _subtree_has_nodes(self, start_rid: int) -> bool:
+        """check if the subtree has any nodes. Start from start_rid"""
         stack = [int(start_rid)]
-        seen = set(self.visited)
+        seen = set(copy.deepcopy(self.visited))
         while stack:
             r_id = int(stack.pop())
             if r_id in seen:
                 continue
             seen.add(r_id)
-            if len(self.nodes_by_room.get(r_id, set())) > 0:
+            if len(self.object_nodes_by_room.get(r_id, set())) > 0:
                 return True
             stack.extend(int(adj_r_id) for adj_r_id in self.room.adjacent_rooms_by_room.get(r_id, []))
         return False
 
-    def _dfs(self, rid: int, is_initial: bool, pending_prefix: List = None) -> List:
-        self.visited.add(rid)
-        self._entry_observe(is_initial=is_initial, prefix_actions=pending_prefix or [])
-        if self.strategy == 'inquisitor':
-            self._inquisitor_edges()
-        if self._all_nodes_known_globally():
-            return []
-        carry: List = []
-        for nxt in sorted(self.room.adjacent_rooms_by_room.get(rid, [])):
-            if nxt in self.visited:
-                continue
-            if self.strategy == 'oracle' and not self._subtree_has_nodes(int(nxt)):
-                continue
-            to_child = carry + self._traverse_to(int(nxt))
-            carry = self._dfs(int(nxt), is_initial=False, pending_prefix=to_child)
-            carry = carry + self._traverse_to(int(rid))
-        return carry
+    # hooks for subclasses
+    def _on_entry_observe(self, is_initial: bool, prefix_actions: List = None) -> None:
+        raise NotImplementedError("Subclasses must implement this method")
 
-    def run(self) -> List[Turn]:
+    def _explore_room(self, is_initial: bool, prefix_actions: List = None) -> None:
+        # default: entry observes only
+        self._on_entry_observe(is_initial=is_initial, prefix_actions=prefix_actions)
+    
+    def _prune_dfs(self, rid: int): # if prune subtree from rid
+        return False
+
+    def _dfs(self, rid: int, is_initial: bool, pre_actions: List = None) -> List:
+        """DFS over rooms.
+        - pre_actions: actions before first observe in this room
+        - carry_actions: if no observe here, carry pre_actions into child
+        - visited: expanded rooms; stop when all objects are known
+        """
+        self.visited.add(rid)
+        before = len(self.turns)
+        self._explore_room(is_initial=is_initial, prefix_actions=pre_actions or [])
+        observed_here = len(self.turns) > before
+        carry_actions: List = [] if observed_here else list(pre_actions or [])
+        if self._all_objects_known_globally():
+            assert not carry_actions, "Carry must be empty if all objects are known"
+            return carry_actions
+        for child_rid in sorted(self.room.adjacent_rooms_by_room.get(rid, [])):
+            if child_rid in self.visited:
+                continue
+            if self._prune_dfs(int(child_rid)):
+                continue
+            to_child = carry_actions + self._traverse_to(int(child_rid))
+            carry_actions = self._dfs(int(child_rid), is_initial=False, pre_actions=to_child)
+            # Stop here if exploration is complete; avoid returning to parent.
+            if self._all_objects_known_globally():
+                return carry_actions
+            carry_actions = carry_actions + self._traverse_to(int(rid))
+        return carry_actions
+
+    def run(self) -> List[Turn]:  # to be used by subclasses too
         start_rid = self._current_room()
-        pending = self._dfs(start_rid, is_initial=True, pending_prefix=[])
-        actions = list(pending)
-        actions.append(self.mgr.execute_action(TermAction()))
-        self._add_turn(actions)
+        _ = self._dfs(start_rid, is_initial=True, pre_actions=[])
+        # final turn contains only Term()
+        self._add_turn([self.mgr.execute_action(TermAction())])
         return self.turns
 
-
-class AutoExplore:
-    """Produce text history via proxy strategies."""
-
-    def __init__(self, room: Room, agent: Agent, np_random: np.random.Generator | None = None, strategy: str = "oracle"):
-        self.strategy = strategy
-        self.proxy = AgentProxy(room, agent, strategy=strategy)
-
-    def _format_history_to_obs(self, turns: List[Turn]) -> str:
-        def ori_name(v):
-            return {(0, 1): 'north', (1, 0): 'east', (0, -1): 'south', (-1, 0): 'west'}[tuple(v)]
+    def to_text(self) -> str:
         lines: List[str] = []
-        for i, t in enumerate(turns, 1):
+        for i, t in enumerate(self.turns, 1):
             lines.append(f"{i}. {action_results_to_text(t.actions)}")
         return "\n".join(lines)
 
-    def gen_exp_history(self) -> str:
-        return self._format_history_to_obs(self.proxy.run())
+
+class OracleAgentProxy(AgentProxy):
+    """Oracle Agent: greedy rotations to reveal all nodes (knows everything about nodes)."""
+
+    def _on_entry_observe(self, is_initial: bool, prefix_actions: List = None) -> None:
+        rid = self._current_room()
+        allowed = self._allowed_rotations(is_initial, continuous_rotation=False)
+        while self._unknown_nodes_in_room(rid):
+            targets = self._unknown_nodes_in_room(rid)
+            scores = {d: self._score_rotation_nodes(d, targets) for d in allowed}
+            best, best_score = max(scores.items(), key=lambda kv: kv[1]) if scores else (0, 0)
+            
+            if best_score == 0:
+                break
+            self._observe((prefix_actions or []) + self._rotate_by(best))
+            prefix_actions = []
+
+    def _prune_dfs(self, rid: int):
+        return not self._subtree_has_nodes(rid)
+
+# TODO fix unknown objects in room
+
+class StrategistAgentProxy(AgentProxy):
+    """NodeSweeper: simple sweep rotations; may not be optimal or complete."""
+
+    def _on_entry_observe(self, is_initial: bool, prefix_actions: List = None) -> None:
+        for d in self._allowed_rotations(is_initial):
+            if self._all_objects_known_globally():
+                break
+            self._observe((prefix_actions or []) + self._rotate_by(d))
+            prefix_actions = []
+
+
+class InquisitorAgentProxy(AgentProxy):
+    """Inquisitor Agent: visit/confirm all edges between nodes (know nothing in prior)"""
+
+    def _on_entry_observe(self, is_initial: bool, prefix_actions: List = None) -> None:
+        # treat entry gate as anchor; at start, use initial anchor
+        self.anchor = self.initial_anchor if is_initial else self.current_gate
+        for d in self._allowed_rotations(is_initial):
+            if self._all_objects_known_globally(): # early stop if see all objects at entry
+                break
+            self._observe((prefix_actions or []) + self._rotate_by(d))
+            prefix_actions = []
+        self.anchor = None
+
+    # move to each node with unknown edges and observe
+    def _resolve_edges(self) -> None:
+        rid = self._current_room()
+        unknown = self._unknown_edges_in_room(rid)
+        if not unknown:
+            return
+        for anchor in self._anchors_with_unknown_edges(rid):
+            self._observe(self._move_to(anchor))
+            for d in (0, 90, 90, 90):
+                if d == 0:
+                    continue
+                self._observe(self._rotate_by(d))
+                if not any(anchor in p for p in self._unknown_edges_in_room(rid)): # no unknown edges from anchor
+                    break
+
+    # how to choose anchor node with unknown edges
+    def _anchors_with_unknown_edges(self, rid: int) -> List[str]:
+        unknown = self._unknown_edges_in_room(rid)
+        if not unknown:
+            return []
+        anchors = sorted(self.nodes_by_room.get(rid, set()))
+        return [a for a in anchors if any(a in p for p in unknown)]
+
+    def _explore_room(self, is_initial: bool, prefix_actions: List = None) -> None:
+        self._on_entry_observe(is_initial=is_initial, prefix_actions=prefix_actions)
+        self._resolve_edges()
+
+class GreedyInquisitorAgentProxy(InquisitorAgentProxy):
+    """Greedy Inquisitor Agent: pick best rotation each step."""
+
+    def _on_entry_observe(self, is_initial: bool, prefix_actions: List = None) -> None:
+        self.anchor = self.initial_anchor if is_initial else self.current_gate
+        rid = self._current_room()
+        while any(self.anchor in p for p in self._unknown_edges_in_room(rid)):
+            scores = {d: self._score_rotation(d) for d in (0, 90, 180, 270)}
+            best, best_score = max(scores.items(), key=lambda kv: kv[1]) if scores else (0, 0)
+            if best_score == 0:
+                break
+            self._observe((prefix_actions or []) + self._rotate_by(best))
+            prefix_actions = []
+        self.anchor = None
+
+    def _resolve_edges(self) -> None:
+        # move to each node with unknown edges; at each node, rotate greedily by edge score
+        rid = self._current_room()
+        unknown = self._unknown_edges_in_room(rid)
+        if not unknown:
+            return
+        for anchor in self._anchors_with_unknown_edges(rid):
+            self.anchor = anchor
+            prefix_actions = self._move_to(anchor)
+            while any(anchor in p for p in self._unknown_edges_in_room(rid)): # exist unknown edges from anchor
+                scores = {d: self._score_rotation(d) for d in (0, 90, 180, 270)}
+                best, best_score = max(scores.items(), key=lambda kv: kv[1]) if scores else (0, 0)
+                if best_score == 0:
+                    break
+                self._observe(prefix_actions + self._rotate_by(best))
+                prefix_actions = []
+
+            self.anchor = None
+
+def get_agent_proxy(name: str, room: Room, agent: Agent) -> AgentProxy:
+    name = (name or 'oracle').lower()
+    mapping = {
+        'oracle': OracleAgentProxy,
+        'strategist': StrategistAgentProxy,
+        'inquisitor': InquisitorAgentProxy,
+        'greedy_inquisitor': GreedyInquisitorAgentProxy,
+    }
+    return mapping.get(name, OracleAgentProxy)(room, agent)
 
 
 if __name__ == "__main__":
     from ..utils.room_utils import RoomGenerator, RoomPlotter
 
     room, agent = RoomGenerator.generate_room(
-        room_size=[10, 10],
-        n_objects=3,
-        generation_type='rand',
-        np_random=np.random.default_rng(42),
+        room_size=[20, 20],
+        n_objects=8,
+        np_random=np.random.default_rng(0),
+        level=3,
+        main=5
     )
-    print(BaseAction.get_field_of_view())
+    print(room)
+    print(room.gates)
     ObserveAction.MODE = 'full'
     RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
 
-    auto = AutoExplore(room, agent, strategy="oracle")
-    print(auto.gen_exp_history())
+    # proxy = OracleAgentProxy(room, agent)        # node_seeker (complete nodes)
+    # proxy = StrategistAgentProxy(room, agent)    # node_sweeper
+    # proxy = InquisitorAgentProxy(room, agent)    # edge_seeker (complete edges)
+    proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
+    proxy.run()
+    print(proxy.to_text())
+    print(proxy.mgr.get_exp_summary())

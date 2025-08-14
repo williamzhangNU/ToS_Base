@@ -13,18 +13,17 @@ Contains all concrete action classes and the ActionSequence parser.
 
 
 ACTION_INSTRUCTION = """\
-You can move in the room and turn around to observe the room.
+You can move within and across rooms, turn, observe, and traverse doors.
 
 Available Actions:
 {actions}
 
-Answer with following format:
+Answer format:
 Actions: [<movement_action1>, <movement_action2>, ... , <final_action>]
 
 Rules:
-- First use one or more movement actions, then end with exactly one final action.
-- Actions will be executed in order.
-- You have a field of view for observation: {field_of_view} degrees.
+- Use one or more movement actions, then end with exactly one final action.
+- Actions execute in order. Field of view: {field_of_view}°.
 
 Examples:
 {examples}
@@ -56,7 +55,6 @@ class MoveAction(BaseAction):
     
     def success_message(self, **kwargs) -> str:
         return f"You moved at {self.target}."
-        # return f"You moved to the same position as {self.target}."
     
     def error_message(self, error_type: str) -> str:
         errors = {"not_found": "object not found", "not_visible": "object not visible"}
@@ -134,7 +132,8 @@ class ReturnAction(BaseAction):
         # move to initial position
         agent.pos = agent.init_pos.copy()
         # rotate to initial orientation (compute delta)
-        deg = {(0, 1): 0, (-1, 0): 90, (0, -1): 180, (1, 0): 270}[tuple(agent.ori)]
+        # report clockwise degrees from north; ensure consistency with _ori_to_deg in agent_proxy
+        deg = {(0, 1): 0, (1, 0): 90, (0, -1): 180, (-1, 0): 270}[tuple(agent.ori)]
         agent.ori = agent.init_ori.copy()
         # restore room id if tracked
         if agent.init_room_id is not None:
@@ -156,8 +155,8 @@ class ObserveAction(BaseAction):
     example = "Observe()"
     format_pattern = r"^Observe\(\)$"
 
-    directional_template = "{obj_name} is {dir_str} of you"
-    orientation_template = "{obj_name} faces {orientation}"
+    directional_template = "{obj_name}: {dir_str}"
+    orientation_template = "{obj_name} facing {orientation}"
     # MODE: 'dir' for direction-only, 'full' for (dir, deg, dist)
     MODE: str = 'dir'
     
@@ -172,12 +171,12 @@ class ObserveAction(BaseAction):
     
     def execute(self, room, agent, **kwargs) -> ActionResult:
         """Execute observe action on room state. NOTE Also neglect same position objects."""
-        neglect_objects = kwargs.get('neglect_objects', []) + [obj.name for obj in room.objects if np.allclose(obj.pos, agent.pos)]
+        neglect_objects = kwargs.get('neglect_objects', []) + [obj.name for obj in room.all_objects if np.allclose(obj.pos, agent.pos)]
         with_orientation = kwargs.get('with_orientation', True)
-        visible_objects = [obj for obj in room.objects if self._is_visible(agent, obj) and obj.name not in neglect_objects]
+        visible_objects = [obj for obj in room.all_objects if self._is_visible(agent, obj) and obj.name not in neglect_objects]
         
         if not visible_objects:
-            answer = "Nothing in your field of view."
+            answer = "Nothing in view."
             return ActionResult(True, self.get_feedback(True, answer=answer), str(self), 'observe', {
                 'answer': answer, 'visible_objects': [], 'relationships': []
             })
@@ -186,13 +185,20 @@ class ObserveAction(BaseAction):
         for obj in visible_objects:
             if self.MODE == 'full':
                 rel = TotalRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
-                answer_str = f"{obj.name} is {rel.to_string()}"
+                answer_str = f"{obj.name}: {rel.to_string()}"
             else:
                 dir_rel = TotalRelationship.get_direction(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
-                answer_str = f"{obj.name} is {dir_rel.to_string('ego')}"
+                answer_str = f"{obj.name}: {dir_rel.to_string('ego')}"
             if with_orientation and obj.has_orientation:
-                _, orientation = TotalRelationship.get_orientation(tuple(obj.ori), tuple(agent.ori))
-                answer_str += f" and faces {orientation}"
+                if isinstance(obj, Gate):
+                    # Egocentric facing for gates, and phrase as wall side using relative dir
+                    g_ori = obj.get_ori_for_room(int(agent.room_id)) if getattr(agent, 'room_id', None) is not None else obj.ori
+                    ori_rel = TotalRelationship.get_orientation(tuple(g_ori), tuple(agent.ori))
+                    gate_dir = TotalRelationship.get_direction(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
+                    answer_str += f", {ori_rel.to_string('ego', kind='orientation', gate_dir=gate_dir)}"
+                else:
+                    ori_rel = TotalRelationship.get_orientation(tuple(obj.ori), tuple(agent.ori))
+                    answer_str += f" and faces {ori_rel.to_string('ego', kind='orientation')}"
             relationships.append(answer_str)
         final_answer = ", ".join(relationships)
         
@@ -277,7 +283,10 @@ class GoThroughDoorAction(BaseAction):
     """
 
     format_desc = "GoThroughDoor(door_name)"
-    description = "Go through a door when standing at it; switches agent's room to the other side."
+    description = (
+        "Go through a door when standing at it; switches your room to the other side. "
+        "After passing through, your orientation faces into the new room (perpendicular to the wall of the gate)."
+    )
     example = "GoThroughDoor(door1)"
     format_pattern = r"^GoThroughDoor\(([A-Za-z0-9_-]+)\)$"
 
@@ -286,7 +295,8 @@ class GoThroughDoorAction(BaseAction):
         self.door_name = door_name
 
     def success_message(self, **kwargs) -> str:
-        return f"You pass through {self.door_name}."
+        rid = kwargs.get('room_id')
+        return f"You pass through {self.door_name} into room {rid}." if rid is not None else f"You pass through {self.door_name}."
 
     def error_message(self, error_type: str) -> str:
         errors = {
@@ -316,7 +326,7 @@ class GoThroughDoorAction(BaseAction):
         agent.room_id = next_room_id
         # set orientation to door's orientation for the new room, if available
         agent.ori = door.get_ori_for_room(int(next_room_id)).copy()
-        return ActionResult(True, self.get_feedback(True), str(self), 'go_through_door', {"door": self.door_name, "room_id": agent.room_id})
+        return ActionResult(True, self.get_feedback(True, room_id=int(agent.room_id)), str(self), 'go_through_door', {"door": self.door_name, "room_id": int(agent.room_id)})
 
 # Action registry for easy lookup
 ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveAction, ObserveRelAction, ObserveDirAction, GoThroughDoorAction, TermAction]
@@ -399,62 +409,4 @@ class ActionSequence:
 
 
 if __name__ == "__main__":
-    # Test action parsing and execution
-    from ..core import BaseRoom, Object, Agent
-    import numpy as np
-    
-    # Create test room
-    agent = Agent()
-    table = Object("table", np.array([1, 2]), np.array([0, 1]))
-    chair = Object("chair", np.array([-2, 1]), np.array([0, 1]))
-    room = BaseRoom([table, chair], name="test_room")
-
-    print(f"Room: {room}")
-    
-    print("=== Testing Action Parsing ===")
-    
-    # Test individual action parsing
-    test_actions = [
-        "Move(table)",
-        "Rotate(90)",
-        "Rotate(-45)",
-        "Observe()",
-        "Query(table, chair)",
-        "Return()",
-        "Term()",
-        "InvalidAction()",
-        "Move()",
-        "Rotate(abc)",
-    ]
-    
-    print("Individual Action Parsing Tests:")
-    for action_str in test_actions:
-        action = ActionSequence._parse_single_action(action_str)
-        print(f"  '{action_str}' -> {action}")
-    
-    print("\n=== Testing Action Sequence Parsing ===")
-    
-    # Test action sequence parsing
-    test_sequences = [
-        "Actions: [Move(table), Rotate(90), Observe()]",
-        "Actions: [Observe()]",
-        "Actions: [Move(table), Query(table, chair)]",
-        "Actions: [Return(), Term()]",
-        "Actions: [Term()]",
-        "Actions: [Move(table)]",  # Invalid: no final action
-        "Actions: [Observe(), Query(table, chair)]",  # Invalid: multiple final actions
-        "Actions: [Move(invalid_object), Observe(), Observe()]",
-        "Actions: [Rotate(90), Rotate(-45), Return()]",
-    ]
-    
-    print("Action Sequence Parsing Tests:")
-    for seq_str in test_sequences:
-        sequence = ActionSequence.parse(seq_str)
-        if sequence:
-            print(f"  '{seq_str}' -> SUCCESS")
-            print(f"    Motion: {sequence.motion_actions}")
-            print(f"    Final: {sequence.final_action}")
-        else:
-            print(f"  '{seq_str}' -> ERROR")
-    
-    
+    pass

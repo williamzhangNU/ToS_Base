@@ -21,6 +21,9 @@ class BaseRoom:
         names = [obj.name for obj in self.all_objects]
         assert len(names) == len(set(names)), "All object names must be unique"
 
+        self.objects_by_room = {1: [obj.name for obj in self.objects]}
+        self.room_by_object = {obj.name: 1 for obj in self.objects}
+
     def add_object(self, obj: Object):
         self._init_objects(self.objects + [obj], self.gates)
 
@@ -46,16 +49,23 @@ class BaseRoom:
         max_y_bound = max_y + min(max_y - min_y, 1)
         return min_x_bound, max_x_bound, min_y_bound, max_y_bound
 
-    def get_random_point(self, rng: np.random.Generator, room_id: int | None = None) -> np.ndarray:
-        """Random coordinate around object bbox; room_id ignored (no mask)."""
+    def get_random_point(self, rng: np.random.Generator, n_points: int = 1, room_id: int | None = None) -> np.ndarray:
+        """Sample random point(s).
+        - If mask is not available, sample around object bounding box (room_id ignored).
+        - Returns shape (2,) when n_points==1, else (n_points, 2).
+        """
         if not self.all_objects:
-            return np.array([0, 0], dtype=int)
+            pt = np.array([0, 0], dtype=int)
+            return pt if n_points == 1 else np.tile(pt, (n_points, 1))
         positions = np.array([obj.pos for obj in self.all_objects])
         min_x, min_y = np.min(positions, axis=0)
         max_x, max_y = np.max(positions, axis=0)
         low_x, high_x = int(np.floor(min_x)) - 1, int(np.ceil(max_x)) + 1
         low_y, high_y = int(np.floor(min_y)) - 1, int(np.ceil(max_y)) + 1
-        return np.array([rng.integers(low_x, high_x + 1), rng.integers(low_y, high_y + 1)], dtype=int)
+        xs = rng.integers(low_x, high_x + 1, size=n_points)
+        ys = rng.integers(low_y, high_y + 1, size=n_points)
+        pts = np.stack([xs, ys], axis=1)
+        return pts[0] if n_points == 1 else pts
 
     def get_objects_orientation(self):
         ori_mapping = {(0, 1): "north", (0, -1): "south", (1, 0): "east", (-1, 0): "west"}
@@ -123,13 +133,17 @@ class Room(BaseRoom):
         h, w = self.mask.shape
         return 0, w - 1, 0, h - 1
 
-    def get_random_point(self, rng: np.random.Generator, room_id: int | None = None) -> np.ndarray:
-        """Random valid mask coordinate; filter by room_id if provided."""
-        valid = np.argwhere(self.mask == int(room_id)) if room_id is not None else np.argwhere(self.mask != -1)
-        if valid.size == 0:
-            return np.array([0, 0], dtype=int)
-        y, x = valid[rng.integers(0, len(valid))]
-        return np.array([int(x), int(y)], dtype=int)
+    def get_random_point(self, rng: np.random.Generator, n_points: int = 1, room_id: int | None = None) -> np.ndarray:
+        """Random valid mask coordinate(s); filter by room_id if provided.
+        Returns shape (2,) when n_points==1, else (n_points, 2).
+        """
+        if room_id is not None:
+            valid = np.argwhere(self.mask.T == int(room_id))
+        else:
+            valid = np.argwhere((self.mask.T >= 1) & (self.mask.T < 100))
+        rng.shuffle(valid)
+        pts = valid[:n_points]
+        return pts[0] if n_points == 1 else pts
 
     def to_dict(self) -> Dict[str, Any]:
         data = {
@@ -183,6 +197,14 @@ class Room(BaseRoom):
             adjacent_rooms_by_room[k] = sorted(list(set(adjacent_rooms_by_room[k])))
         self.gates_by_room, self.rooms_by_gate, self.adjacent_rooms_by_room = gates_by_room, rooms_by_gate, adjacent_rooms_by_room
 
+        # Recompute object-room mappings now that room_id is assigned
+        self.objects_by_room = {}
+        self.room_by_object = {}
+        for obj in self.objects:
+            rid = int(obj.room_id)
+            self.objects_by_room.setdefault(rid, []).append(obj.name)
+            self.room_by_object[obj.name] = rid
+
     def get_cell_info(self, x: int, y: int) -> Dict[str, Any]:
         info: Dict[str, Any] = {"room_id": None, "object_name": None, "gate_name": None}
         if self.mask is not None:
@@ -202,28 +224,13 @@ class Room(BaseRoom):
         return info
 
     def __repr__(self):
-        objects_details = [f"{obj.name}@{tuple(obj.pos)}:{tuple(obj.ori)}" for obj in self.objects]
+        objects_details = [f"{obj.name}@{tuple(obj.pos)}:{tuple(obj.ori)}@room{obj.room_id}" for obj in self.all_objects]
         return f"Room(name={self.name}, objects=[{', '.join(objects_details)}])"
 
 
 
 if __name__ == '__main__':
-    from ..utils.room_utils import RoomGenerator
-    room, agent = RoomGenerator.generate_room(
-        room_size=[10, 10],
-        n_objects=3,
-        generation_type='rand',
-        np_random=np.random.default_rng(42),
-    )
-    print(room)
-    print(agent)
-    print(room.get_random_point(np.random.default_rng(42)))
-    print(room.object_map)
-    print(room.get_boundary())
-    print(room.get_cell_info(2, 2))
-        # print(room.gates_by_room)
-        # print(room.rooms_by_gate)
-        # print(room.adjacent_rooms_by_room)
+    pass
 
 
 

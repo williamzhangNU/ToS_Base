@@ -13,7 +13,6 @@ class EvalTaskType(Enum):
     # Task type definitions: (short_name, class_name)
     DIR = ("dir", "DirectionEvaluationTask")
     ROT = ("rot", "RotEvaluationTask")
-    CIRCULAR_ROT = ("circular_rot", "CircularRotEvaluationTask")
     ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
     POV = ("pov", "PovEvaluationTask")
     E2A = ("e2a", "E2AEvaluationTask")
@@ -40,7 +39,7 @@ class EvalTaskType(Enum):
         # Import here to avoid circular imports
         from .tasks import (
             DirectionEvaluationTask, RotEvaluationTask,
-            CircularRotEvaluationTask, RotDualEvaluationTask, PovEvaluationTask, 
+            RotDualEvaluationTask, PovEvaluationTask, 
             E2AEvaluationTask, 
             LocalizationEvaluationTask, FalseBeliefEvaluationTask
         )
@@ -48,7 +47,6 @@ class EvalTaskType(Enum):
         task_map = {
             cls.DIR.short_name: DirectionEvaluationTask,
             cls.ROT.short_name: RotEvaluationTask,
-            cls.CIRCULAR_ROT.short_name: CircularRotEvaluationTask,
             cls.ROT_DUAL.short_name: RotDualEvaluationTask,
             cls.POV.short_name: PovEvaluationTask,
             cls.E2A.short_name: E2AEvaluationTask,

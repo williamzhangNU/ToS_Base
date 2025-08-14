@@ -54,8 +54,8 @@ class EvaluationManager:
     def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent):
         self.eval_tasks = eval_tasks
         self.np_random = np_random
-        self.room = room
-        self.agent = agent
+        self.room = room.copy()
+        self.agent = agent.copy()
         self.results = []
         self.turn_logs: List[EvaluationTurnLog] = []
         
@@ -160,32 +160,4 @@ class EvaluationManager:
 
 
 if __name__ == "__main__":
-    # Simple test
-    from ..utils.room_utils import RoomGenerator
-    from ..core.constant import CANDIDATE_OBJECTS
-    from gymnasium.utils import seeding
-    
-    eval_tasks = [{"task_type": "rot", "task_kwargs": {}}]
-    np_random = seeding.np_random(42)[0]
-    
-    room, agent = RoomGenerator.generate_room(
-        np_random=np_random,
-        n_objects=3, 
-        candidate_objects=CANDIDATE_OBJECTS,
-        generation_type="rand",
-        room_size=[10, 10],
-    )
-    eval_manager = EvaluationManager(eval_tasks, np_random, room, agent)
-    print(f"Room: {room}")
-    
-    question = eval_manager.get_current_question()
-    print(f"Question: {question}")
-    
-    task = eval_manager._get_current_eval_task()
-    print(f"Task Answer: {task.answer}")
-    
-    correct, info = eval_manager.evaluate_answer("['keyboard', 'sofa', 'microphone']")
-    print(f"Result: correct={correct}, info={info}")
-    
-    summary = eval_manager.get_eval_summary()
-    print(f"Summary: {summary['accuracy']}") 
+    pass

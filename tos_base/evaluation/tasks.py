@@ -247,12 +247,11 @@ class RotEvaluationTask(BaseEvaluationTask):
     
     QUESTION_TEMPLATE = (
         "You return to your starting position and facing north.\n"
-        "You will perform a full 360-degree rotation by continuously turning {turn_direction} in place.\n"
-        "As you rotate, imagine a narrow spotlight beam projecting straight ahead from your current viewpoint.\n"
-        "Your task is to identify the sequence of objects that become visible during the full rotation.\n\n"
+        "perform a full 360° rotation by turning {turn_direction} in place.\n"
+        "Identify the order in which objects come directly into view (straight ahead).\n\n"
         "Instructions:\n"
-        "- Object at your current position is not included\n"
-        "- Objects are visible ONLY when you turn to face them directly\n\n"
+        "- Exclude any object at your exact position\n"
+        "- An object is counted only when you face it directly\n\n"
         "Choose the correct sequence:\n"
         "{choices_text}\n\n"
         "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
@@ -266,13 +265,6 @@ class RotEvaluationTask(BaseEvaluationTask):
     
     def generate_question(self) -> str:
 
-        def get_angle(pos: np.ndarray) -> float:
-            """Get angle from positive y-axis"""
-            angle = np.arctan2(pos[0], pos[1])
-            if angle < 0:
-                angle += 2 * np.pi  
-            return angle
-        
         if self.room is None:
             raise ValueError("Room must be set before generating question")
         turn_direction = self.np_random.choice(['clockwise', 'counterclockwise'])
@@ -292,12 +284,17 @@ class RotEvaluationTask(BaseEvaluationTask):
             turn_prompt = self.TURN_TEMPLATE.format(degree=degree)
             RotateAction(degree).execute(self.room, self.agent)
 
-        objects = self.room.objects.copy()
-        direct_front_objects = [obj for obj in objects if obj.pos[0] == 0 and obj.pos[1] >= 0]
-        other_objects = [obj for obj in objects if obj.name not in [obj.name for obj in direct_front_objects]]
-        other_objects.sort(key=lambda x: get_angle(x.pos), reverse=(turn_direction == 'counterclockwise'))
+        # Compute ordering by relative bearing around the agent (CW positive)
+        def bearing_deg(obj: Object) -> Tuple[float, float]:
+            deg = TotalRelationship.get_degree(tuple(obj.pos), tuple(self.agent.pos), anchor_ori=tuple(self.agent.ori)).value
+            # Wrap to [0, 360) in chosen rotation direction
+            angle = (deg % 360.0) if turn_direction == 'clockwise' else ((-deg) % 360.0)
+            dist = TotalRelationship.get_distance(tuple(obj.pos), tuple(self.agent.pos)).value
+            return angle, dist
 
-        correct_answer = [obj.name for obj in direct_front_objects] + [obj.name for obj in other_objects]
+        objects = [obj for obj in self.room.objects if not np.array_equal(obj.pos, self.agent.pos)]
+        objects.sort(key=bearing_deg)
+        correct_answer = [obj.name for obj in objects]
         
         # Generate choices
         choices, correct_idx = self.generate_choices(correct_answer)
@@ -310,88 +307,6 @@ class RotEvaluationTask(BaseEvaluationTask):
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
         self.eval_data.reasoning = self._generate_reasoning()
-        return self.eval_data.question
-    
-    def generate_choices(self, correct_answer: list) -> Tuple[List[str], int]:
-        """Generate 4 object sequence choices"""
-        correct_answer_str = ", ".join(correct_answer)
-        choices = [correct_answer_str]
-        
-        for _ in range(3):
-            wrong_list = correct_answer.copy()
-            assert len(wrong_list) >= 3, "Need at least 3 objects for this task"
-            while ", ".join(wrong_list) in choices:
-                self.np_random.shuffle(wrong_list)
-            choices.append(", ".join(wrong_list))
-        
-        self.np_random.shuffle(choices)
-        correct_idx = choices.index(correct_answer_str)
-        return choices, correct_idx
-    
-    @override
-    def to_string(self) -> str:
-        return f"{self.__class__.__name__}({self.config.get('turn_direction', 'clockwise')})"
-
-
-class CircularRotEvaluationTask(BaseEvaluationTask):
-    """
-    Evaluation task for circular movement around the center.
-    
-    1. Agent moves far from center so distance > any object's distance to center
-    2. Agent faces center and rotates around it
-    3. Uses same logic as mental rotation at original position
-    """
-
-    QUESTION_TEMPLATE = (
-        "You return to your starting position and facing north.\n"
-        "Assume your original position is the center of the room.\n"
-        "Move {direction} from the center until you are farther away than any object in the room.\n"
-        "Now face the center and walk {turn_direction} in a circle around it.\n"
-        "Imagine a narrow spotlight beam projecting straight ahead from your current viewpoint.\n"
-        "Your task is to identify the sequence of objects that become visible during the full rotation.\n\n"
-        "Instructions:\n"
-        "- As you circle around, only count objects that are directly in front of you AND between you and the center.\n"
-        "- Objects are visible ONLY when you turn to face them directly\n\n"
-        "Choose the correct sequence:\n"
-        "{choices_text}\n\n"
-        "IMPORTANT: You must respond with ONLY the single letter choice (E.g., A, B, C, D) in your answer\n\n"
-    )
-    
-    def generate_question(self) -> str:
-        if self.room is None:
-            raise ValueError("Room must be set before generating question")
-                    
-        # Choose direction to move from center
-        direction = self.np_random.choice(['front', 'right', 'left', 'back'])
-        turn_direction = self.config.get('turn_direction', 'clockwise')
-        RotateAction({'front': 0, 'right': 90, 'left': 270, 'back': 180}[direction]).execute(self.room, self.agent)
-        
-        # Use same rotation logic as RotEvaluationTask from center
-        def get_angle(pos: np.ndarray) -> float:
-            """Get angle from positive y-axis"""
-            angle = np.arctan2(pos[0], pos[1])
-            if angle < 0:
-                angle += 2 * np.pi  
-            return angle
-        
-        objects = self.room.objects.copy()
-        objects.sort(key=lambda x: get_angle(x.pos), reverse=(turn_direction == 'counterclockwise'))
-        
-        correct_answer = [obj.name for obj in objects]
-        
-        # Generate choices
-        choices, correct_idx = self.generate_choices(correct_answer)
-        choices_text, correct_label = self.format_choices(choices, correct_idx)
-        
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(
-            direction=direction,
-            turn_direction=turn_direction,
-            choices_text=choices_text
-        )
-        self.eval_data.answer = correct_label
-        self.eval_data.choices = choices
-        self.eval_data.reasoning = self._generate_reasoning()
-        
         return self.eval_data.question
     
     def generate_choices(self, correct_answer: list) -> Tuple[List[str], int]:
@@ -429,7 +344,7 @@ class RotDualEvaluationTask(BaseEvaluationTask):
 
     QUESTION_TEMPLATE = (
         "You return to your starting position and facing north.\n"
-        "You performed a complete 360-degree rotation at your position.\n"
+        "you performed a complete 360° rotation in place.\n"
         "During the rotation, these objects appeared directly in front of you in this order:\n"
         "{object_sequence}\n\n"
         "Based on this sequence, in which direction did you rotate?\n\n"
@@ -440,22 +355,21 @@ class RotDualEvaluationTask(BaseEvaluationTask):
     
     def generate_question(self) -> str:
 
-        def get_angle(pos: np.ndarray) -> float:
-            """Get angle from positive y-axis"""
-            angle = np.arctan2(pos[0], pos[1])
-            if angle < 0:
-                angle += 2 * np.pi  
-            return angle
-        
         if self.room is None:
             raise ValueError("Room must be set before generating question")
         
         # Randomly choose rotation direction
         turn_direction = self.np_random.choice(['clockwise', 'counterclockwise'])
         
-        # Sort objects based on rotation direction
-        objects = self.room.objects
-        objects.sort(key=lambda x: get_angle(x.pos), reverse=(turn_direction == 'counterclockwise'))
+        # Sort objects by relative bearing around the agent
+        def bearing_deg(obj: Object) -> Tuple[float, float]:
+            deg = TotalRelationship.get_degree(tuple(obj.pos), tuple(self.agent.pos), anchor_ori=tuple(self.agent.ori)).value
+            angle = (deg % 360.0) if turn_direction == 'clockwise' else ((-deg) % 360.0)
+            dist = TotalRelationship.get_distance(tuple(obj.pos), tuple(self.agent.pos)).value
+            return angle, dist
+
+        objects = [obj for obj in self.room.objects if not np.array_equal(obj.pos, self.agent.pos)]
+        objects.sort(key=bearing_deg)
         
         # Create sequence string
         object_names = [obj.name for obj in objects]
@@ -497,8 +411,8 @@ class E2AEvaluationTask(BaseEvaluationTask):
     """
 
     QUESTION_TEMPLATE = (
-        "You return to your starting position (0, 0) and facing north.\n"
-        "Your front is the positive y-axis, your right is the positive x-axis.\n"
+        "You return to your starting position and facing north.\n"
+        "Consider the global map coordinates (x right, y up).\n"
         "What are the coordinates and orientations of these objects: {object_names}?\n\n"
         "Answer format: [obj at (x, y) facing orientation, ...] where orientation is north/east/south/west\n"
         "Choose the correct answer:\n"
@@ -615,12 +529,12 @@ class SpatialManipulationTaskBase(BaseEvaluationTask):
         jx, jy = joint
         # sample until hitting the opposite quadrant w.r.t. joint
         for _ in range(200):
-            px, py = self.room.get_random_point(self.np_random)
-            if (px - jx) * joint_dir[0] >= 0 and (py - jy) * joint_dir[1] >= 0:
-                return np.array([px, py])
+            p = self.room.get_random_point(self.np_random)
+            if (p[0] - jx) * joint_dir[0] >= 0 and (p[1] - jy) * joint_dir[1] >= 0:
+                return p
         # fallback
         p = self.room.get_random_point(self.np_random)
-        return np.array([p[0], p[1]])
+        return p
 
 
 class LocalizationEvaluationTask(SpatialManipulationTaskBase):
@@ -671,8 +585,8 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
         # Calculate answer (direction + orientation)
         dir_rel = TotalRelationship.get_direction(tuple(self.agent.pos), tuple(target_obj.pos), anchor_ori=tuple(self.agent.ori))
         dir_str = dir_rel.to_string('ego')
-        _, ori_str = TotalRelationship.get_orientation(tuple(target_obj.ori), tuple(self.agent.ori))
-        correct_answer = [dir_str, ori_str]
+        ori_rel = TotalRelationship.get_orientation(tuple(target_obj.ori), tuple(self.agent.ori))
+        correct_answer = [dir_str, ori_rel.to_string('ego', kind='orientation')]
         
         # Generate choices
         choices, correct_idx = self.generate_choices(correct_answer)
@@ -782,9 +696,9 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
         rel_x, rel_y = target_obj.pos - agent_pos
         # move target to opposite quadrant relative to agent by sampling
         for _ in range(200):
-            px, py = self.room.get_random_point(self.np_random)
-            if (px - agent_pos[0]) * rel_x >= 0 and (py - agent_pos[1]) * rel_y >= 0:
-                target_obj.pos = np.array([px, py])
+            p = self.room.get_random_point(self.np_random)
+            if (p[0] - agent_pos[0]) * rel_x >= 0 and (p[1] - agent_pos[1]) * rel_y >= 0:
+                target_obj.pos = p
                 break
         return target_obj.name, agent_pos
     
@@ -802,9 +716,7 @@ class FalseBeliefEvaluationTask(SpatialManipulationTaskBase):
     
     def _position_agent_random(self):
         """Position agent randomly for rotation-only tasks"""
-        p = self.room.get_random_point(self.np_random)
-        agent_pos = np.array([p[0], p[1]])
-        self._position_agent_at(agent_pos)
+        self._position_agent_at(self.room.get_random_point(self.np_random))
     
     def generate_choices(self, correct_answer: Any) -> Tuple[List[str], int]:
         """Generate 4 false belief choices"""
@@ -848,26 +760,24 @@ if __name__ == "__main__":
         'room_size': [10, 10],
         'n_objects': 3,
         'candidate_objects': CANDIDATE_OBJECTS,
-        'generation_type': 'pov',
     }
     np_random = seeding.np_random(2)[0]
     room, agent = RoomGenerator.generate_room(**room_config, np_random=np_random)
     print(f"Room: {room}")
     
-    BaseAction.set_field_of_view(180)
+    BaseAction.set_field_of_view(90)
 
-    test_task(DirectionEvaluationTask, room, agent, np_random)
+    # test_task(DirectionEvaluationTask, room, agent, np_random)
 
-    test_task(RotEvaluationTask, room, agent, np_random)
+    # test_task(RotEvaluationTask, room, agent, np_random)
 
-    test_task(RotDualEvaluationTask, room, agent, np_random)
+    # test_task(RotDualEvaluationTask, room, agent, np_random)
 
-    test_task(CircularRotEvaluationTask, room, agent, np_random)
 
-    test_task(PovEvaluationTask, room, agent, np_random)
+    # test_task(PovEvaluationTask, room, agent, np_random)
 
     test_task(E2AEvaluationTask, room, agent, np_random)
 
-    test_task(LocalizationEvaluationTask, room, agent, np_random)
+    # test_task(LocalizationEvaluationTask, room, agent, np_random)
 
-    test_task(FalseBeliefEvaluationTask, room, agent, np_random)
+    # test_task(FalseBeliefEvaluationTask, room, agent, np_random)

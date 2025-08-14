@@ -1,8 +1,7 @@
 import numpy as np
-from typing import Tuple, List
-import random
+from typing import Tuple, List, Optional
 
-def generate_rooms(n: int, level: int, main: int = None, seed: int = None, debug: bool = False) -> np.ndarray:
+def generate_room_layout(n: int, level: int, main: int = None, np_random: np.random.Generator = None, debug: bool = False) -> np.ndarray:
     """
     Function to generate room layout
 
@@ -10,7 +9,7 @@ def generate_rooms(n: int, level: int, main: int = None, seed: int = None, debug
         n: Grid size (n x n)
         level: Complexity level, level=0 means 1 room, level=1 means 2 rooms, and so on
         main: Main room size, if specified the first room will be main×main size
-        seed: Random seed
+        np_random: numpy random Generator
 
     Returns:
         n x n numpy array where:
@@ -20,9 +19,7 @@ def generate_rooms(n: int, level: int, main: int = None, seed: int = None, debug
         - 100: North-south door
         - 101: East-west door
     """
-    if seed is not None:
-        np.random.seed(seed)
-        random.seed(seed)
+    assert np_random is not None, "np_random must be provided"
 
     num_rooms = level + 1
 
@@ -33,18 +30,21 @@ def generate_rooms(n: int, level: int, main: int = None, seed: int = None, debug
         return _generate_single_room(grid, n, main)
 
     # Multiple attempts to generate valid room layout
-    max_attempts = 100
+    max_attempts = 500
     for attempt in range(max_attempts):
         # Reset grid
         grid = np.full((n, n), -1, dtype=int)
 
         # Generate room layout
-        rooms = _generate_room_layout(n, num_rooms, main)
+        rooms = _generate_room_layout(n, num_rooms, main, np_random)
         if not rooms or len(rooms) != num_rooms:
             continue
 
-        # Generate room connections (tree structure, no cycles)
-        connections = _generate_tree_connections(rooms)
+        # Prefer connections only between rooms that are directly adjacent (share a boundary)
+        connections = _generate_adjacency_tree_connections(rooms)
+        if not connections:
+            # If we cannot build a spanning tree from adjacency-only pairs, try another attempt
+            continue
 
         # Place rooms in grid
         for i, room in enumerate(rooms):
@@ -56,10 +56,14 @@ def generate_rooms(n: int, level: int, main: int = None, seed: int = None, debug
         _add_walls_around_rooms(grid, rooms)
 
         # Add doors
-        doors_added = _add_doors_between_rooms(grid, rooms, connections)
+        doors_added = _add_doors_between_rooms(grid, rooms, connections, np_random)
 
-        # Check if all doors were successfully added and connected
-        if len(doors_added) == len(connections) and _verify_connectivity(grid, num_rooms):
+        # Check if all doors were successfully added and connected, and rooms are still rectangles
+        if (
+            len(doors_added) == len(connections)
+            and _verify_rooms_rectangular(grid, num_rooms)
+            and _verify_connectivity(grid, num_rooms)
+        ):
             # Final check: ensure no rooms reach the boundary
             if _verify_no_rooms_at_boundary(grid, num_rooms):
                 return grid
@@ -67,25 +71,21 @@ def generate_rooms(n: int, level: int, main: int = None, seed: int = None, debug
     # If multiple attempts fail, return single room
     return _generate_single_room(grid, n, main)
 
-def _generate_single_room(grid: np.ndarray, n: int, main: int = None) -> np.ndarray:
+def _generate_single_room(grid: np.ndarray, n: int, main: Optional[int] = None) -> np.ndarray:
     """Generate single room, occupying center area"""
     # Calculate room size, ensure space for surrounding walls
     if main is not None:
         # If main parameter is specified, use main×main as room size
         room_size = main
-        if room_size > n - 4:  # Ensure room is not too large
-            room_size = n - 4
-        if room_size < 4:  # Ensure room is not too small
-            room_size = 4
+        room_size = max(4, min(room_size, n - 4))  # Ensure room size is within bounds
     else:
         # Default room size calculation
-        min_room_size = 4
-        max_room_size = n - 4  # Leave space for walls
-        room_size = max(min_room_size, max_room_size)
+        room_size = max(4, n - 4)
 
     # Calculate room position (centered)
     start = (n - room_size) // 2
-    end = start + room_size
+    # Use inclusive end index so the room contains exactly `room_size` cells per side
+    end = start + room_size - 1
 
     # Ensure room doesn't reach boundary, must have space for surrounding walls
     if end >= n - 1:  # Leave at least 1 cell for wall
@@ -111,7 +111,7 @@ def _generate_single_room(grid: np.ndarray, n: int, main: int = None) -> np.ndar
 
     return grid
 
-def _generate_room_layout(n: int, num_rooms: int, main: int = None) -> List[Tuple[int, int, int, int]]:
+def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np_random: np.random.Generator = None) -> List[Tuple[int, int, int, int]]:
     """Generate room layout, return list of room coordinates (x1, y1, x2, y2)"""
     rooms = []
 
@@ -161,35 +161,35 @@ def _generate_room_layout(n: int, num_rooms: int, main: int = None) -> List[Tupl
                 elif i == 1:
                     # Second room is medium size
                     room_min = min_size
-                    room_max = max(min_size, max_size - random.randint(1, 2))
+                    room_max = max(min_size, max_size - int(np_random.integers(1, 3)))
                 elif i == 2:
                     # Third room is smaller
                     room_min = min_size
-                    room_max = max(min_size, max_size - random.randint(2, 3))
+                    room_max = max(min_size, max_size - int(np_random.integers(2, 4)))
                 else:
                     # Other rooms have random size variation
-                    size_variation = random.choice([0, 1, 2, 3])
+                    size_variation = int(np_random.choice([0, 1, 2, 3]))
                     room_min = min_size
                     room_max = max(min_size, max_size - size_variation)
 
                 # Generate room size, width and height can be different
-                width = random.randint(room_min, room_max)
-                height = random.randint(room_min, room_max)
+                width = int(np_random.integers(room_min, room_max + 1))
+                height = int(np_random.integers(room_min, room_max + 1))
 
                 # Increase probability of rectangular rooms with larger differences
-                if random.random() < 0.6:  # 60% probability to generate rectangle
-                    if random.random() < 0.5:
+                if float(np_random.random()) < 0.6:  # 60% probability to generate rectangle
+                    if float(np_random.random()) < 0.5:
                         # Increase width
-                        width = min(max_size, width + random.randint(1, 3))
+                        width = min(max_size, width + int(np_random.integers(1, 3 + 1)))
                     else:
                         # Increase height
-                        height = min(max_size, height + random.randint(1, 3))
+                        height = min(max_size, height + int(np_random.integers(1, 3 + 1)))
             else:
                 # Single room case
                 room_min = min_size
                 room_max = max_size
-                width = random.randint(room_min, room_max)
-                height = random.randint(room_min, room_max)
+                width = int(np_random.integers(room_min, room_max + 1))
+                height = int(np_random.integers(room_min, room_max + 1))
 
             # Ensure room doesn't reach boundary, must have space for surrounding walls
             max_x = n - width - 1  # Leave at least 1 cell for wall
@@ -206,8 +206,8 @@ def _generate_room_layout(n: int, num_rooms: int, main: int = None) -> List[Tupl
                     break
 
             # Randomly generate room position (starting from 1, ensure space for surrounding walls)
-            x1 = random.randint(1, max_x)
-            y1 = random.randint(1, max_y)
+            x1 = int(np_random.integers(1, max_x + 1))
+            y1 = int(np_random.integers(1, max_y + 1))
             x2 = x1 + width - 1
             y2 = y1 + height - 1
 
@@ -307,6 +307,77 @@ def _generate_tree_connections(rooms: List[Tuple[int, int, int, int]]) -> List[T
 
     return connections
 
+def _generate_adjacency_tree_connections(rooms: List[Tuple[int, int, int, int]]) -> List[Tuple[int, int]]:
+    """Generate a spanning tree but only using room pairs that are directly adjacent
+    (share a boundary with at most one-cell gap), so that a door can be placed between them.
+
+    Returns an empty list if the adjacency graph is disconnected.
+    """
+    if len(rooms) <= 1:
+        return []
+
+    def are_adjacent(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> bool:
+        x1_1, y1_1, x2_1, y2_1 = a
+        x1_2, y1_2, x2_2, y2_2 = b
+        # Horizontal adjacency: a left, b right OR b left, a right
+        horiz_close_lr = abs(x2_1 + 1 - x1_2) <= 1
+        horiz_close_rl = abs(x2_2 + 1 - x1_1) <= 1
+        if horiz_close_lr or horiz_close_rl:
+            y_overlap_start = max(y1_1, y1_2)
+            y_overlap_end = min(y2_1, y2_2)
+            if y_overlap_end >= y_overlap_start:
+                return True
+        # Vertical adjacency: a top, b bottom OR b top, a bottom
+        vert_close_tb = abs(y2_1 + 1 - y1_2) <= 1
+        vert_close_bt = abs(y2_2 + 1 - y1_1) <= 1
+        if vert_close_tb or vert_close_bt:
+            x_overlap_start = max(x1_1, x1_2)
+            x_overlap_end = min(x2_1, x2_2)
+            if x_overlap_end >= x_overlap_start:
+                return True
+        return False
+
+    # Build adjacency list
+    n = len(rooms)
+    adj: List[List[int]] = [[] for _ in range(n)]
+    edges: List[Tuple[int, int]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            if are_adjacent(rooms[i], rooms[j]):
+                adj[i].append(j)
+                adj[j].append(i)
+                edges.append((i, j))
+
+    # Check connectivity from node 0
+    visited = [False] * n
+    stack = [0]
+    visited[0] = True
+    while stack:
+        u = stack.pop()
+        for v in adj[u]:
+            if not visited[v]:
+                visited[v] = True
+                stack.append(v)
+
+    if not all(visited):
+        # Not fully connected via adjacency-only edges
+        return []
+
+    # Build a spanning tree via BFS
+    from collections import deque
+    visited = [False] * n
+    visited[0] = True
+    q = deque([0])
+    tree: List[Tuple[int, int]] = []
+    while q:
+        u = q.popleft()
+        for v in adj[u]:
+            if not visited[v]:
+                visited[v] = True
+                tree.append((u, v))
+                q.append(v)
+    return tree
+
 def _add_walls_around_rooms(grid: np.ndarray, rooms: List[Tuple[int, int, int, int]]):
     """Add walls around all rooms, rooms don't reach boundary so there's always space for walls"""
     n = grid.shape[0]
@@ -316,29 +387,29 @@ def _add_walls_around_rooms(grid: np.ndarray, rooms: List[Tuple[int, int, int, i
         current_room_id = i + 1
 
         # Since rooms don't reach boundary, can always add walls around them
+        # Only convert impassable cells (-1) to walls to avoid carving into other rooms
         # Top wall
         for x in range(max(0, x1-1), min(n, x2+2)):
             pos_value = grid[y1-1, x]
-            # Set wall in impassable area or other room boundaries
-            if pos_value == -1 or (1 <= pos_value <= len(rooms) and pos_value != current_room_id):
+            if pos_value == -1:
                 grid[y1-1, x] = 0
 
         # Bottom wall
         for x in range(max(0, x1-1), min(n, x2+2)):
             pos_value = grid[y2+1, x]
-            if pos_value == -1 or (1 <= pos_value <= len(rooms) and pos_value != current_room_id):
+            if pos_value == -1:
                 grid[y2+1, x] = 0
 
         # Left wall
         for y in range(max(0, y1-1), min(n, y2+2)):
             pos_value = grid[y, x1-1]
-            if pos_value == -1 or (1 <= pos_value <= len(rooms) and pos_value != current_room_id):
+            if pos_value == -1:
                 grid[y, x1-1] = 0
 
         # Right wall
         for y in range(max(0, y1-1), min(n, y2+2)):
             pos_value = grid[y, x2+1]
-            if pos_value == -1 or (1 <= pos_value <= len(rooms) and pos_value != current_room_id):
+            if pos_value == -1:
                 grid[y, x2+1] = 0
 
     # Second pass: ensure all rooms are surrounded by walls or doors, cannot be directly adjacent to -1
@@ -371,7 +442,7 @@ def _ensure_rooms_surrounded_by_walls_or_doors(grid: np.ndarray, rooms: List[Tup
                                 grid[ny, nx] = 0  # Set as wall
 
 def _add_doors_between_rooms(grid: np.ndarray, rooms: List[Tuple[int, int, int, int]],
-                            connections: List[Tuple[int, int]]) -> List[Tuple[int, int, int]]:
+                            connections: List[Tuple[int, int]], np_random: np.random.Generator) -> List[Tuple[int, int, int]]:
     """Add doors between connected rooms, return list of successfully added doors"""
     doors_added = []
 
@@ -380,7 +451,7 @@ def _add_doors_between_rooms(grid: np.ndarray, rooms: List[Tuple[int, int, int, 
         room2 = rooms[room2_idx]
 
         # Find door position between two rooms
-        door_pos = _find_door_between_rooms(grid, room1, room2)
+        door_pos = _find_door_between_rooms(grid, room1, room2, np_random)
         if door_pos:
             x, y, door_type = door_pos
             grid[y, x] = door_type
@@ -389,7 +460,7 @@ def _add_doors_between_rooms(grid: np.ndarray, rooms: List[Tuple[int, int, int, 
     return doors_added
 
 def _find_door_between_rooms(grid: np.ndarray, room1: Tuple[int, int, int, int],
-                            room2: Tuple[int, int, int, int]) -> Tuple[int, int, int]:
+                            room2: Tuple[int, int, int, int], np_random: np.random.Generator) -> Tuple[int, int, int]:
     """Find door position between two rooms"""
     x1_1, y1_1, x2_1, y2_1 = room1
     x1_2, y1_2, x2_2, y2_2 = room2
@@ -401,14 +472,15 @@ def _find_door_between_rooms(grid: np.ndarray, room1: Tuple[int, int, int, int],
         y_overlap_end = min(y2_1, y2_2)
 
         if y_overlap_end >= y_overlap_start:
-            # Avoid placing door in corner
-            if y_overlap_end > y_overlap_start:
-                door_y = random.randint(y_overlap_start, y_overlap_end)
-            else:
-                door_y = y_overlap_start
-
-            if 0 <= door_x < grid.shape[1] and 0 <= door_y < grid.shape[0]:
-                return (door_x, door_y, 101)  # East-west door
+            # Try random y in the overlap first, then scan
+            candidate_ys = list(range(y_overlap_start, y_overlap_end + 1))
+            if len(candidate_ys) > 1:
+                candidate_ys = list(np_random.permutation(candidate_ys))
+            for door_y in candidate_ys:
+                if 0 <= door_x < grid.shape[1] and 0 <= door_y < grid.shape[0]:
+                    # Only place a door on a wall or empty corridor, never carve rooms
+                    if grid[door_y, door_x] in (-1, 0):
+                        return (door_x, door_y, 101)  # East-west door
 
     elif abs(x2_2 + 1 - x1_1) <= 1:  # room2 on left, room1 on right
         door_x = x2_2 + 1 if x2_2 + 1 == x1_1 else (x2_2 + x1_1) // 2
@@ -416,13 +488,13 @@ def _find_door_between_rooms(grid: np.ndarray, room1: Tuple[int, int, int, int],
         y_overlap_end = min(y2_1, y2_2)
 
         if y_overlap_end >= y_overlap_start:
-            if y_overlap_end > y_overlap_start:
-                door_y = random.randint(y_overlap_start, y_overlap_end)
-            else:
-                door_y = y_overlap_start
-
-            if 0 <= door_x < grid.shape[1] and 0 <= door_y < grid.shape[0]:
-                return (door_x, door_y, 101)  # East-west door
+            candidate_ys = list(range(y_overlap_start, y_overlap_end + 1))
+            if len(candidate_ys) > 1:
+                candidate_ys = list(np_random.permutation(candidate_ys))
+            for door_y in candidate_ys:
+                if 0 <= door_x < grid.shape[1] and 0 <= door_y < grid.shape[0]:
+                    if grid[door_y, door_x] in (-1, 0):
+                        return (door_x, door_y, 101)  # East-west door
 
     # Check vertical adjacency (north-south door)
     if abs(y2_1 + 1 - y1_2) <= 1:  # room1 on top, room2 on bottom
@@ -431,13 +503,13 @@ def _find_door_between_rooms(grid: np.ndarray, room1: Tuple[int, int, int, int],
         x_overlap_end = min(x2_1, x2_2)
 
         if x_overlap_end >= x_overlap_start:
-            if x_overlap_end > x_overlap_start:
-                door_x = random.randint(x_overlap_start, x_overlap_end)
-            else:
-                door_x = x_overlap_start
-
-            if 0 <= door_x < grid.shape[1] and 0 <= door_y < grid.shape[0]:
-                return (door_x, door_y, 100)  # North-south door
+            candidate_xs = list(range(x_overlap_start, x_overlap_end + 1))
+            if len(candidate_xs) > 1:
+                candidate_xs = list(np_random.permutation(candidate_xs))
+            for door_x in candidate_xs:
+                if 0 <= door_x < grid.shape[1] and 0 <= door_y < grid.shape[0]:
+                    if grid[door_y, door_x] in (-1, 0):
+                        return (door_x, door_y, 100)  # North-south door
 
     elif abs(y2_2 + 1 - y1_1) <= 1:  # room2 on top, room1 on bottom
         door_y = y2_2 + 1 if y2_2 + 1 == y1_1 else (y2_2 + y1_1) // 2
@@ -445,15 +517,32 @@ def _find_door_between_rooms(grid: np.ndarray, room1: Tuple[int, int, int, int],
         x_overlap_end = min(x2_1, x2_2)
 
         if x_overlap_end >= x_overlap_start:
-            if x_overlap_end > x_overlap_start:
-                door_x = random.randint(x_overlap_start, x_overlap_end)
-            else:
-                door_x = x_overlap_start
-
-            if 0 <= door_x < grid.shape[1] and 0 <= door_y < grid.shape[0]:
-                return (door_x, door_y, 100)  # North-south door
+            candidate_xs = list(range(x_overlap_start, x_overlap_end + 1))
+            if len(candidate_xs) > 1:
+                candidate_xs = list(np_random.permutation(candidate_xs))
+            for door_x in candidate_xs:
+                if 0 <= door_x < grid.shape[1] and 0 <= door_y < grid.shape[0]:
+                    if grid[door_y, door_x] in (-1, 0):
+                        return (door_x, door_y, 100)  # North-south door
 
     return None
+
+def _verify_rooms_rectangular(grid: np.ndarray, num_rooms: int) -> bool:
+    """Ensure each room's tiles form a solid rectangle with no holes or intrusions."""
+    n = grid.shape[0]
+    for room_id in range(1, num_rooms + 1):
+        positions = np.argwhere(grid == room_id)
+        if positions.size == 0:
+            return False
+        ys = positions[:, 0]
+        xs = positions[:, 1]
+        y_min, y_max = ys.min(), ys.max()
+        x_min, x_max = xs.min(), xs.max()
+        # All cells in the bounding box must belong to the room
+        sub = grid[y_min:y_max+1, x_min:x_max+1]
+        if not np.all(sub == room_id):
+            return False
+    return True
 
 def _verify_connectivity(grid: np.ndarray, num_rooms: int) -> bool:
     """Verify if all rooms are connected"""
@@ -556,27 +645,22 @@ def _grid_to_emoji(grid: np.ndarray) -> str:
 # Test function
 if __name__ == "__main__":
     for level in range(5):  # Only test first 5 levels
-        # Use different random seeds to show room size diversity
-        seed = 42 + level * 10
-        # Add main parameter test for level > 0 cases
-        main_size =  10 if level > 0 else None
-        grid = generate_rooms(20, level, main=main_size, seed=seed)
+        np_random = np.random.default_rng(42 + level * 10)
+        main_size = 10 if level > 0 else None
+        grid = generate_room_layout(20, level, main=main_size, np_random=np_random)
         if main_size:
             print(f"🎯 Specified main room size: {main_size}×{main_size}")
         unique_values = sorted(set(grid.flatten()))
         print(f"📊 Unique values in grid: {unique_values}")
 
-        # Count rooms
         room_count = sum(1 for v in unique_values if v > 0 and v < 100)
         door_count = sum(1 for v in unique_values if v >= 100)
         print(f"🏠 Actual room count: {room_count}, 🚪 Door count: {door_count}")
 
-        # Print numeric version
         print("🔢 Numeric version:")
         with np.printoptions(linewidth=np.inf, threshold=np.inf):
             for row in grid:
                 print(' '.join(f'{val:3d}' for val in row))
 
-        # Print emoji version
         print("🎨 Emoji version:")
         print(_grid_to_emoji(grid))

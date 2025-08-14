@@ -436,14 +436,4 @@ class CognitiveMapManager:
 
 
 if __name__ == "__main__":
-    room = BaseRoom(
-        objects=[Object(name="table", pos=np.array([1, 1]), ori=np.array([0, 1])), Object(name="chair", pos=np.array([0, 1]), ori=np.array([0, 1]))],
-        name="room"
-    )
-    room2 = BaseRoom(
-        objects=[Object(name="table", pos=np.array([-1,-1]), ori=np.array([0, 1])), Object(name="chair", pos=np.array([0, 2]), ori=np.array([0, 1]))],
-        name="room2"
-    )
-
-    common_obj_names = set(["table", "chair"])
-    print(CognitiveMapManager()._calculate_pos_sim(room, room2))
+    pass
