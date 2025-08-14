@@ -93,35 +93,33 @@ class DirectionRel:
         assert perspective in ('ego', 'allo'), f"Invalid perspective: {perspective}"
         assert kind in ('relation', 'orientation'), f"Invalid kind: {kind}"
         if kind == 'relation':
-            return self.pair_to_string(self.pair, perspective)
-        return self._orientation_to_string(self.pair, perspective, None if gate_dir is None else gate_dir.pair)
+            return self._dir_to_string(self.pair, perspective)
+        return self._ori_to_string(self.pair, perspective, None if gate_dir is None else gate_dir.pair)
 
     @classmethod
-    def pair_to_string(cls, direction: Union[Dir, DirPair], perspective: str = 'ego') -> str:
+    def _dir_to_string(cls, direction: Union[Dir, DirPair], perspective: str = 'ego') -> str:
         assert perspective in ('ego', 'allo'), f"Invalid perspective: {perspective}"
         labels = cls.EGO_LABELS if perspective == 'ego' else cls.ALLO_LABELS
+
         if isinstance(direction, Dir):
             return labels[direction]
-        h_str = labels[direction.horiz]
-        v_str = labels[direction.vert]
-        if direction.horiz == Dir.UNKNOWN or direction.vert == Dir.UNKNOWN:
+
+        h, v = direction.horiz, direction.vert
+        if Dir.UNKNOWN in (h, v):
             return 'unknown'
-        if direction.horiz == Dir.SAME and direction.vert == Dir.SAME:
+        if h == v == Dir.SAME:
             return 'same'
-        if direction.horiz == Dir.SAME:
-            return f'directly {v_str}'
-        if direction.vert == Dir.SAME:
-            return f'directly {h_str}'
-        # Prefer natural ordering: vertical first, then horizontal (e.g., front-right)
-        return f"{v_str}-{h_str}"
+        if h == Dir.SAME or v == Dir.SAME:
+            return f"directly {labels[h] if h != Dir.SAME else labels[v]}"
+        return f"{labels[v]}-{labels[h]}"
 
     @classmethod
-    def _orientation_to_string(cls, orientation: DirPair, perspective: str = 'ego', gate_dir: DirPair = None) -> str:
+    def _ori_to_string(cls, orientation: DirPair, perspective: str = 'ego', gate_dir: DirPair = None) -> str:
         """Orientation labels: ego -> forward/backward/right/left; allo -> north/south/east/west.
         For gates and provided gate_dir (relative dir of gate wrt agent), return "gate at <side> wall".
         """
         assert perspective in ('ego', 'allo'), f"Invalid perspective: {perspective}"
-        # Gate phrasing
+        # for gate
         if gate_dir is not None:
             if orientation.vert != Dir.SAME and orientation.horiz == Dir.SAME: # front/back wall
                 side = {Dir.FORWARD: 'front', Dir.BACKWARD: 'back'}.get(gate_dir.vert)
@@ -131,10 +129,8 @@ class DirectionRel:
                 side = {Dir.RIGHT: 'right', Dir.LEFT: 'left'}.get(gate_dir.horiz)
                 if side:
                     return f"gate at {side} wall"
-        if orientation.horiz == Dir.SAME and orientation.vert == Dir.SAME:
-            # Degenerate orientation
-            return 'same'
-        # Determine the single facing direction
+        
+        # for object
         if orientation.horiz != Dir.SAME and orientation.vert == Dir.SAME:
             primary = orientation.horiz  # RIGHT or LEFT
         elif orientation.vert != Dir.SAME and orientation.horiz == Dir.SAME:
@@ -233,7 +229,7 @@ class TotalRelationship:
         pos1: tuple,
         pos2: tuple,
         anchor_ori: Optional[tuple] = None,
-        full: bool = False,
+        full: bool = True,
     ) -> 'TotalRelationship':
         dir_rel = DirectionRel.get_direction(pos1, pos2, anchor_ori)
         if not full:

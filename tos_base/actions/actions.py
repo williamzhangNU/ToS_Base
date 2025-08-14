@@ -171,6 +171,8 @@ class ObserveAction(BaseAction):
     
     def execute(self, room, agent, **kwargs) -> ActionResult:
         """Execute observe action on room state. NOTE Also neglect same position objects."""
+        
+        # neglect objects in the same position
         neglect_objects = kwargs.get('neglect_objects', []) + [obj.name for obj in room.all_objects if np.allclose(obj.pos, agent.pos)]
         with_orientation = kwargs.get('with_orientation', True)
         visible_objects = [obj for obj in room.all_objects if self._is_visible(agent, obj) and obj.name not in neglect_objects]

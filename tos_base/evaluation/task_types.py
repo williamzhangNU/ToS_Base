@@ -37,12 +37,11 @@ class EvalTaskType(Enum):
     def get_task_map(cls) -> Dict[str, 'Type[BaseEvaluationTask]']:
         """Get mapping from short names to task classes."""
         # Import here to avoid circular imports
-        from .tasks import (
-            DirectionEvaluationTask, RotEvaluationTask,
-            RotDualEvaluationTask, PovEvaluationTask, 
-            E2AEvaluationTask, 
-            LocalizationEvaluationTask, FalseBeliefEvaluationTask
-        )
+        from .direction import DirectionEvaluationTask, PovEvaluationTask
+        from .rotation import RotEvaluationTask, RotDualEvaluationTask
+        from .e2a import E2AEvaluationTask
+        from .localization import LocalizationEvaluationTask
+        from .false_belief import FalseBeliefEvaluationTask
         
         task_map = {
             cls.DIR.short_name: DirectionEvaluationTask,
