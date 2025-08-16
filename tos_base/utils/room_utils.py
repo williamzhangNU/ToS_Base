@@ -262,9 +262,10 @@ class RoomPlotter:
             if agent is not None:
                 ax.scatter(agent.pos[0], agent.pos[1], c='green', marker='s', s=70, edgecolors='white', linewidths=0.7, label='agent', zorder=5)
                 ax.scatter(agent.init_pos[0], agent.init_pos[1], c='green', marker='x', s=60, label='agent_init', zorder=4)
-                dx, dy = float(agent.init_ori[0])*0.4, float(agent.init_ori[1])*0.4
-                ax.quiver(agent.init_pos[0], agent.init_pos[1], dx, dy, angles='xy', scale_units='xy', scale=0.5, color='grey', width=0.005)
+                dx, dy = float(agent.ori[0])*0.4, float(agent.ori[1])*0.4
+                idx, idy = float(agent.init_ori[0])*0.4, float(agent.init_ori[1])*0.4
                 ax.quiver(agent.pos[0], agent.pos[1], dx, dy, angles='xy', scale_units='xy', scale=0.5, color='grey', width=0.005)
+                ax.quiver(agent.init_pos[0], agent.init_pos[1], idx, idy, angles='xy', scale_units='xy', scale=0.5, color='grey', width=0.005)
             h,l = ax.get_legend_handles_labels(); 
             if l:
                 d = dict(zip(l,h)); ax.legend(d.values(), d.keys(), loc='upper right', frameon=False, fontsize=9)

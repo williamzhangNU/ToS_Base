@@ -43,7 +43,12 @@ class AgentProxy:
         self.object_nodes_by_room: Dict[int, Set[str]] = {}
         for o in self.room.objects:
             self.object_nodes_by_room.setdefault(int(o.room_id), set()).add(o.name)
-        self.nodes_by_room: Dict[int, Set[str]] = {rid: set(names) | self.gates_by_room.get(int(rid), set()) for rid, names in self.object_nodes_by_room.items()}
+        # Include rooms that have only gates (no objects)
+        room_ids = set(self.object_nodes_by_room.keys()) | {int(r) for r in self.gates_by_room.keys()}
+        self.nodes_by_room: Dict[int, Set[str]] = {
+            int(rid): set(self.object_nodes_by_room.get(int(rid), set())) | self.gates_by_room.get(int(rid), set())
+            for rid in room_ids
+        }
         self.known_nodes_by_room: Dict[int, Set[str]] = {int(rid): set() for rid in self.nodes_by_room}
 
         self.all_edges_by_room: Dict[int, Set[frozenset]] = {}
@@ -94,6 +99,11 @@ class AgentProxy:
                 if n != self.anchor:
                     known.add(frozenset({self.anchor, n}))
 
+    def _rotate_by(self, delta: int) -> List:
+        delta = delta % 360
+        assert delta in (0, 90, 180, 270), "Invalid rotation delta"
+        return [self.mgr.execute_action(RotateAction(delta))] if delta else []
+
     def _rotate_to_face(self, target_pos: np.ndarray) -> List:
         vec = target_pos - self.agent.pos
         if np.allclose(vec, 0):
@@ -102,9 +112,9 @@ class AgentProxy:
         cur, des = _ori_to_deg(self.agent.ori), _ori_to_deg(desired)
         return self._rotate_by(des - cur)
 
-    def _rotate_by(self, delta: int) -> List:
-        delta = delta % 360
-        return [self.mgr.execute_action(RotateAction(delta))] if delta else []
+    def _rotate_to_ori(self, desired_ori: np.ndarray) -> List:
+        cur, des = _ori_to_deg(self.agent.ori), _ori_to_deg(desired_ori)
+        return self._rotate_by(des - cur)
 
     def _move_to(self, name: str) -> List:
         target = self.room.get_object_by_name(name)
@@ -171,6 +181,8 @@ class AgentProxy:
         if not np.allclose(self.agent.pos, gate_obj.pos):
             acts += self._rotate_to_face(gate_obj.pos)
             acts.append(self.mgr.execute_action(MoveAction(gate_name)))
+        # Must face doorway: opposite of gate ori for current room (acceptable alternative is same as other room ori)
+        acts += self._rotate_to_ori(-gate_obj.get_ori_for_room(int(cur)))
         go = self.mgr.execute_action(GoThroughDoorAction(gate_name))
         acts.append(go)
         self.current_gate = gate_name
@@ -391,10 +403,10 @@ if __name__ == "__main__":
     ObserveAction.MODE = 'full'
     RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
 
-    # proxy = OracleAgentProxy(room, agent)        # node_seeker (complete nodes)
+    proxy = OracleAgentProxy(room, agent)        # node_seeker (complete nodes)
     # proxy = StrategistAgentProxy(room, agent)    # node_sweeper
     # proxy = InquisitorAgentProxy(room, agent)    # edge_seeker (complete edges)
-    proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
+    # proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
     proxy.run()
     print(proxy.to_text())
     print(proxy.mgr.get_exp_summary())

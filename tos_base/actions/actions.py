@@ -22,7 +22,9 @@ Answer format:
 Actions: [<movement_action1>, <movement_action2>, ... , <final_action>]
 
 Rules:
-- Use one or more movement actions, then end with exactly one final action.
+- You may perform zero, one or more movement actions.
+- There must be **exactly one** final action in the sequence and it must be the last action.
+- Observe() only reports from your current position. If you move multiple times, the final Observe() gives the view only from your last position.
 - Actions execute in order. Field of view: {field_of_view}°.
 
 Examples:
@@ -43,7 +45,7 @@ class MoveAction(BaseAction):
         "Invalid examples: Move(left), Move(forward), Move(back). "
     )
     example = "Move(table)"
-    format_pattern = r"^Move\(([A-Za-z0-9_-]+)\)$"
+    format_pattern = r"^Move\(([A-Za-z0-9_ -]+)\)$"
     
     def __init__(self, target: str):
         super().__init__(target)
@@ -281,13 +283,15 @@ class TermAction(BaseAction):
 
 class GoThroughDoorAction(BaseAction):
     """Go through a gate (door) connecting two rooms.
-    Valid only if agent is at the gate's position and the gate connects two rooms.
+    Valid only if you are at the door position and facing the doorway:
+    face opposite to the door's orientation for your current room (or the same as
+    the door's orientation for the other room).
     """
 
     format_desc = "GoThroughDoor(door_name)"
     description = (
-        "Go through a door when standing at it; switches your room to the other side. "
-        "After passing through, your orientation faces into the new room (perpendicular to the wall of the gate)."
+        "Go to the connected room. You must be at the door and face the doorway "
+        "On success you appear in the other room facing into it. Your orientation will NOT change."
     )
     example = "GoThroughDoor(door1)"
     format_pattern = r"^GoThroughDoor\(([A-Za-z0-9_-]+)\)$"
@@ -305,7 +309,7 @@ class GoThroughDoorAction(BaseAction):
             "not_found": "door not found",
             "not_gate": "target is not a door",
             "not_at_door": "you are not at the door position",
-            "invalid_rooms": "door does not connect two rooms",
+            "not_facing": "you are not facing the door",
         }
         return f"Cannot go through '{self.door_name}': {errors.get(error_type, 'execution failed')}."
 
@@ -317,21 +321,65 @@ class GoThroughDoorAction(BaseAction):
         # Treat as door if it is listed in room.gates by name
         if self.door_name not in [g.name for g in room.gates]:
             return ActionResult(False, self.get_feedback(False, "not_gate"), str(self), 'go_through_door', {})
+        
+
+        # Must face the doorway and at the door position
+        cur_rid = int(agent.room_id)
+        door_connected_room_ids = [int(x) for x in door.room_id]
+        assert len(door_connected_room_ids) == 2 and cur_rid in door_connected_room_ids, "Door must connect two rooms and you must be at one of the connected rooms"
+        next_room_id = door_connected_room_ids[0] if door_connected_room_ids[1] == cur_rid else door_connected_room_ids[1]
+        req_ori_other = door.get_ori_for_room(next_room_id)
         if not np.allclose(agent.pos, door.pos):
             return ActionResult(False, self.get_feedback(False, "not_at_door"), str(self), 'go_through_door', {})
+        if not np.array_equal(agent.ori, req_ori_other):
+            return ActionResult(False, self.get_feedback(False, "not_facing"), str(self), 'go_through_door', {})
 
-        # Determine next room id
-        # door.room_id may be List[int]; agent.room_id should be int
-        door_connected_room_ids = door.room_id
-        assert len(door_connected_room_ids) == 2, "Door must connect two rooms"
-        next_room_id = door_connected_room_ids[0] if door_connected_room_ids[0] != agent.room_id else door_connected_room_ids[1]
+        # move to next room with position and orientation unchanged
         agent.room_id = next_room_id
-        # set orientation to door's orientation for the new room, if available
-        agent.ori = door.get_ori_for_room(int(next_room_id)).copy()
         return ActionResult(True, self.get_feedback(True, room_id=int(agent.room_id)), str(self), 'go_through_door', {"door": self.door_name, "room_id": int(agent.room_id)})
 
+class QueryRelAction(BaseAction):
+    """Query allocentric relationship between two objects"""
+
+    format_desc = "QueryRel(obj1, obj2)"
+    description = "Return accurate allocentric spatial relationship between two objects."
+    example = "QueryRel(table, chair)"
+    format_pattern = r"^QueryRel\(([A-Za-z0-9_-]+),\s*([A-Za-z0-9_-]+)\)$"
+
+    def __init__(self, obj1: str, obj2: str):
+        super().__init__((obj1, obj2))
+        self.obj1, self.obj2 = obj1, obj2
+
+    def success_message(self, **kwargs) -> str:
+        return f"Relationship: {kwargs.get('answer','unknown')}"
+
+    def error_message(self, error_type: str) -> str:
+        return f"Cannot query relationship: {error_type}"
+
+    def execute(self, room, agent, **kwargs) -> ActionResult:
+        if not room.has_object(self.obj1) or not room.has_object(self.obj2):
+            return ActionResult(False, self.get_feedback(False, "object not found"), str(self), 'query', {})
+        o1, o2 = room.get_object_by_name(self.obj1), room.get_object_by_name(self.obj2)
+        rel = TotalRelationship.relationship(tuple(o1.pos), tuple(o2.pos), anchor_ori=tuple(agent.init_ori), full=True)
+        ans = rel.to_string('allo')
+        return ActionResult(True, self.get_feedback(True, answer=ans), str(self), 'query', {"answer": ans})
+
+    @staticmethod
+    def is_final() -> bool: return True
+    def __repr__(self): return f"QueryRel({self.obj1}, {self.obj2})"
+
+
+
+
+
+
+
+
+
+
 # Action registry for easy lookup
-ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveAction, ObserveRelAction, ObserveDirAction, GoThroughDoorAction, TermAction]
+# ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveAction, ObserveRelAction, ObserveDirAction, GoThroughDoorAction, TermAction]
+ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveAction, GoThroughDoorAction, TermAction, QueryRelAction]
 
 
 class ActionSequence:
@@ -351,7 +399,7 @@ class ActionSequence:
         if not m:
             return None
         # extract top-level actions like Move(table), Rotate(90), Term()
-        action_strs = re.findall(r'([A-Za-z]+\(.*?\))', m.group(1))
+        action_strs = re.findall(r'([A-Za-z]+\([^()]*\))', m.group(1))
         if not action_strs:
             return None
 

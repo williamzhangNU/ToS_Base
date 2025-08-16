@@ -84,7 +84,7 @@ class DirectionRel:
         (-1, 0): {Dir.FORWARD: Dir.RIGHT, Dir.BACKWARD: Dir.LEFT, Dir.RIGHT: Dir.BACKWARD, Dir.LEFT: Dir.FORWARD, Dir.SAME: Dir.SAME, Dir.UNKNOWN: Dir.UNKNOWN},
     }
 
-    def to_string(self, perspective: str = 'ego', kind: str = 'relation', gate_dir: 'DirectionRel' = None) -> str:
+    def to_string(self, perspective: str = 'ego', kind: str = 'relation', gate_dir: 'DirectionRel' = None, approx: bool = False) -> str:
         """Convert to string.
 
         kind='relation' -> use front/back/left/right (ego) or north/south/east/west (allo) for position relations
@@ -93,11 +93,11 @@ class DirectionRel:
         assert perspective in ('ego', 'allo'), f"Invalid perspective: {perspective}"
         assert kind in ('relation', 'orientation'), f"Invalid kind: {kind}"
         if kind == 'relation':
-            return self._dir_to_string(self.pair, perspective)
+            return self._dir_to_string(self.pair, perspective, approx=approx)
         return self._ori_to_string(self.pair, perspective, None if gate_dir is None else gate_dir.pair)
 
     @classmethod
-    def _dir_to_string(cls, direction: Union[Dir, DirPair], perspective: str = 'ego') -> str:
+    def _dir_to_string(cls, direction: Union[Dir, DirPair], perspective: str = 'ego', approx: bool = False) -> str:
         assert perspective in ('ego', 'allo'), f"Invalid perspective: {perspective}"
         labels = cls.EGO_LABELS if perspective == 'ego' else cls.ALLO_LABELS
 
@@ -110,7 +110,7 @@ class DirectionRel:
         if h == v == Dir.SAME:
             return 'same'
         if h == Dir.SAME or v == Dir.SAME:
-            return f"directly {labels[h] if h != Dir.SAME else labels[v]}"
+            return f"directly {labels[h] if h != Dir.SAME else labels[v]}" # if not approx else f"approximately {labels[h] if h != Dir.SAME else labels[v]}"
         return f"{labels[v]}-{labels[h]}"
 
     @classmethod
@@ -176,9 +176,14 @@ class DirectionRel:
 @dataclass(frozen=True)
 class DegreeRel:
     value: float
-    def to_string(self, perspective: str = 'ego') -> str:
-        sign = '+' if self.value > 0 else ('-' if self.value < 0 else '')
-        return f"{sign}{abs(self.value):.0f}°"
+    def to_string(self, perspective: str = 'ego', approx: bool = False) -> str:
+        v = self.value
+        if approx:
+            if v == 0: v = 0
+            else: v = round(v / 10) * 10 or (5 if v > 0 else -5)
+        if v == 0: return "0°"
+        sign = '+' if v > 0 else '-'
+        return f"{sign}{abs(v):.0f}°" if not approx else f"around {sign}{abs(v):.0f}° (+/- 5°)"
     
     @classmethod
     def get_degree(cls, pos1: tuple, pos2: tuple, anchor_ori: tuple = (0, 1)) -> 'DegreeRel':
@@ -202,8 +207,12 @@ class DegreeRel:
 @dataclass(frozen=True)
 class DistanceRel:
     value: float
-    def to_string(self, perspective: str = 'ego') -> str:
-        return f"{self.value:.2f}"
+    def to_string(self, perspective: str = 'ego', approx: bool = False) -> str:
+        if approx:
+            # val = round(self.value * 2) / 2
+            val = int(self.value) + 0.5
+            return f"around {val:g} (+/- 0.5) away"
+        return f"{self.value:.2f} away"
     
     @classmethod
     def get_distance(cls, pos1: tuple, pos2: tuple) -> 'DistanceRel':
@@ -212,16 +221,18 @@ class DistanceRel:
         return DistanceRel(float(np.linalg.norm(p1 - p2)))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class TotalRelationship:
     dir: DirectionRel
     deg: Optional[DegreeRel] = None
     dist: Optional[DistanceRel] = None
 
-    def to_string(self, perspective: str = 'ego') -> str:
+    def to_string(self, perspective: str = 'ego', approx: bool = True) -> str:
         if self.deg is None or self.dist is None:
             return self.dir.to_string(perspective)
-        return f"{self.dir.to_string(perspective)}, {self.deg.to_string(perspective)}, {self.dist.to_string(perspective)}"
+        if approx and abs(self.deg.value) <= 5:
+            self.dir = DirectionRel(DirPair(Dir.SAME, Dir.FORWARD))
+        return f"{self.dir.to_string(perspective, approx=approx)}, {self.deg.to_string(perspective, approx)}, {self.dist.to_string(perspective, approx)}"
 
     @classmethod
     def relationship(
