@@ -227,7 +227,7 @@ class TotalRelationship:
     deg: Optional[DegreeRel] = None
     dist: Optional[DistanceRel] = None
 
-    def to_string(self, perspective: str = 'ego', approx: bool = True) -> str:
+    def to_string(self, perspective: str = 'ego', approx: bool = False) -> str:
         if self.deg is None or self.dist is None:
             return self.dir.to_string(perspective)
         if approx and abs(self.deg.value) <= 5:

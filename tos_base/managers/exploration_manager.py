@@ -73,8 +73,9 @@ class ExplorationManager:
         self.observed_nodes: Set[str] = set()
         self.known_edges: Set[frozenset] = set()
 
-        # Action counts
+        # Action counts and costs
         self.action_counts: Dict[str, int] = {}
+        self.action_cost: int = 0
         
     def _execute_and_update(self, action: BaseAction) -> ActionResult:
         """Execute action and update exploration state."""
@@ -83,8 +84,13 @@ class ExplorationManager:
         if not result.success:
             return result
         
-        # Count action and update coverage
+        # Count action, cost, and update coverage
         self.action_counts[result.action_type] = self.action_counts.get(result.action_type, 0) + 1
+        if hasattr(action, 'cost'):
+            try:
+                self.action_cost += int(action.cost())
+            except Exception:
+                pass
         if isinstance(action, ObserveAction):
             self._update_coverage_from_observe(result)
         
@@ -103,6 +109,16 @@ class ExplorationManager:
         Returns info and list of action results.
         """
         
+        # Query-only sequence
+        if getattr(action_sequence, 'query_actions', None):
+            info, action_results = {}, []
+            for action in action_sequence.query_actions:
+                result = self._execute_and_update(action)
+                action_results.append(result)
+                info.update(result.data)
+            self._log_exploration(action_sequence, info)
+            return info, action_results
+
         assert action_sequence.final_action, "Action sequence requires a final action."
 
         info = {}
@@ -190,6 +206,19 @@ class ExplorationManager:
             if pair in self.target_edges:
                 self.known_edges.add(pair)
 
+    def _update_coverage_from_query(self, query_result: 'ActionResult') -> None:
+        # Coverage: two nodes + edge between them
+        objs = query_result.data.get('objects') or query_result.data.get('pair') or []
+        if len(objs) == 2:
+            a, b = objs[0], objs[1]
+            if a in self.node_names:
+                self.observed_nodes.add(a)
+            if b in self.node_names:
+                self.observed_nodes.add(b)
+            pair = frozenset({a, b})
+            if pair in self.target_edges:
+                self.known_edges.add(pair)
+
 
     
     def _log_exploration(self, action_sequence: ActionSequence, info: Dict[str, Any]) -> None:
@@ -221,6 +250,7 @@ class ExplorationManager:
             "edge_coverage": edge_cov,
             "n_exploration_steps": len(self.turn_logs),
             "action_counts": dict(self.action_counts),
+            "action_cost": int(self.action_cost),
         }
         return self.exp_summary
     

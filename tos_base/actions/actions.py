@@ -19,13 +19,20 @@ Available Actions:
 {actions}
 
 Answer format:
-Actions: [<movement_action1>, <movement_action2>, ... , <final_action>]
+Actions: [<movement_1>, <movement_2>, ... (movement) , <movement_n>, <final_action>] or [<query_1>, <query_2>, ... (query) , <query_n>]
 
 Rules:
 - You may perform zero, one or more movement actions.
-- There must be **exactly one** final action in the sequence and it must be the last action.
-- Observe() only reports from your current position. If you move multiple times, the final Observe() gives the view only from your last position.
+- Either:
+  - Provide **exactly one** final action (and it **must be last**), OR
+  - Provide one or more **query actions only** (no movement/final actions).
+- Observe action only reports from your current position. If you move multiple times, the final Observe action gives the view only from your last position.
 - Actions execute in order. Field of view: {field_of_view}°.
+
+Costs:
+{costs}
+
+You need to explore the environment using **minimal cost**.
 
 Examples:
 {examples}
@@ -46,6 +53,7 @@ class MoveAction(BaseAction):
     )
     example = "Move(table)"
     format_pattern = r"^Move\(([A-Za-z0-9_ -]+)\)$"
+    cost = 0
     
     def __init__(self, target: str):
         super().__init__(target)
@@ -76,7 +84,6 @@ class MoveAction(BaseAction):
     
     def __repr__(self):
         return f"Move({self.target})"
-
 
 class RotateAction(BaseAction):
     """Rotate by specified degrees"""
@@ -122,6 +129,7 @@ class ReturnAction(BaseAction):
     description = "Return to the starting anchor position"
     example = "Return()"
     format_pattern = r"^Return\(\)$"
+    cost = 0
     
     def success_message(self, **kwargs) -> str:
         return "You returned to anchor."
@@ -156,7 +164,7 @@ class ObserveAction(BaseAction):
     )
     example = "Observe()"
     format_pattern = r"^Observe\(\)$"
-
+    cost = 1
     directional_template = "{obj_name}: {dir_str}"
     orientation_template = "{obj_name} facing {orientation}"
     # MODE: 'dir' for direction-only, 'full' for (dir, deg, dist)
@@ -227,7 +235,7 @@ class ObserveRelAction(ObserveAction):
     example = "ObserveRel()"
     format_pattern = r"^ObserveRel\(\)$"
     MODE = 'full'
-
+    cost = 1
     @staticmethod
     def is_final() -> bool:
         return True
@@ -242,7 +250,7 @@ class ObserveDirAction(ObserveAction):
     example = "ObserveDir()"
     format_pattern = r"^ObserveDir\(\)$"
     MODE = 'dir'
-
+    cost = 1
     @staticmethod
     def is_final() -> bool:
         return True
@@ -251,6 +259,66 @@ class ObserveDirAction(ObserveAction):
         return "ObserveDir()"
 
 
+class ObserveApproxAction(ObserveAction):
+    """Observe with approximate relations and local (near) pair descriptions"""
+    format_desc = "ObserveApprox()"
+    description = "Observe with approximate values; also report near pairs (left/right, closer/farther)."
+    example = "ObserveApprox()"
+    format_pattern = r"^ObserveApprox\(\)$"
+    MODE = 'full'
+    NEAR_DEG = 15.0  # degrees
+    NEAR_DIST = 1.0  # distance difference threshold
+    cost = 1
+    @staticmethod
+    def is_final() -> bool:
+        return True
+
+    def __repr__(self):
+        return "ObserveApprox()"
+
+    def execute(self, room, agent, **kwargs) -> ActionResult:
+        neglect_objects = kwargs.get('neglect_objects', []) + [obj.name for obj in room.all_objects if np.allclose(obj.pos, agent.pos)]
+        visible_objects = [obj for obj in room.all_objects if self._is_visible(agent, obj) and obj.name not in neglect_objects]
+        if not visible_objects:
+            answer = "Nothing in view."
+            return ActionResult(True, self.get_feedback(True, answer=answer), str(self), 'observe', {
+                'answer': answer, 'visible_objects': [], 'relationships': [], 'near_relations': []
+            })
+
+        relationships = []
+        for obj in visible_objects:
+            rel = TotalRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
+            relationships.append(f"{obj.name}: {rel.to_string('ego', approx=True)}")
+
+        # local pair relations (relative to agent)
+        def _norm_angle(a):
+            a = (a + 180.0) % 360.0 - 180.0
+            return a
+
+        bearings = {o.name: TotalRelationship.get_degree(tuple(o.pos), tuple(agent.pos), tuple(agent.ori)).value for o in visible_objects}
+        dists = {o.name: TotalRelationship.get_distance(tuple(o.pos), tuple(agent.pos)).value for o in visible_objects}
+        near_pairs = []
+        n = len(visible_objects)
+        for i in range(n):
+            for j in range(i + 1, n):
+                a, b = visible_objects[i].name, visible_objects[j].name
+                ang_diff = abs(_norm_angle(bearings[a] - bearings[b]))
+                dist_diff = abs(dists[a] - dists[b])
+                if ang_diff <= self.NEAR_DEG and dist_diff <= self.NEAR_DIST:
+                    side = 'right' if _norm_angle(bearings[a] - bearings[b]) > 0 else 'left'
+                    prox = 'closer' if dists[a] < dists[b] else 'farther'
+                    near_pairs.append(f"{a} is {side} of {b} and {prox}")
+
+        final_answer = ", ".join(relationships)
+        if near_pairs:
+            final_answer += f" | Local relations: " + "; ".join(near_pairs)
+        return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe', {
+            'answer': final_answer,
+            'visible_objects': [obj.name for obj in visible_objects],
+            'relationships': relationships,
+            'near_relations': near_pairs
+        })
+
 class TermAction(BaseAction):
     """Terminate exploration"""
     
@@ -258,7 +326,7 @@ class TermAction(BaseAction):
     description = "Terminate the exploration phase. Term() must be alone with no movement actions except for Return()."
     example = "Term()"
     format_pattern = r"^Term\(\)$"
-    
+    cost = 0
     def success_message(self, **kwargs) -> str:
         return "Exploration terminated."
     
@@ -294,8 +362,8 @@ class GoThroughDoorAction(BaseAction):
         "On success you appear in the other room facing into it. Your orientation will NOT change."
     )
     example = "GoThroughDoor(door1)"
-    format_pattern = r"^GoThroughDoor\(([A-Za-z0-9_-]+)\)$"
-
+    format_pattern = r"^GoThroughDoor\(([A-Za-z0-9_ -]+)\)$"
+    cost = 0
     def __init__(self, door_name: str):
         super().__init__(door_name)
         self.door_name = door_name
@@ -339,13 +407,13 @@ class GoThroughDoorAction(BaseAction):
         return ActionResult(True, self.get_feedback(True, room_id=int(agent.room_id)), str(self), 'go_through_door', {"door": self.door_name, "room_id": int(agent.room_id)})
 
 class QueryRelAction(BaseAction):
-    """Query allocentric relationship between two objects"""
+    """Query accurate allocentric relationship between two objects"""
 
     format_desc = "QueryRel(obj1, obj2)"
     description = "Return accurate allocentric spatial relationship between two objects."
     example = "QueryRel(table, chair)"
-    format_pattern = r"^QueryRel\(([A-Za-z0-9_-]+),\s*([A-Za-z0-9_-]+)\)$"
-
+    format_pattern = r"^QueryRel\(([A-Za-z0-9_ -]+),\s*([A-Za-z0-9_ -]+)\)$"
+    cost = 5
     def __init__(self, obj1: str, obj2: str):
         super().__init__((obj1, obj2))
         self.obj1, self.obj2 = obj1, obj2
@@ -361,11 +429,13 @@ class QueryRelAction(BaseAction):
             return ActionResult(False, self.get_feedback(False, "object not found"), str(self), 'query', {})
         o1, o2 = room.get_object_by_name(self.obj1), room.get_object_by_name(self.obj2)
         rel = TotalRelationship.relationship(tuple(o1.pos), tuple(o2.pos), anchor_ori=tuple(agent.init_ori), full=True)
-        ans = rel.to_string('allo')
-        return ActionResult(True, self.get_feedback(True, answer=ans), str(self), 'query', {"answer": ans})
+        ans = rel.to_string('allo', approx=False)
+        return ActionResult(True, self.get_feedback(True, answer=ans), str(self), 'query', {"answer": ans, "objects": [self.obj1, self.obj2], "pair": [self.obj1, self.obj2]})
 
     @staticmethod
-    def is_final() -> bool: return True
+    def is_final() -> bool: return False
+    @staticmethod
+    def is_query() -> bool: return True
     def __repr__(self): return f"QueryRel({self.obj1}, {self.obj2})"
 
 
@@ -379,19 +449,21 @@ class QueryRelAction(BaseAction):
 
 # Action registry for easy lookup
 # ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveAction, ObserveRelAction, ObserveDirAction, GoThroughDoorAction, TermAction]
-ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveAction, GoThroughDoorAction, TermAction, QueryRelAction]
+ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveApproxAction, GoThroughDoorAction, TermAction, QueryRelAction]
 
 
 class ActionSequence:
     """Sequence of actions for spatial exploration"""
     
-    def __init__(self, motion_actions: List[BaseAction] = None, final_action: BaseAction = None):
+    def __init__(self, motion_actions: List[BaseAction] = None, final_action: BaseAction = None, query_actions: List[BaseAction] = None):
         self.motion_actions = motion_actions or []
         self.final_action = final_action
+        self.query_actions = query_actions or []
     
     def __repr__(self):
         motions = ", ".join(str(action) for action in self.motion_actions)
-        return f"ActionSequence(motions=[{motions}], final={self.final_action})"
+        queries = ", ".join(str(action) for action in self.query_actions)
+        return f"ActionSequence(motions=[{motions}], queries=[{queries}], final={self.final_action})"
 
     @classmethod
     def parse(cls, action_str: str) -> Optional['ActionSequence']:
@@ -403,13 +475,24 @@ class ActionSequence:
         if not action_strs:
             return None
 
-        motions = []
-        final_action = None
-        for i, act_s in enumerate(action_strs):
+        # Parse all actions
+        parsed_actions = []
+        for act_s in action_strs:
             act = cls._parse_single_action(act_s.strip())
             if not act:
                 return None
-            if i == len(action_strs) - 1:
+            parsed_actions.append(act)
+
+        # If any query action present, enforce query-only sequence
+        if any(a.is_query() for a in parsed_actions):
+            if not all(a.is_query() for a in parsed_actions):
+                return None
+            return cls([], None, parsed_actions)
+
+        # Otherwise, standard: zero or more motions then exactly one final
+        motions, final_action = [], None
+        for i, act in enumerate(parsed_actions):
+            if i == len(parsed_actions) - 1:
                 if not act.is_final():
                     return None
                 final_action = act
@@ -433,30 +516,63 @@ class ActionSequence:
     @staticmethod
     def get_usage_instructions() -> str:
         """Get usage instructions for action sequences"""
-        motion_actions = [cls for cls in ACTION_CLASSES if not cls.is_final()]
+        motion_actions = [cls for cls in ACTION_CLASSES if not cls.is_final() and not cls.is_query()]
         final_actions = [cls for cls in ACTION_CLASSES if cls.is_final()]
+        query_actions = [cls for cls in ACTION_CLASSES if cls.is_query()]
         
         action_desc = (
             "Movement Actions:\n" +
             "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in motion_actions) +
             "\n\n" +
             "Final Actions:\n" +
-            "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in final_actions)
+            "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in final_actions) +
+            "\n\n" +
+            "Query Actions (use alone, can list multiple):\n" +
+            "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in query_actions)
         )
         examples = (
             f"Valid Example:\nActions: [Move(table), Rotate(90), Observe()]\n\n" +
             f"Valid Example:\nActions: [Observe()]\n\n" +
+            f"Valid Example (queries only):\nActions: [QueryRel(table, chair), QueryRel(lamp, sofa)]\n\n" +
             f"Invalid Example (no final action):\nActions: [Move(table)]\n\n"+
-            f"Invalid Example (more than one final action):\nActions: [Observe(), Rotate(90), Observe()]\n\n"
+            f"Invalid Example (more than one final action):\nActions: [Observe(), Rotate(90), Observe()]\n\n" +
+            f"Invalid Example (termination with other actions):\nActions: [Move(table), Term()]\n\n" +
+            f"Invalid Example (mixing queries with others):\nActions: [Move(table), QueryRel(a,b)]\n\n"
             
         )
         
         return ACTION_INSTRUCTION.format(
             actions=action_desc,
             examples=examples,
-            field_of_view=BaseAction.get_field_of_view()
+            field_of_view=BaseAction.get_field_of_view(),
+            costs="\n".join(f"- {cls.format_desc}: {cls.cost}" for cls in ACTION_CLASSES)
         )
 
 
 if __name__ == "__main__":
-    pass
+    # simple smoke tests
+    import numpy as np
+    from ..core.object import Object, Agent
+    from ..core.room import Room
+    from ..managers.exploration_manager import ExplorationManager
+
+    objs = [
+        Object('table', np.array([1, 2]), np.array([0, 1])),
+        Object('chair', np.array([2, 2]), np.array([0, 1])),
+        Object('lamp', np.array([1, 3]), np.array([0, 1])),
+    ]
+    mask = np.ones((6, 6), dtype=np.int8)
+    room = Room(objects=objs, mask=mask, name='r')
+    agent = Agent(pos=np.array([1, 1]), ori=np.array([0, 1]), room_id=1, init_room_id=1)
+    mgr = ExplorationManager(room, agent)
+
+    # ObserveApprox
+    seq = ActionSequence.parse("Actions: [ObserveApprox()]")
+    info, results = mgr.execute_action_sequence(seq)
+    print('ObserveApprox ->', results[0].message)
+
+    # Query-only: two queries
+    seq = ActionSequence.parse("Actions: [QueryRel(table, chair), QueryRel(lamp, chair)]")
+    info, results = mgr.execute_action_sequence(seq)
+    print('Query ->', "; ".join(r.message for r in results))
+    print('Counts:', mgr.action_counts, 'Cost:', mgr.action_cost)

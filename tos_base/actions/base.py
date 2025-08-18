@@ -28,6 +28,7 @@ class BaseAction(ABC):
     description = ""
     example = ""
     format_pattern = ""
+    cost = 0
     
     # Shared field of view for all actions
     _field_of_view: int = 90
@@ -119,6 +120,11 @@ class BaseAction(ABC):
     @staticmethod
     def is_term() -> bool:
         """Check if this is a termination action"""
+        return False
+    
+    @staticmethod
+    def is_query() -> bool:
+        """Check if this is a query action (can form a query-only sequence)"""
         return False
     
     @classmethod
