@@ -4,7 +4,7 @@ import numpy as np
 
 from .base import BaseAction, ActionResult
 from ..core.object import Gate
-from ..core.relationship import TotalRelationship
+from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, LocalRelationship, RelationTriple
 
 """
 Specific action implementations for spatial exploration.
@@ -38,6 +38,7 @@ Examples:
 {examples}
 
 """
+
 
 
 class MoveAction(BaseAction):
@@ -172,6 +173,41 @@ class ObserveAction(BaseAction):
     
     def __init__(self):
         super().__init__()
+
+    def _get_anchor_name(self, room, agent) -> str:
+        if np.allclose(agent.pos, agent.init_pos):
+            return 'initial_pos'
+        at_objs = [o for o in room.all_objects if np.allclose(o.pos, agent.pos)]
+        assert len(at_objs) == 1, "Only one object can be at the same position as the agent"
+        return at_objs[0].name
+    
+    def _collect_obj_observations(self, agent, visible_objects, anchor_name: str, mode: str = 'dir', with_orientation: bool = True, discrete: bool = False):
+        relationships: List[str] = []
+        relation_triples: List[RelationTriple] = []
+        for obj in visible_objects:
+            answer_str = ""
+            if discrete:
+                rel = PairwiseRelationshipDiscrete.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
+            else:
+                rel = PairwiseRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=(mode == 'full'))
+            pairwise_str = rel.to_string('ego')
+
+            # orientation (gate/object)
+            if with_orientation and getattr(obj, 'has_orientation', False):
+                if isinstance(obj, Gate):
+                    g_ori = obj.get_ori_for_room(int(agent.room_id)) if getattr(agent, 'room_id', None) is not None else obj.ori
+                    ori_rel = PairwiseRelationship.get_orientation(tuple(g_ori), tuple(agent.ori))
+                    gate_dir = PairwiseRelationship.get_direction(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
+                    ori_str = ori_rel.to_string('ego', kind='orientation', gate_dir=gate_dir)
+                else:
+                    ori_rel = PairwiseRelationship.get_orientation(tuple(obj.ori), tuple(agent.ori))
+                    ori_str = ori_rel.to_string('ego', kind='orientation')
+            answer_str = f"{obj.name}: {pairwise_str}, faces {ori_str}"
+            relationships.append(answer_str)
+            relation_triples.append(RelationTriple(obj_a=obj.name, obj_b=anchor_name, relation=rel, anchor_name=anchor_name, anchor_ori=tuple(agent.ori)))
+        
+        final_answer = "\n" + "\n".join(f"• {rel}" for rel in relationships)
+        return final_answer, relationships, relation_triples
     
     def success_message(self, **kwargs) -> str:
         return f"You observe: {kwargs.get('answer', 'nothing')}."
@@ -193,31 +229,15 @@ class ObserveAction(BaseAction):
                 'answer': answer, 'visible_objects': [], 'relationships': []
             })
 
-        relationships = []
-        for obj in visible_objects:
-            if self.MODE == 'full':
-                rel = TotalRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
-                answer_str = f"{obj.name}: {rel.to_string()}"
-            else:
-                dir_rel = TotalRelationship.get_direction(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
-                answer_str = f"{obj.name}: {dir_rel.to_string('ego')}"
-            if with_orientation and obj.has_orientation:
-                if isinstance(obj, Gate):
-                    # Egocentric facing for gates, and phrase as wall side using relative dir
-                    g_ori = obj.get_ori_for_room(int(agent.room_id)) if getattr(agent, 'room_id', None) is not None else obj.ori
-                    ori_rel = TotalRelationship.get_orientation(tuple(g_ori), tuple(agent.ori))
-                    gate_dir = TotalRelationship.get_direction(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
-                    answer_str += f", {ori_rel.to_string('ego', kind='orientation', gate_dir=gate_dir)}"
-                else:
-                    ori_rel = TotalRelationship.get_orientation(tuple(obj.ori), tuple(agent.ori))
-                    answer_str += f" and faces {ori_rel.to_string('ego', kind='orientation')}"
-            relationships.append(answer_str)
-        final_answer = ", ".join(relationships)
+        anchor_name = self._get_anchor_name(room, agent)
+        final_answer, relationships, relation_triples = self._collect_obj_observations(agent=agent, visible_objects=visible_objects, anchor_name=anchor_name, mode=self.MODE, with_orientation=with_orientation, discrete=False)
+
         
         return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe', {
             'answer': final_answer,
             'visible_objects': [obj.name for obj in visible_objects],
-            'relationships': relationships
+            'relationships': relationships,
+            'relation_triples': relation_triples
         })
     
     @staticmethod
@@ -266,8 +286,6 @@ class ObserveApproxAction(ObserveAction):
     example = "ObserveApprox()"
     format_pattern = r"^ObserveApprox\(\)$"
     MODE = 'full'
-    NEAR_DEG = 15.0  # degrees
-    NEAR_DIST = 1.0  # distance difference threshold
     cost = 1
     @staticmethod
     def is_final() -> bool:
@@ -275,48 +293,42 @@ class ObserveApproxAction(ObserveAction):
 
     def __repr__(self):
         return "ObserveApprox()"
+    
+    def _collect_local_relationships(self, agent, visible_objects, anchor_name: str):
+        # local pair relations using discrete relationship binning
+        relationships, relation_triples = [], []
+        n = len(visible_objects)
+        for i in range(n):
+            for j in range(i + 1, n):
+                a_obj, b_obj = visible_objects[i], visible_objects[j]
+                local_rel = LocalRelationship.from_positions(tuple(a_obj.pos), tuple(b_obj.pos), tuple(agent.pos), tuple(agent.ori))
+                if local_rel is not None:
+                    relationships.append(local_rel.to_string(a_obj.name, b_obj.name))
+                    relation_triples.append(RelationTriple(obj_a=a_obj.name, obj_b=b_obj.name, relation=local_rel, anchor_name=anchor_name, anchor_ori=tuple(agent.ori)))
+        final_answer = "\n" + "\n".join(f"• {rel}" for rel in relationships)
+        return final_answer, relationships, relation_triples
 
     def execute(self, room, agent, **kwargs) -> ActionResult:
         neglect_objects = kwargs.get('neglect_objects', []) + [obj.name for obj in room.all_objects if np.allclose(obj.pos, agent.pos)]
+        with_orientation = kwargs.get('with_orientation', True)
         visible_objects = [obj for obj in room.all_objects if self._is_visible(agent, obj) and obj.name not in neglect_objects]
         if not visible_objects:
             answer = "Nothing in view."
             return ActionResult(True, self.get_feedback(True, answer=answer), str(self), 'observe', {
-                'answer': answer, 'visible_objects': [], 'relationships': [], 'near_relations': []
+                'answer': answer, 'visible_objects': [], 'relationships': [], 'local_relationships': []
             })
 
-        relationships = []
-        for obj in visible_objects:
-            rel = TotalRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
-            relationships.append(f"{obj.name}: {rel.to_string('ego', approx=True)}")
+        anchor_name = self._get_anchor_name(room, agent)
+        pairwise_answer, relationships, pairwise_relation_triples = self._collect_obj_observations(agent=agent, visible_objects=visible_objects, anchor_name=anchor_name, mode='full', with_orientation=with_orientation, discrete=True)
+        local_answer, local_relationships, local_relation_triples = self._collect_local_relationships(agent, visible_objects, anchor_name)
 
-        # local pair relations (relative to agent)
-        def _norm_angle(a):
-            a = (a + 180.0) % 360.0 - 180.0
-            return a
-
-        bearings = {o.name: TotalRelationship.get_degree(tuple(o.pos), tuple(agent.pos), tuple(agent.ori)).value for o in visible_objects}
-        dists = {o.name: TotalRelationship.get_distance(tuple(o.pos), tuple(agent.pos)).value for o in visible_objects}
-        near_pairs = []
-        n = len(visible_objects)
-        for i in range(n):
-            for j in range(i + 1, n):
-                a, b = visible_objects[i].name, visible_objects[j].name
-                ang_diff = abs(_norm_angle(bearings[a] - bearings[b]))
-                dist_diff = abs(dists[a] - dists[b])
-                if ang_diff <= self.NEAR_DEG and dist_diff <= self.NEAR_DIST:
-                    side = 'right' if _norm_angle(bearings[a] - bearings[b]) > 0 else 'left'
-                    prox = 'closer' if dists[a] < dists[b] else 'farther'
-                    near_pairs.append(f"{a} is {side} of {b} and {prox}")
-
-        final_answer = ", ".join(relationships)
-        if near_pairs:
-            final_answer += f" | Local relations: " + "; ".join(near_pairs)
+        final_answer = f"{pairwise_answer}" + ((f"\n Local relations: {local_answer}") if local_answer else "")
         return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe', {
             'answer': final_answer,
             'visible_objects': [obj.name for obj in visible_objects],
             'relationships': relationships,
-            'near_relations': near_pairs
+            'local_relationships': local_relationships,
+            'relation_triples': pairwise_relation_triples + local_relation_triples
         })
 
 class TermAction(BaseAction):
@@ -419,17 +431,18 @@ class QueryRelAction(BaseAction):
         self.obj1, self.obj2 = obj1, obj2
 
     def success_message(self, **kwargs) -> str:
-        return f"Relationship: {kwargs.get('answer','unknown')}"
+        return f"Relationship: {self.obj1}→{self.obj2}: {kwargs.get('answer','unknown')}"
 
     def error_message(self, error_type: str) -> str:
         return f"Cannot query relationship: {error_type}"
 
     def execute(self, room, agent, **kwargs) -> ActionResult:
-        if not room.has_object(self.obj1) or not room.has_object(self.obj2):
+        if self.obj1 != 'initial_pos' and self.obj2 != 'initial_pos' and (not room.has_object(self.obj1) or not room.has_object(self.obj2)):
             return ActionResult(False, self.get_feedback(False, "object not found"), str(self), 'query', {})
-        o1, o2 = room.get_object_by_name(self.obj1), room.get_object_by_name(self.obj2)
-        rel = TotalRelationship.relationship(tuple(o1.pos), tuple(o2.pos), anchor_ori=tuple(agent.init_ori), full=True)
-        ans = rel.to_string('allo', approx=False)
+        o1_pos = room.get_object_by_name(self.obj1).pos if self.obj1 != 'initial_pos' else agent.init_pos
+        o2_pos = room.get_object_by_name(self.obj2).pos if self.obj2 != 'initial_pos' else agent.init_pos
+        rel = PairwiseRelationship.relationship(tuple(o1_pos), tuple(o2_pos), anchor_ori=tuple(agent.init_ori), full=True)
+        ans = rel.to_string('allo')
         return ActionResult(True, self.get_feedback(True, answer=ans), str(self), 'query', {"answer": ans, "objects": [self.obj1, self.obj2], "pair": [self.obj1, self.obj2]})
 
     @staticmethod
@@ -448,8 +461,11 @@ class QueryRelAction(BaseAction):
 
 
 # Action registry for easy lookup
-# ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveAction, ObserveRelAction, ObserveDirAction, GoThroughDoorAction, TermAction]
-ACTION_CLASSES = [MoveAction, RotateAction, ReturnAction, ObserveApproxAction, GoThroughDoorAction, TermAction, QueryRelAction]
+# Expose all observe variants; default flows may still prefer ObserveApprox
+ACTION_CLASSES = [
+    MoveAction, RotateAction, ReturnAction, GoThroughDoorAction, 
+    ObserveApproxAction, TermAction, QueryRelAction
+]
 
 
 class ActionSequence:

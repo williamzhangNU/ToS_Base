@@ -7,7 +7,7 @@ from .object import Object
 from .relationship import (
     DirPair,
     Dir,
-    DirectionRel,
+    PairwiseRelationship,
 )
 
 @dataclass
@@ -101,9 +101,9 @@ class DirectionalGraph:
             for j, obj2 in enumerate(objects):
                 if i == j:
                     continue
-                dir_rel = DirectionRel.get_direction(obj1.pos, obj2.pos)
-                v_val = self._dir_to_val(dir_rel.pair.vert, 'vertical')
-                h_val = self._dir_to_val(dir_rel.pair.horiz, 'horizontal')
+                rel = PairwiseRelationship.relationship(obj1.pos, obj2.pos, full=False)
+                v_val = self._dir_to_val(rel.dir_pair.vert, 'vertical')
+                h_val = self._dir_to_val(rel.dir_pair.horiz, 'horizontal')
                 if v_val >= 0:
                     self._v_matrix_working[i, j] = True
                 if v_val <= 0:
@@ -149,9 +149,9 @@ class DirectionalGraph:
             for j in range(len(coordinates)):
                 if i == j:
                     continue
-                dir_rel = DirectionRel.get_direction(coordinates[i], coordinates[j])
-                _v_matrix[i, j] = DirectionalGraph._dir_to_val(dir_rel.pair.vert, 'vertical')
-                _h_matrix[i, j] = DirectionalGraph._dir_to_val(dir_rel.pair.horiz, 'horizontal')
+                rel = PairwiseRelationship.relationship(coordinates[i], coordinates[j], full=False)
+                _v_matrix[i, j] = DirectionalGraph._dir_to_val(rel.dir_pair.vert, 'vertical')
+                _h_matrix[i, j] = DirectionalGraph._dir_to_val(rel.dir_pair.horiz, 'horizontal')
         
         return _v_matrix, _h_matrix
         

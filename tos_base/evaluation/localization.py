@@ -5,7 +5,7 @@ import numpy as np
 
 from .tasks import SpatialManipulationTaskBase
 from ..core.object import Object
-from ..core.relationship import DirPair, Dir, DirectionRel, TotalRelationship
+from ..core.relationship import DirPair, Dir, PairwiseRelationship
 
 
 class LocalizationEvaluationTask(SpatialManipulationTaskBase):
@@ -32,9 +32,9 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
         self._position_agent_at(diagonal_pos)
         observations = self._take_full_observations(neglect_objects=[target_name])
 
-        dir_rel = TotalRelationship.get_direction(tuple(self.agent.pos), tuple(target_obj.pos), anchor_ori=tuple(self.agent.ori))
-        dir_str = dir_rel.to_string('ego')
-        ori_rel = TotalRelationship.get_orientation(tuple(target_obj.ori), tuple(self.agent.ori))
+        rel = PairwiseRelationship.relationship(tuple(self.agent.pos), tuple(target_obj.pos), anchor_ori=tuple(self.agent.ori), full=False)
+        dir_str = PairwiseRelationship.pair_to_string(rel.dir_pair, 'ego') + ", " + PairwiseRelationship.format_degree(rel.degree)
+        ori_rel = PairwiseRelationship.get_orientation(tuple(target_obj.ori), tuple(self.agent.ori))
         correct_answer = [dir_str, ori_rel.to_string('ego', kind='orientation')]
 
         choices, correct_idx = self.generate_choices(correct_answer)
@@ -57,7 +57,7 @@ class LocalizationEvaluationTask(SpatialManipulationTaskBase):
         choices = [f'{correct_answer[0]}, {correct_answer[1]}']
         while len(choices) < 4:
             wrong_dir = DirPair(self.np_random.choice(h_dirs), self.np_random.choice(v_dirs))
-            choice = f"{DirectionRel.pair_to_string(wrong_dir, perspective='ego')}, {orientations[self.np_random.choice(range(len(orientations)))]}"
+            choice = f"{PairwiseRelationship.pair_to_string(wrong_dir, perspective='ego')}, {orientations[self.np_random.choice(range(len(orientations)))]}"
             if choice not in choices:
                 choices.append(choice)
         self.np_random.shuffle(choices)

@@ -7,7 +7,7 @@ from typing_extensions import override
 
 from .tasks import BaseEvaluationTask
 from ..core.object import Object
-from ..core.relationship import TotalRelationship
+from ..core.relationship import PairwiseRelationship
 from ..actions import MoveAction, RotateAction
 
 """TODO: 
@@ -39,7 +39,7 @@ class RotEvaluationTask(BaseEvaluationTask):
 
         movement_prompt = ""
         turn_prompt = ""
-        default_prompt = "You return to your starting position facing north"
+        default_prompt = "You return to your starting position facing north\n"
         if if_move:
             move_obj = rnd.choice(self.room.objects)
             movement_prompt = self.MOVEMENT_TEMPLATE.format(move_obj_name=move_obj.name)
@@ -51,9 +51,9 @@ class RotEvaluationTask(BaseEvaluationTask):
         state_prompt = default_prompt if not if_move and not if_turn else movement_prompt + turn_prompt
 
         def measure(o):
-            deg = TotalRelationship.get_degree(tuple(o.pos), tuple(self.agent.pos), anchor_ori=tuple(self.agent.ori)).value
+            deg = PairwiseRelationship.get_bearing_degree(tuple(o.pos), tuple(self.agent.pos), anchor_ori=tuple(self.agent.ori))
             ang = (deg % 360.0) if turn_direction == 'clockwise' else ((-deg) % 360.0)
-            dist = TotalRelationship.get_distance(tuple(o.pos), tuple(self.agent.pos)).value
+            dist = PairwiseRelationship.get_distance(tuple(o.pos), tuple(self.agent.pos)).value
             return ang, dist
 
         pool = [o for o in self.room.objects if not np.array_equal(o.pos, self.agent.pos)]
@@ -151,9 +151,9 @@ class RotDualEvaluationTask(BaseEvaluationTask):
         turn_direction = self.np_random.choice(['clockwise', 'counterclockwise'])
 
         def bearing_deg(obj: Object) -> Tuple[float, float]:
-            deg = TotalRelationship.get_degree(tuple(obj.pos), tuple(self.agent.pos), anchor_ori=tuple(self.agent.ori)).value
+            deg = PairwiseRelationship.get_bearing_degree(tuple(obj.pos), tuple(self.agent.pos), anchor_ori=tuple(self.agent.ori))
             angle = (deg % 360.0) if turn_direction == 'clockwise' else ((-deg) % 360.0)
-            dist = TotalRelationship.get_distance(tuple(obj.pos), tuple(self.agent.pos)).value
+            dist = PairwiseRelationship.get_distance(tuple(obj.pos), tuple(self.agent.pos)).value
             return angle, dist
 
         objects = [obj for obj in self.room.objects if not np.array_equal(obj.pos, self.agent.pos)]
@@ -251,11 +251,11 @@ class RotMultiStepDirectionTask(BaseEvaluationTask):
     # ---------- helpers ----------
 
     def _bearing_of(self, obj):
-        deg = TotalRelationship.get_degree(tuple(obj.pos), tuple(self.agent.pos), anchor_ori=tuple(self.agent.ori)).value
+        deg = PairwiseRelationship.get_bearing_degree(tuple(obj.pos), tuple(self.agent.pos), anchor_ori=tuple(self.agent.ori))
         return deg % 360.0
 
     def _dist_of(self, obj):
-        return TotalRelationship.get_distance(tuple(obj.pos), tuple(self.agent.pos)).value
+        return PairwiseRelationship.get_distance(tuple(obj.pos), tuple(self.agent.pos)).value
 
     def _sample_object_subset_with_gaps(self):
         rnd = self.np_random

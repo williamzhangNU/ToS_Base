@@ -6,7 +6,9 @@ import numpy as np
 
 from ..core.room import Room
 from ..actions.base import BaseAction
-from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, GoThroughDoorAction
+from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, GoThroughDoorAction, ObserveApproxAction, QueryRelAction
+from .spatial_solver import SpatialSolver, Variable, Constraint, AC3Solver
+from ..core.relationship import PairwiseRelationship, RelationTriple
 from .exploration_manager import ExplorationManager
 from ..core.object import Agent
 from ..utils.action_utils import action_results_to_text
@@ -125,7 +127,8 @@ class AgentProxy:
 
     def _observe(self, prefix_actions: List = None) -> None:
         acts = list(prefix_actions or [])
-        obs = self.mgr.execute_action(ObserveAction())
+        # obs = self.mgr.execute_action(ObserveAction())
+        obs = self.mgr.execute_action(ObserveApproxAction())
         acts.append(obs)
         self._update_known_from_observe(obs)
         self._add_turn(acts)
@@ -377,6 +380,190 @@ class GreedyInquisitorAgentProxy(InquisitorAgentProxy):
 
             self.anchor = None
 
+
+class AnalystAgentProxy(AgentProxy):
+    """Analyst Agent: observe (approx) to see nodes, then greedily query allocentric pairs.
+    Greedy criterion switches between reducing relationships vs positions.
+    """
+
+    def __init__(self, room: Room, agent: Agent, grid_size: int | None = None,
+                 max_queries: int = 16, rel_threshold: int = 0, pos_threshold: int | None = None,
+                 max_eval_pairs: int = 20, eval_samples: int = 30, observe_strategy: str = 'oracle'):
+        super().__init__(room, agent)
+        names = [o.name for o in self.room.all_objects] + ['initial_pos']
+        g = (max(self.room.mask.shape) if getattr(self.room, 'mask', None) is not None else 10)
+        self.solver = SpatialSolver(names, grid_size=(g if grid_size is None else grid_size))
+        self.metric_mode = 'relationships'
+        self.max_queries = int(max_queries)
+        self.rel_threshold = int(rel_threshold)
+        self.pos_threshold = int(pos_threshold) if pos_threshold is not None else len(names)
+        self.max_eval_pairs = int(max_eval_pairs)
+        self.eval_samples = int(eval_samples)
+        self.observe_strategy = observe_strategy  # 'oracle' or 'strategist'
+        self.phase = 'observe'
+
+        # anchor position known for local checks at initial position
+        # if hasattr(self.agent, 'init_pos'):
+        #     self.solver.set_initial_position('initial_pos', tuple(self.agent.init_pos))
+        self.solver.set_initial_position('initial_pos', (0, 0)) # agent initial position unknown, so set to (0, 0)
+
+    def _ingest_last_observation(self) -> None:
+        if not self.turns:
+            return
+        last = self.turns[-1]
+        if not last.actions:
+            return
+        obs = last.actions[-1]
+        triples = obs.data.get('relation_triples', []) if hasattr(obs, 'data') else []
+        if triples:
+            self.solver.add_observation(triples)
+
+    def _observe_nodes_oracle(self, is_initial: bool, prefix_actions: List = None) -> None:
+        """Oracle strategy: greedy observation based on visible unknown nodes."""
+        rid = self._current_room()
+        allowed = self._allowed_rotations(is_initial, continuous_rotation=False)
+        while self._unknown_nodes_in_room(rid):
+            targets = self._unknown_nodes_in_room(rid)
+            scores = {d: self._score_rotation_nodes(d, targets) for d in allowed}
+            best, best_score = max(scores.items(), key=lambda kv: kv[1]) if scores else (0, 0)
+            if best_score == 0:
+                break
+            self._observe((prefix_actions or []) + self._rotate_by(best))
+            self._ingest_last_observation()
+            prefix_actions = []
+
+    def _observe_nodes_strategist(self, is_initial: bool, prefix_actions: List = None) -> None:
+        """Strategist strategy: systematic sweep observation."""
+        for d in self._allowed_rotations(is_initial):
+            if self._all_objects_known_globally():
+                break
+            self._observe((prefix_actions or []) + self._rotate_by(d))
+            self._ingest_last_observation()
+            prefix_actions = []
+
+    def _query_and_ingest(self, a: str, b: str) -> None:
+        res = self.mgr.execute_action(QueryRelAction(a, b))
+        self._add_turn([res])
+        o1_pos = self.room.get_object_by_name(a).pos if a != 'initial_pos' else self.agent.init_pos
+        o2_pos = self.room.get_object_by_name(b).pos if b != 'initial_pos' else self.agent.init_pos
+        rel = PairwiseRelationship.relationship(tuple(o1_pos), tuple(o2_pos), anchor_ori=tuple(self.agent.init_ori), full=True)
+        self.solver.add_observation([RelationTriple(obj_a=a, obj_b=b, relation=rel, anchor_name='initial_pos', anchor_ori=tuple(self.agent.init_ori))])
+
+    def _explore_room(self, is_initial: bool, prefix_actions: List = None) -> None:
+        """Explore room using selected observation strategy."""
+        if self.phase == 'observe':
+            if self.observe_strategy == 'oracle':
+                self._observe_nodes_oracle(is_initial=is_initial, prefix_actions=prefix_actions)
+            else:  # strategist
+                self._observe_nodes_strategist(is_initial=is_initial, prefix_actions=prefix_actions)
+        # no queries here; queries are handled globally after observation DFS
+
+    def _compute_metrics(self) -> tuple[Dict[str, int], int, Dict[tuple, Set[str]], int]:
+        """Compute current solver metrics for query selection."""
+        return self.solver.compute_metrics('dir', max_samples_per_var=self.eval_samples)
+
+    # ---- Greedy global query with simulation ----
+    def _simulate_effect(self, a: str, b: str, mode: str,
+                         baseline_rels: int, baseline_pos: int) -> tuple[float, float]:
+        """Efficiently simulate adding a constraint using incremental solver."""
+        # Get relationship between objects
+        o1_pos = self.room.get_object_by_name(a).pos if a != 'initial_pos' else self.agent.init_pos
+        o2_pos = self.room.get_object_by_name(b).pos if b != 'initial_pos' else self.agent.init_pos
+        north_ori = tuple(self.agent.init_ori)
+        rel = PairwiseRelationship.relationship(tuple(o1_pos), tuple(o2_pos), anchor_ori=north_ori, full=True)
+        
+        # Use efficient copy and incremental constraint addition
+        sim_solver = self.solver.copy()
+        new_constraint = Constraint(a, b, rel, anchor_pos=None, anchor_ori=north_ori)
+        
+        # Use incremental solving
+        if sim_solver.solver is not None:
+            sim_solver.solver.solve_incremental(new_constraint)
+        else:
+            sim_solver.constraints.append(new_constraint)
+            sim_solver.solver = AC3Solver(sim_solver.variables, sim_solver.constraints)
+            sim_solver.solver.solve()
+        
+        # Compute new metrics
+        _, new_pos, _, new_rels = sim_solver.compute_metrics('dir', max_samples_per_var=self.eval_samples)
+        
+        return (baseline_rels - new_rels), (baseline_pos - new_pos)
+
+    def _global_query_loop(self) -> None:
+        """Optimized greedy query selection loop using incremental metrics."""
+        q = 0
+        switched = False
+        
+        while q < self.max_queries:
+            # Compute current metrics using dedicated function
+            dom_sizes, total_pos, rel_sets, total_rels = self._compute_metrics()
+            
+            # Check termination criteria
+            if total_rels <= self.rel_threshold and total_pos <= self.pos_threshold:
+                break
+                
+            # Get candidate pairs and score them efficiently
+            best_pair, best_gain = self._find_best_query_pair(dom_sizes, rel_sets, total_rels, total_pos)
+            
+            # Switch mode if no good queries found, TODO update here for stop criteria
+            if best_gain <= 1e-9:
+                if switched:
+                    break
+                self.metric_mode = 'positions' if self.metric_mode == 'relationships' else 'relationships'
+                switched = True
+                continue
+                
+            # Execute best query
+            self._query_and_ingest(best_pair[0], best_pair[1])
+            q += 1
+
+    def _find_best_query_pair(self, dom_sizes: dict, rel_sets: dict, total_rels: int, total_pos: int) -> tuple:
+        """Find the best query pair by efficient candidate ranking and simulation."""
+        names = [o.name for o in self.room.all_objects] + ['initial_pos']
+        
+        # Score and sort candidates
+        candidates = []
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                a, b = names[i], names[j]
+                if self.metric_mode == 'positions':
+                    score = dom_sizes.get(a, 0) * dom_sizes.get(b, 0)
+                else:
+                    key = (a, b) if (a, b) in rel_sets else (b, a)
+                    score = len(rel_sets.get(key, set()))
+                candidates.append(((a, b), score))
+        
+        # Sort by score and take top candidates
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        top_candidates = [pair for pair, _ in candidates[:self.max_eval_pairs]]
+        
+        # Simulate each candidate and find best
+        best_pair, best_gain = (None, None), -1.0
+        for a, b in top_candidates:
+            d_rel, d_pos = self._simulate_effect(a, b, self.metric_mode, total_rels, total_pos)
+            gain = d_rel if self.metric_mode == 'relationships' else d_pos
+            if gain > best_gain:
+                best_gain, best_pair = gain, (a, b)
+                
+        return best_pair, best_gain
+
+    def run(self) -> List[Turn]:
+        """Run analyst agent: DFS observation + greedy queries + termination."""
+        start_rid = self._current_room()
+        
+        # Phase 1: DFS observation across all rooms (like oracle/strategist)
+        self.phase = 'observe'
+        self.visited = set()  # Initialize visited set for DFS
+        _ = self._dfs(start_rid, is_initial=True, pre_actions=[])
+        
+        # Phase 2: Global greedy query selection
+        self.phase = 'query'
+        self._global_query_loop()
+        
+        # Phase 3: Termination
+        self._add_turn([self.mgr.execute_action(TermAction())])
+        return self.turns
+
 def get_agent_proxy(name: str, room: Room, agent: Agent) -> AgentProxy:
     name = (name or 'oracle').lower()
     mapping = {
@@ -384,6 +571,7 @@ def get_agent_proxy(name: str, room: Room, agent: Agent) -> AgentProxy:
         'strategist': StrategistAgentProxy,
         'inquisitor': InquisitorAgentProxy,
         'greedy_inquisitor': GreedyInquisitorAgentProxy,
+        'analyst': AnalystAgentProxy,
     }
     return mapping.get(name, OracleAgentProxy)(room, agent)
 
@@ -393,20 +581,21 @@ if __name__ == "__main__":
 
     room, agent = RoomGenerator.generate_room(
         room_size=[20, 20],
-        n_objects=8,
-        np_random=np.random.default_rng(0),
-        level=3,
-        main=5
+        n_objects=2,
+        np_random=np.random.default_rng(6),
+        level=0,
+        main=10
     )
     print(room)
     print(room.gates)
     ObserveAction.MODE = 'full'
     RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
 
-    proxy = OracleAgentProxy(room, agent)        # node_seeker (complete nodes)
+    # proxy = OracleAgentProxy(room, agent)        # node_seeker (complete nodes)
     # proxy = StrategistAgentProxy(room, agent)    # node_sweeper
     # proxy = InquisitorAgentProxy(room, agent)    # edge_seeker (complete edges)
     # proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
+    proxy = AnalystAgentProxy(room, agent)
     proxy.run()
     print(proxy.to_text())
     print(proxy.mgr.get_exp_summary())

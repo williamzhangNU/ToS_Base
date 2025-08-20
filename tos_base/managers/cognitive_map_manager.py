@@ -14,7 +14,7 @@ import copy
 
 from ..core.room import Room, BaseRoom
 from ..core.object import Object, Agent
-from ..core.relationship import TotalRelationship
+from ..core.relationship import PairwiseRelationship
 
 COGMAP_INSTRUCTION = """\
 ## Cognitive Map Creation
@@ -374,10 +374,10 @@ class CognitiveMapManager:
         for i in range(len(gt_object_lists)):
             for j in range(i + 1, len(gt_object_lists)):
                 a, b = gt_object_lists[i], gt_object_lists[j]
-                gt_rel = TotalRelationship.get_direction(a.pos, b.pos)
+                gt_rel = PairwiseRelationship.get_direction(a.pos, b.pos)
                 p1, p2 = pred.get(a.name), pred.get(b.name)
                 if p1 and p2:
-                    pr = TotalRelationship.get_direction(p1.pos, p2.pos)
+                    pr = PairwiseRelationship.get_direction(p1.pos, p2.pos)
                     if (pr.horiz, pr.vert) == (gt_rel.horiz, gt_rel.vert): cor += 1.0
                 tot += 1.0
         return cor / tot if tot else 0.0
