@@ -42,6 +42,10 @@ class AC3Solver:
         self.adjacency: Dict[str, Set[str]] = {name: set() for name in self.variables}
         # Group constraints by variable pairs (undirected)
         self.arc_constraints: Dict[frozenset, Set[Constraint]] = {}
+        # Residue cache: (Xi, Xj) -> {vi: vj}
+        self._residue: Dict[Tuple[str, str], Dict[Tuple[int, int], Tuple[int, int]]] = {}
+        # Path-consistency cache: (A, pA, B, pB) -> bool
+        self._pc_cache: Dict[Tuple[str, Tuple[int, int], str, Tuple[int, int]], bool] = {}
         
         for c in constraints:
             self.add_constraint(c)
@@ -61,7 +65,13 @@ class AC3Solver:
         self.arc_constraints.setdefault(arc, set()).add(constraint)
         
         # Return True if predicate changed (new constraint added)
-        return old_constraints != self.arc_constraints[arc]
+        changed = old_constraints != self.arc_constraints[arc]
+        if changed:
+            # Clear caches related to this arc
+            self._pc_cache.clear()
+            self._residue.pop((var1, var2), None)
+            self._residue.pop((var2, var1), None)
+        return changed
 
     def copy(self) -> 'AC3Solver':
         new_variables = {
@@ -78,6 +88,8 @@ class AC3Solver:
 
     def propagate(self, changed_arcs: Optional[Set[Tuple[str, str]]] = None) -> bool:
         """AC-3 propagation from changed arcs or all arcs."""
+        # invalidate caches
+        self._pc_cache.clear()
         if changed_arcs is None:
             # All directed arcs
             work: Set[Tuple[str, str]] = {(a, b) for a, ns in self.adjacency.items() for b in ns}
@@ -119,6 +131,24 @@ class AC3Solver:
             return True
             
         var2_domain = self.variables[var2_name].domain
+        # Residue fast path
+        arc_key = (var1_name, var2_name)
+        cached_map = self._residue.get(arc_key)
+        if cached_map is not None:
+            cached_pos2 = cached_map.get(pos1)
+            if cached_pos2 is not None and cached_pos2 in var2_domain:
+                all_satisfied = True
+                for constraint in constraints:
+                    if constraint.var1_name == var1_name:
+                        satisfied = relationship_applies(pos1, cached_pos2, constraint.relation, constraint.orientation)
+                    else:
+                        satisfied = relationship_applies(cached_pos2, pos1, constraint.relation, constraint.orientation)
+                    if not satisfied:
+                        all_satisfied = False
+                        break
+                if all_satisfied:
+                    return True
+
         for pos2 in var2_domain:
             # Check if ALL constraints are satisfied for this pos2 (conjunction)
             all_satisfied = True
@@ -137,10 +167,64 @@ class AC3Solver:
             
             # If ALL constraints are satisfied for this pos2, then pos1 has support
             if all_satisfied:
+                # Save residue
+                self._residue.setdefault(arc_key, {})[pos1] = pos2
                 return True
                 
         # No value in var2's domain satisfies all constraints
         return False
+
+    def _pc_key(self, a: str, pa: Tuple[int, int], b: str, pb: Tuple[int, int]) -> Tuple[str, Tuple[int, int], str, Tuple[int, int]]:
+        # Symmetric cache key
+        return (a, pa, b, pb) if (a, pa) <= (b, pb) else (b, pb, a, pa)
+
+    def _pair_constraints_satisfied(self, a: str, pa: Tuple[int, int], b: str, pb: Tuple[int, int]) -> bool:
+        for c in self._constraints_between(a, b):
+            if c.var1_name == a:
+                if not relationship_applies(pa, pb, c.relation, c.orientation):
+                    return False
+            else:
+                if not relationship_applies(pb, pa, c.relation, c.orientation):
+                    return False
+        return True
+
+    def is_pair_value_path_consistent(self, var1_name: str, pos1: Tuple[int, int],
+                                      var2_name: str, pos2: Tuple[int, int]) -> bool:
+        """Check path-consistency for (var1=pos1, var2=pos2).
+        Require C_AB(pos1,pos2) and for every k != A,B, exists pk in Dk s.t.
+        C_Ak(pos1,pk) and C_Bk(pos2,pk) (where present)."""
+        key = self._pc_key(var1_name, pos1, var2_name, pos2)
+        cached = self._pc_cache.get(key)
+        if cached is not None:
+            return cached
+
+        # C_AB(pos1, pos2)
+        if not self._pair_constraints_satisfied(var1_name, pos1, var2_name, pos2):
+            self._pc_cache[key] = False
+            return False
+
+        # For all k
+        for k in self.variables.keys():
+            if k == var1_name or k == var2_name:
+                continue
+            if not self._constraints_between(var1_name, k) and not self._constraints_between(var2_name, k):
+                continue
+            domain_k = self.variables[k].domain
+            if not domain_k:
+                self._pc_cache[key] = False
+                return False
+            supported = False
+            for posk in domain_k:
+                if self._pair_constraints_satisfied(var1_name, pos1, k, posk) and \
+                   self._pair_constraints_satisfied(var2_name, pos2, k, posk):
+                    supported = True
+                    break
+            if not supported:
+                self._pc_cache[key] = False
+                return False
+
+        self._pc_cache[key] = True
+        return True
 
 
 class SpatialSolver:
@@ -225,15 +309,28 @@ class SpatialSolver:
         new_spatial.solver = self.solver.copy()
         return new_spatial
 
+    # ---- Path-consistency API ----
+    def is_pair_value_path_consistent(self, obj1_name: str, pos1: Tuple[int, int],
+                                      obj2_name: str, pos2: Tuple[int, int]) -> bool:
+        """PC check for (obj1=pos1, obj2=pos2) against all other variables."""
+        # Ensure domains exist for referenced vars (others assumed initialized already)
+        self._ensure_domain_initialized(obj1_name)
+        self._ensure_domain_initialized(obj2_name)
+        return self.solver.is_pair_value_path_consistent(obj1_name, tuple(pos1), obj2_name, tuple(pos2))
+
     # ---- Metrics ----
     def compute_metrics(self, mode: str = 'dir', max_samples_per_var: int = 50,
-                        perspective: Tuple[int, int] = (0, 1), bin_system=None, distance_bin_system=None) -> tuple[
+                        perspective: Tuple[int, int] = (0, 1), bin_system=None, distance_bin_system=None,
+                        path_consistent: bool = False) -> tuple[
         Dict[str, int], int, Dict[Tuple[str, str], Set[str]], int
     ]:
         """
         mode: 'disc' for PairwiseRelationshipDiscrete; 'dir' for direction-only (continuous, full=False).
         Returns: (domain_sizes, total_positions, pair_rel_sets, total_relationships)
         """
+        bin_system = bin_system or CardinalBins()
+        distance_bin_system = distance_bin_system or StandardDistanceBins()
+        
         # Domain sizes
         domain_sizes: Dict[str, int] = {}
         for name in self.solver.variables:
@@ -258,9 +355,9 @@ class SpatialSolver:
                 s: Set[str] = set()
                 for pa in da:
                     for pb in db:
+                        if path_consistent and not self.solver.is_pair_value_path_consistent(a, pa, b, pb):
+                            continue
                         if mode == 'disc':
-                            bin_system = bin_system or CardinalBins()
-                            distance_bin_system = distance_bin_system or StandardDistanceBins()
                             rel = PairwiseRelationshipDiscrete.relationship(pa, pb, perspective, bin_system, distance_bin_system, 'allo')
                             s.add(rel.to_string('allo'))
                         else:

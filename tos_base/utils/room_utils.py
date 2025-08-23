@@ -41,31 +41,32 @@ class RoomGenerator:
     def _gen_gates_from_mask(msk: np.ndarray) -> List[Gate]:
         gates: List[Gate] = []
         h, w = msk.shape
+        print(msk)
         cnt = 0
-        # vertical doors (100): look up and down for room ids
+        # vertical doors (100, go through horizontally): look up and down for room ids
         xs, ys = np.where(msk == 100)
         for x, y in zip(xs.tolist(), ys.tolist()):
-            up, down = int(msk[x, y + 1]), int(msk[x, y - 1])
+            up, down = int(msk[x - 1, y]), int(msk[x + 1, y]) # NOTE up and down are with respect mask indexing
             if 1 <= up < 100 and 1 <= down < 100 and up != down:
                 g = Gate(
                     name=f"door_{cnt}",
                     pos=np.array([x, y], dtype=int),
-                    ori=np.array([0, 1], dtype=int),
+                    ori=np.array([1, 0], dtype=int),
                     room_id=[int(up), int(down)],
-                    ori_by_room={int(up): np.array([0, 1], dtype=int), int(down): np.array([0, -1], dtype=int)},
+                    ori_by_room={int(up): np.array([-1, 0], dtype=int), int(down): np.array([1, 0], dtype=int)},
                 )
                 gates.append(g); cnt += 1
-        # horizontal doors (101): look left and right for room ids
+        # horizontal doors (101, go through vertically): look left and right for room ids
         xs, ys = np.where(msk == 101)
         for x, y in zip(xs.tolist(), ys.tolist()):
-            left, right = int(msk[x - 1, y]), int(msk[x + 1, y])
+            left, right = int(msk[x, y - 1]), int(msk[x, y + 1])
             if 1 <= left < 100 and 1 <= right < 100 and left != right:
                 g = Gate(
                     name=f"door_{cnt}",
                     pos=np.array([x, y], dtype=int),
-                    ori=np.array([1, 0], dtype=int),
+                    ori=np.array([0, 1], dtype=int),
                     room_id=[int(left), int(right)],
-                    ori_by_room={int(left): np.array([-1, 0], dtype=int), int(right): np.array([1, 0], dtype=int)},
+                    ori_by_room={int(left): np.array([0, -1], dtype=int), int(right): np.array([0, 1], dtype=int)},
                 )
                 gates.append(g); cnt += 1
         return gates
@@ -86,7 +87,7 @@ class RoomGenerator:
         """
         n = int(max(room_size[0], room_size[1]))
         # generate layout in conventional [row(y), col(x)] then transpose to our [x, y] convention
-        mask = generate_room_layout(n=n, level=int(level), main=main, np_random=np_random).T
+        mask = generate_room_layout(n=n, level=int(level), main=main, np_random=np_random)
 
         gates = RoomGenerator._gen_gates_from_mask(mask)
 

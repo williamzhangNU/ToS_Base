@@ -409,40 +409,13 @@ class AnalystAgentProxy(AgentProxy):
 
         self.solver.set_initial_position('initial_pos', (0, 0)) # agent initial position unknown, so set to (0, 0)
 
-    def _ingest_last_observation(self) -> None:
-        if not self.turns:
-            return
-        last = self.turns[-1]
-        if not last.actions:
-            return
-        obs = last.actions[-1]
-        triples = obs.data.get('relation_triples', []) if hasattr(obs, 'data') else []
-        if triples:
-            self.solver.add_observation(triples)
-            print(self.solver.compute_allocentric_bin_metrics())
-
-    def _observe_nodes_oracle(self, is_initial: bool, prefix_actions: List = None) -> None:
-        """Oracle strategy: greedy observation based on visible unknown nodes."""
-        rid = self._current_room()
-        allowed = self._allowed_rotations(is_initial, continuous_rotation=False)
-        while self._unknown_nodes_in_room(rid):
-            targets = self._unknown_nodes_in_room(rid)
-            scores = {d: self._score_rotation_nodes(d, targets) for d in allowed}
-            best, best_score = max(scores.items(), key=lambda kv: kv[1]) if scores else (0, 0)
-            if best_score == 0:
-                break
-            self._observe((prefix_actions or []) + self._rotate_by(best))
-            self._ingest_last_observation()
-            prefix_actions = []
-
-    def _observe_nodes_strategist(self, is_initial: bool, prefix_actions: List = None) -> None:
-        """Strategist strategy: systematic sweep observation."""
-        for d in self._allowed_rotations(is_initial):
-            if self._all_objects_known_globally():
-                break
-            self._observe((prefix_actions or []) + self._rotate_by(d))
-            self._ingest_last_observation()
-            prefix_actions = []
+    def _ingest_from_turns(self) -> None:
+        for i, t in enumerate(self.turns):
+            obs = t.actions[-1]
+            triples = obs.data.get('relation_triples', []) if hasattr(obs, 'data') else []
+            if triples:
+                self.solver.add_observation(triples)
+            print(f'[DEBUG] {i} {self.solver.compute_metrics("disc", path_consistent=True)}')
 
     def _query_and_ingest(self, a: str, b: str) -> None:
         res = self.mgr.execute_action(QueryRelAction(a, b))
@@ -451,15 +424,6 @@ class AnalystAgentProxy(AgentProxy):
         o2_pos = self.room.get_object_by_name(b).pos if b != 'initial_pos' else self.agent.init_pos
         rel = PairwiseRelationship.relationship(tuple(o1_pos), tuple(o2_pos), anchor_ori=tuple(self.agent.init_ori), full=True)
         self.solver.add_observation([RelationTriple(subject=a, anchor=b, relation=rel, orientation=tuple(self.agent.init_ori))])
-
-    def _explore_room(self, is_initial: bool, prefix_actions: List = None) -> None:
-        """Explore room using selected observation strategy."""
-        if self.phase == 'observe':
-            if self.observe_strategy == 'oracle':
-                self._observe_nodes_oracle(is_initial=is_initial, prefix_actions=prefix_actions)
-            else:  # strategist
-                self._observe_nodes_strategist(is_initial=is_initial, prefix_actions=prefix_actions)
-        # no queries here; queries are handled globally after observation DFS
 
     def _compute_metrics(self) -> tuple[Dict[str, int], int, Dict[tuple, Set[str]], int]:
         """Compute current solver metrics for query selection."""
@@ -549,19 +513,19 @@ class AnalystAgentProxy(AgentProxy):
         return best_pair, best_gain
 
     def run(self) -> List[Turn]:
-        """Run analyst agent: DFS observation + greedy queries + termination."""
-        start_rid = self._current_room()
-        
-        # Phase 1: DFS observation across all rooms (like oracle/strategist)
-        self.phase = 'observe'
-        self.visited = set()  # Initialize visited set for DFS
-        _ = self._dfs(start_rid, is_initial=True, pre_actions=[])
-        
-        # Phase 2: Global greedy query selection
-        self.phase = 'query'
+        """Run analyst: delegate exploration to oracle/strategist, then query."""
+        # Delegate full exploration (_dfs) to ensure identical behavior
+        delegate_cls = OracleAgentProxy if self.observe_strategy == 'oracle' else StrategistAgentProxy
+        delegate = delegate_cls(self.room, self.agent)
+        d_turns = delegate.run()
+        # adopt delegate manager/state for accurate history/costs; drop its final Term()
+        self.mgr, self.room, self.agent = delegate.mgr, delegate.mgr.exploration_room, delegate.mgr.agent
+        self.turns = list(d_turns[:-1]) if d_turns else []
+        # Ingest all observed relation triples into solver
+        self._ingest_from_turns()
+        # Global greedy queries
         self._global_query_loop()
-        
-        # Phase 3: Termination
+        # Terminate
         self._add_turn([self.mgr.execute_action(TermAction())])
         return self.turns
 
@@ -580,13 +544,13 @@ def get_agent_proxy(name: str, room: Room, agent: Agent) -> AgentProxy:
 if __name__ == "__main__":
     from ..utils.room_utils import RoomGenerator, RoomPlotter
     from tqdm import tqdm
-    for seed in tqdm(range(2,3)):
+    for seed in tqdm(range(1)):
         room, agent = RoomGenerator.generate_room(
-            room_size=[15, 15],
-            n_objects=2,
+            room_size=[12, 12],
+            n_objects=5,
             np_random=np.random.default_rng(seed),
-            level=0,
-            main=10
+            level=1,
+            main=5
         )
         print(room)
         print(room.gates)

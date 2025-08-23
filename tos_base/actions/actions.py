@@ -202,10 +202,11 @@ class ObserveAction(BaseAction):
                     ori_rel = PairwiseRelationship.get_orientation(tuple(g_ori), tuple(agent.ori))
                     gate_dir = PairwiseRelationship.get_direction(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
                     ori_str = ori_rel.to_string('ego', kind='orientation', gate_dir=gate_dir)
+                    answer_str = f"{obj.name}: {ori_str}, {pairwise_str}"
                 else:
                     ori_rel = PairwiseRelationship.get_orientation(tuple(obj.ori), tuple(agent.ori))
                     ori_str = ori_rel.to_string('ego', kind='orientation')
-            answer_str = f"{obj.name}: {pairwise_str}, faces {ori_str}"
+                    answer_str = f"{obj.name}: {pairwise_str}, faces {ori_str}"
             relationships.append(answer_str)
             relation_triples.append(RelationTriple(subject=obj.name, anchor=anchor_name, relation=rel, orientation=tuple(agent.ori)))
         
@@ -304,11 +305,11 @@ class ObserveApproxAction(ObserveAction):
         for i in range(n):
             for j in range(i + 1, n):
                 a_obj, b_obj = visible_objects[i], visible_objects[j]
-                prox_rel = ProximityRelationship.from_positions(tuple(a_obj.pos), tuple(b_obj.pos), tuple(agent.ori))
+                # NOTE always use b_obj.ori for orientation
+                prox_rel = ProximityRelationship.from_positions(tuple(a_obj.pos), tuple(b_obj.pos), tuple(b_obj.ori))
                 if prox_rel is not None:
                     relationships.append(prox_rel.to_string(a_obj.name, b_obj.name, 'ego'))
-                    # Proximity is object-object; anchor is the other object
-                    relation_triples.append(RelationTriple(subject=a_obj.name, anchor=b_obj.name, relation=prox_rel, orientation=tuple(agent.ori)))
+                    relation_triples.append(RelationTriple(subject=a_obj.name, anchor=b_obj.name, relation=prox_rel, orientation=tuple(b_obj.ori)))
         final_answer = "\n".join(f"• {rel}" for rel in relationships)
         return final_answer, relationships, relation_triples
 

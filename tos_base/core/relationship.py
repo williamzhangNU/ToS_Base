@@ -63,7 +63,16 @@ class EgoFrontBins:
 class CardinalBins:
     """Cardinal direction bins (8 directions) with ego/allo perspective support."""
     ALLO_LABELS = ['north', 'north east', 'east', 'south east', 'south', 'south west', 'west', 'north west']
-    EGO_LABELS = ['front', 'front right', 'right', 'back right', 'back', 'back left', 'left', 'front left']
+    EGO_LABELS = [
+        "12 o'clock",  # front
+        '1:30',         # front-right
+        "3 o'clock",   # right
+        '4:30',         # back-right
+        "6 o'clock",   # back
+        '7:30',         # back-left
+        "9 o'clock",   # left
+        '10:30'         # front-left
+    ]
     
     def bin(self, degree: float, perspective: str = 'allo') -> Tuple[int, str]:
         v = float(degree)
@@ -83,7 +92,7 @@ class CardinalBins:
 
 class StandardDistanceBins:
     """Standard distance bins."""
-    BINS = [(0.0, 2.0, 'near'), (2.0, 5.0, 'mid distance'), (5.0, 10.0, 'slightly far'), (10.0, 20.0, 'far'), (20.0, 50.0, 'very far')]
+    BINS = [(0.0, 1.0, 'very near'), (1.0, 2.0, 'near'), (2.0, 4.0, 'mid distance'), (4.0, 8.0, 'slightly far'), (8.0, 16.0, 'far'), (16.0, 32.0, 'very far'), (32.0, 64.0, 'extremely far')]
     ZERO_LABEL = 'same distance'
     
     def bin(self, value: float) -> Tuple[int, str]:
@@ -467,7 +476,7 @@ class PairwiseRelationshipDiscrete(PairwiseRelationship):
         return cls(direction=d, dist=s)
 
     def to_string(self, perspective: str = None) -> str:
-        return f"{self.direction.to_string(perspective, 'relation')}, {self.dist.to_string()}"
+        return f"around {self.direction.to_string(perspective, 'relation')}, {self.dist.to_string()}"
     
     
 
@@ -478,7 +487,7 @@ class ProximityRelationship:
     pairwise_rel: PairwiseRelationshipDiscrete
     
     # Proximity threshold - objects must be within this distance to have proximity relationship
-    PROXIMITY_THRESHOLD: ClassVar[float] = 5.0
+    PROXIMITY_THRESHOLD: ClassVar[float] = 2.0 # within near distance
     
     def __eq__(self, other):
         if type(other) is not ProximityRelationship:
@@ -516,7 +525,7 @@ class ProximityRelationship:
     
     def to_string(self, a_name: str, b_name: str, perspective: str = 'ego') -> str:
         rel_str = self.pairwise_rel.to_string(perspective)
-        return f"{a_name} is {rel_str} from {b_name} (close objects)"
+        return f"from {b_name}'s view, {a_name} is {rel_str}  (close)"
 
 
 
