@@ -41,7 +41,6 @@ class RoomGenerator:
     def _gen_gates_from_mask(msk: np.ndarray) -> List[Gate]:
         gates: List[Gate] = []
         h, w = msk.shape
-        print(msk)
         cnt = 0
         # vertical doors (100, go through horizontally): look up and down for room ids
         xs, ys = np.where(msk == 100)

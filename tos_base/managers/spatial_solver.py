@@ -6,7 +6,7 @@ import copy
 # Import the relationship classes from the existing codebase
 from ..core.relationship import (
     PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship,
-    RelationTriple, CardinalBins, StandardDistanceBins
+    RelationTriple, CardinalBinsAllo, StandardDistanceBins
 )
 from ..utils.relationship_utils import relationship_applies, generate_points_for_relationship
 
@@ -293,9 +293,9 @@ class SpatialSolver:
         pos1 = next(iter(self.solver.variables[obj1_name].domain))
         pos2 = next(iter(self.solver.variables[obj2_name].domain))
         if discrete:
-            bin_system = bin_system or CardinalBins()
+            bin_system = bin_system or CardinalBinsAllo()
             distance_bin_system = distance_bin_system or StandardDistanceBins()
-            return PairwiseRelationshipDiscrete.relationship(pos1, pos2, perspective, bin_system, distance_bin_system, perspective_type)
+            return PairwiseRelationshipDiscrete.relationship(pos1, pos2, perspective, bin_system, distance_bin_system)
         return PairwiseRelationship.relationship(pos1, pos2, perspective, full=True)
 
     def _ensure_domain_initialized(self, name: str):
@@ -328,7 +328,7 @@ class SpatialSolver:
         mode: 'disc' for PairwiseRelationshipDiscrete; 'dir' for direction-only (continuous, full=False).
         Returns: (domain_sizes, total_positions, pair_rel_sets, total_relationships)
         """
-        bin_system = bin_system or CardinalBins()
+        bin_system = bin_system or CardinalBinsAllo()
         distance_bin_system = distance_bin_system or StandardDistanceBins()
         
         # Domain sizes
@@ -358,11 +358,11 @@ class SpatialSolver:
                         if path_consistent and not self.solver.is_pair_value_path_consistent(a, pa, b, pb):
                             continue
                         if mode == 'disc':
-                            rel = PairwiseRelationshipDiscrete.relationship(pa, pb, perspective, bin_system, distance_bin_system, 'allo')
-                            s.add(rel.to_string('allo'))
+                            rel = PairwiseRelationshipDiscrete.relationship(pa, pb, perspective, bin_system, distance_bin_system)
+                            s.add(rel.to_string())
                         else:
                             rel = PairwiseRelationship.relationship(pa, pb, perspective, full=False)
-                            s.add(rel.to_string('allo'))
+                            s.add(rel.to_string())
                 rel_sets[(a, b)] = s
 
         total_relationships = sum(len(v) for v in rel_sets.values())

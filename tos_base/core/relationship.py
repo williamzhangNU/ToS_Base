@@ -10,19 +10,32 @@ from abc import ABC, abstractmethod
 
 # ---- Bin System Protocol ----
 class BinSystem(Protocol):
+    """Angle binning system without perspective argument.
+
+    Implementations should provide class attributes:
+    - BINS: list of (lo_deg, hi_deg, label)
+    - LABELS: list of labels (same order as BINS)
+    """
+    BINS: ClassVar[list]
+    LABELS: ClassVar[list]
+
     @abstractmethod
-    def bin(self, degree: float, perspective: str = 'allo') -> Tuple[int, str]:
+    def bin(self, degree: float) -> Tuple[int, str]:
         """Return (bin_id, bin_label) for given degree."""
         pass
     
     @classmethod
     @abstractmethod
-    def prompt(cls, perspective: str = 'allo') -> str:
+    def prompt(cls) -> str:
         """Return description of the bin system."""
         pass
 
 
 class DistanceBinSystem(Protocol):
+    """Distance binning system with unified attributes."""
+    BINS: ClassVar[list]
+    LABELS: ClassVar[list]
+
     @abstractmethod
     def bin(self, value: float) -> Tuple[int, str]:
         """Return (bin_id, bin_label) for given distance value."""
@@ -38,32 +51,58 @@ class DistanceBinSystem(Protocol):
 class EgoFrontBins:
     """Ego-centric front-focused bins."""
     BINS = [
-        (-5, 5, 'front'),
-        (5, 25, 'front-slight-right'),  
-        (25, 45, 'front-right'),
-        (-25, -5, 'front-slight-left'),
-        (-45, -25, 'front-left'),
-        (45, 180, 'beyond-fov')
+        (-5, 5),
+        (5, 25),  
+        (25, 45),
+        (-25, -5),
+        (-45, -25),
+        (45, 180),
+        (-180, -45),
     ]
+    LABELS = ['front', 'front-slight-right', 'front-right', 'front-slight-left', 'front-left', 'beyond-fov', 'beyond-fov']
     
-    def bin(self, degree: float, perspective: str = 'ego') -> Tuple[int, str]:
+    def bin(self, degree: float) -> Tuple[int, str]:
         v = float(degree)
-        for i, (lo, hi, label) in enumerate(self.BINS):
+        for i, (lo, hi) in enumerate(self.BINS):
             if lo <= v <= hi:
-                return i, label
-        return 5, 'beyond-fov'
+                return i, self.LABELS[i]
+        return len(self.LABELS) - 1, self.LABELS[-1]
     
     @classmethod
-    def prompt(cls, perspective: str = 'ego') -> str:
-        parts = [f"[{lo}°,{hi}°]→{label}" if lo == -5 else f"({lo}°,{hi}°]→{label}" 
-                for lo, hi, label in cls.BINS]
+    def prompt(cls) -> str:
+        parts = []
+        for (lo, hi), label in zip(cls.BINS, cls.LABELS):
+            parts.append(f"[{lo}°,{hi}°]→{label}" if lo == -5 else f"({lo}°,{hi}°]→{label}")
         return f"Bearing bins (egocentric): {', '.join(parts)}."
 
 
-class CardinalBins:
-    """Cardinal direction bins (8 directions) with ego/allo perspective support."""
-    ALLO_LABELS = ['north', 'north east', 'east', 'south east', 'south', 'south west', 'west', 'north west']
-    EGO_LABELS = [
+class _CardinalBinsBase:
+    """Cardinal direction bins (8 directions) without perspective args."""
+    LABELS: ClassVar[list] = []
+    # Boundaries: [-22.5, +22.5], [22.5, 67.5], ..., [292.5, 337.5]
+    BINS: ClassVar[list] = [
+        (-22.5, 22.5), (22.5, 67.5), (67.5, 112.5), (112.5, 157.5),
+        (157.5, 202.5), (202.5, 247.5), (247.5, 292.5), (292.5, 337.5),
+    ]
+
+    def bin(self, degree: float) -> Tuple[int, str]:
+        v = float(degree)
+        w = (v + 360.0) % 360.0
+        idx = int(((w + 22.5) // 45.0) % 8)
+        return idx, self.LABELS[idx]
+
+    @classmethod
+    def prompt(cls) -> str:
+        parts = [f"[{lo}°,{hi}°]→{label}" for (lo, hi), label in zip(cls.BINS, cls.LABELS)]
+        return f"Bearing bins: {', '.join(parts)}."
+
+
+class CardinalBinsAllo(_CardinalBinsBase):
+    LABELS = ['north', 'north east', 'east', 'south east', 'south', 'south west', 'west', 'north west']
+
+
+class CardinalBinsEgo(_CardinalBinsBase):
+    LABELS = [
         "around 12 o'clock",  # front
         'around 1:30',         # front-right
         "around 3 o'clock",   # right
@@ -73,41 +112,27 @@ class CardinalBins:
         "around 9 o'clock",   # left
         'around 10:30'         # front-left
     ]
-    
-    def bin(self, degree: float, perspective: str = 'allo') -> Tuple[int, str]:
-        v = float(degree)
-        w = (v + 360.0) % 360.0
-        idx = int(((w + 22.5) // 45.0) % 8)
-        labels = self.EGO_LABELS if perspective == 'ego' else self.ALLO_LABELS
-        return idx, labels[idx]
-    
-    @classmethod
-    def prompt(cls, perspective: str = 'allo') -> str:
-        labels = cls.EGO_LABELS if perspective == 'ego' else cls.ALLO_LABELS
-        parts = [f"[{i * 45 - 22.5}°,{i * 45 + 22.5}°]→{label}"
-                for i, label in enumerate(labels)]
-        perspective_name = "egocentric" if perspective == 'ego' else "allocentric"
-        return f"Bearing bins ({perspective_name}): {', '.join(parts)}."
 
 
 class StandardDistanceBins:
     """Standard distance bins."""
-    BINS = [(0.0, 1.0, 'very near'), (1.0, 2.0, 'near'), (2.0, 4.0, 'mid distance'), (4.0, 8.0, 'slightly far'), (8.0, 16.0, 'far'), (16.0, 32.0, 'very far'), (32.0, 64.0, 'extremely far')]
+    BINS = [(0.0, 1.0), (1.0, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 16.0), (16.0, 32.0), (32.0, 64.0)]
     ZERO_LABEL = 'same distance'
+    LABELS = ['very near', 'near', 'mid distance', 'slightly far', 'far', 'very far', 'extremely far']
     
     def bin(self, value: float) -> Tuple[int, str]:
         d = float(value)
         if d <= 1e-6:
             return -1, self.ZERO_LABEL
-        for i, (lo, hi, label) in enumerate(self.BINS):
+        for i, (lo, hi) in enumerate(self.BINS):
             if lo < d <= hi:
-                return i, label
+                return i, self.LABELS[i]
         raise ValueError(f"Invalid distance: {d}")
     
     @classmethod
     def prompt(cls) -> str:
         parts = [f"=0→{cls.ZERO_LABEL}"] + [f"({lo},{hi}]→{label}"
-                 for lo, hi, label in cls.BINS]
+                 for (lo, hi), label in zip(cls.BINS, cls.LABELS)]
         return f"Distance bins: {', '.join(parts)}."
 
 
@@ -300,26 +325,18 @@ class DirectionRelBinned(DirectionRel):
     bin_system: BinSystem = None
     bin_id: int = 0
     bin_label: str = ""
-    perspective: str = 'allo'
     
     def __post_init__(self):
         if self.bin_system is not None:
-            self.bin_id, self.bin_label = self.bin_system.bin(self.degree, self.perspective)
+            self.bin_id, self.bin_label = self.bin_system.bin(self.degree)
 
     @classmethod
-    def from_relation(cls, rel: DirectionRel, bin_system: BinSystem, perspective: str = 'allo') -> 'DirectionRelBinned':
-        bin_id, bin_label = bin_system.bin(rel.degree, perspective)
+    def from_relation(cls, rel: DirectionRel, bin_system: BinSystem) -> 'DirectionRelBinned':
+        bin_id, bin_label = bin_system.bin(rel.degree)
         return cls(pair=rel.pair, degree=rel.degree, bin_system=bin_system, 
-                  bin_id=bin_id, bin_label=bin_label, perspective=perspective)
+                  bin_id=bin_id, bin_label=bin_label)
 
-    def to_string(self, perspective: str = None, kind: str = 'relation') -> str:
-        assert kind == 'relation'
-        # Use provided perspective or stored perspective
-        use_perspective = perspective or self.perspective
-        if use_perspective != self.perspective and self.bin_system is not None:
-            # Re-bin with new perspective
-            _, label = self.bin_system.bin(self.degree, use_perspective)
-            return label
+    def to_string(self) -> str:
         return self.bin_label
 
 
@@ -346,7 +363,7 @@ class DistanceRelBinned(DistanceRel):
         bin_system = StandardDistanceBins()
         return bin_system.bin(value)
 
-    def to_string(self, perspective: str = 'ego') -> str:
+    def to_string(self) -> str:
         return self.bin_label
 
 
@@ -389,8 +406,8 @@ class PairwiseRelationship:
         return DirectionRel._format_degree(v)
 
     @staticmethod
-    def distance_to_string(value: float, perspective: str = 'ego') -> str:
-        return DistanceRel(float(value)).to_string(perspective)
+    def distance_to_string(value: float) -> str:
+        return DistanceRel(float(value)).to_string()
 
     @staticmethod
     def rotate_pair_90(p: DirPair) -> DirPair:
@@ -400,14 +417,15 @@ class PairwiseRelationship:
             h, v = v, h
         return DirPair(h, v)
 
-    def to_string(self, perspective: str = 'ego') -> str:
+    def to_string(self) -> str:
         if self.direction is None and self.dist is None:
             return ""
         if self.direction is None:
-            return self.distance_to_string(self.distance_value, perspective)
+            return self.distance_to_string(self.distance_value)
         if self.dist is None:
-            return self.direction.to_string(perspective, 'relation')
-        return f"{self.direction.to_string(perspective, 'relation')}, {self.dist.to_string(perspective)}"
+            # default textualization: allocentric
+            return self.direction.to_string('allo', 'relation')
+        return f"{self.direction.to_string('allo', 'relation')}, {self.dist.to_string()}"
 
     @classmethod
     def relationship(cls, pos1: tuple, pos2: tuple, anchor_ori: Optional[tuple] = None, full: bool = True) -> 'PairwiseRelationship':
@@ -454,29 +472,27 @@ class PairwiseRelationshipDiscrete(PairwiseRelationship):
         return hash((self.direction.bin_id, self.dist.bin_id))
 
     @classmethod
-    def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None, perspective: str = 'ego') -> str:
+    def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> str:
         bin_system = bin_system or EgoFrontBins()
         distance_bin_system = distance_bin_system or StandardDistanceBins()
-        perspective_name = "egocentric" if perspective == 'ego' else "allocentric"
         return (
-            f"Discrete relationship reporting ({perspective_name}):\n"
-            f"- {bin_system.prompt(perspective)}\n"
+            f"Discrete relationship reporting:\n"
+            f"- {bin_system.prompt()}\n"
             f"- {distance_bin_system.prompt()}"
         )
     
     @classmethod
     def relationship(cls, pos1: tuple, pos2: tuple, anchor_ori: Optional[tuple] = None, 
-                    bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None,
-                    perspective: str = 'ego') -> 'PairwiseRelationshipDiscrete':
+                    bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> 'PairwiseRelationshipDiscrete':
         bin_system = bin_system or EgoFrontBins()
         distance_bin_system = distance_bin_system or StandardDistanceBins()
         rel = PairwiseRelationship.relationship(pos1, pos2, anchor_ori=anchor_ori, full=True)
-        d = DirectionRelBinned.from_relation(rel.direction, bin_system, perspective)
+        d = DirectionRelBinned.from_relation(rel.direction, bin_system)
         s = DistanceRelBinned.from_value(rel.dist.value if rel.dist else 0.0, distance_bin_system)
         return cls(direction=d, dist=s)
 
-    def to_string(self, perspective: str = None) -> str:
-        return f"{self.direction.to_string(perspective, 'relation')}, {self.dist.to_string()}"
+    def to_string(self) -> str:
+        return f"{self.direction.to_string()}, {self.dist.to_string()}"
     
     
 
@@ -506,25 +522,25 @@ class ProximityRelationship:
             return None
             
         # Create pairwise relationship between the two objects using agent's perspective
-        cardinal_bins = CardinalBins()
+        cardinal_bins = CardinalBinsEgo()
         distance_bins = StandardDistanceBins()
-        pairwise_rel = PairwiseRelationshipDiscrete.relationship(a_pos, b_pos, perspective_ori, cardinal_bins, distance_bins, 'ego')
+        pairwise_rel = PairwiseRelationshipDiscrete.relationship(a_pos, b_pos, perspective_ori, cardinal_bins, distance_bins)
         
         return cls(pairwise_rel=pairwise_rel)
     
     @classmethod
-    def prompt(cls, perspective: str = 'ego') -> str:
-        cardinal_bins = CardinalBins()
-        distance_bins = StandardDistanceBins()
+    def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> str:
+        bin_system = bin_system or CardinalBinsEgo()
+        distance_bin_system = distance_bin_system or StandardDistanceBins()
         return (
-            f"Proximity relationship reporting ({perspective}):\n"
+            f"Proximity relationship reporting:\n"
             f"Object-to-object relationships for nearby objects (≤{cls.PROXIMITY_THRESHOLD} units).\n"
-            f"- {cardinal_bins.prompt(perspective)}\n"
-            f"- {distance_bins.prompt()}"
+            f"- {bin_system.prompt()}\n"
+            f"- {distance_bin_system.prompt()}"
         )
     
-    def to_string(self, a_name: str, b_name: str, perspective: str = 'ego') -> str:
-        rel_str = self.pairwise_rel.to_string(perspective)
+    def to_string(self, a_name: str, b_name: str) -> str:
+        rel_str = self.pairwise_rel.to_string()
         return f"from {b_name}'s view, {a_name} is {rel_str}"
 
 
@@ -549,12 +565,6 @@ class RelationTriple:
 
 
 if __name__ == "__main__":
-    # ego_bins = EgoFrontBins()
-    # cardinal_bins = CardinalBins()
-    # print(PairwiseRelationshipDiscrete.prompt(cardinal_bins, perspective='ego'))
-    # print(PairwiseRelationshipDiscrete.prompt(cardinal_bins, perspective='allo'))
-
-    relationship = PairwiseRelationshipDiscrete.relationship((4, 6), (0, 0), anchor_ori=(1, 0), bin_system=CardinalBins(), distance_bin_system=StandardDistanceBins(), perspective='ego')
+    relationship = PairwiseRelationshipDiscrete.relationship((4, 6), (0, 0), anchor_ori=(1, 0), bin_system=CardinalBinsEgo(), distance_bin_system=StandardDistanceBins())
     print(relationship)
-    print(relationship.to_string('ego'))
-    print(relationship.to_string('allo'))
+    print(relationship.to_string())

@@ -415,7 +415,6 @@ class AnalystAgentProxy(AgentProxy):
             triples = obs.data.get('relation_triples', []) if hasattr(obs, 'data') else []
             if triples:
                 self.solver.add_observation(triples)
-            print(f'[DEBUG] {i} {self.solver.compute_metrics("disc", path_consistent=True)}')
 
     def _query_and_ingest(self, a: str, b: str) -> None:
         res = self.mgr.execute_action(QueryRelAction(a, b))

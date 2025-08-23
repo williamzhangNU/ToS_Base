@@ -1,4 +1,4 @@
-from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, EgoFrontBins, StandardDistanceBins, CardinalBins, Dir, DirectionRel
+from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, EgoFrontBins, StandardDistanceBins, CardinalBinsEgo, Dir, DirectionRel
 from typing import Union
 import math
 
@@ -22,18 +22,17 @@ def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -
         j = relationship.dist.bin_id
         if j == -1:
             return dsq <= 1e-6
-        lo, hi, _ = relationship.dist.bin_system.BINS[j]
+        lo, hi = relationship.dist.bin_system.BINS[j]
         lo2, hi2 = float(lo)*float(lo), float(hi)*float(hi)
         if not (dsq > lo2 - 1e-6 and dsq <= hi2 + 1e-6):
             return False
         # Direction bin check
-        perspective = getattr(relationship.direction, 'perspective', 'ego')
         bin_system = relationship.direction.bin_system
         # atan2(cross, dot) with normalized anchor; v length cancels out
         dot = axn*dx + ayn*dy
         cross = axn*dy - ayn*dx
         deg = -math.degrees(math.atan2(cross, dot)) if (abs(dx) > 1e-6 or abs(dy) > 1e-6) else 0.0
-        bid, _ = bin_system.bin(deg, perspective)
+        bid, _ = bin_system.bin(deg)
         return bid == relationship.direction.bin_id
 
     if isinstance(relationship, PairwiseRelationship):
@@ -116,7 +115,7 @@ def generate_points_for_relationship(
         if j == -1:
             return out
         if j is not None and relationship.dist.bin_system is not None:
-            lo, hi, _ = relationship.dist.bin_system.BINS[j]
+            lo, hi = relationship.dist.bin_system.BINS[j]
             Rmin, Rmax = float(lo), float(hi)
     elif isinstance(relationship, PairwiseRelationship) and relationship.dist is not None:
         d = float(relationship.dist.value)
@@ -139,11 +138,9 @@ def generate_points_for_relationship(
     is_disc = isinstance(relationship, PairwiseRelationshipDiscrete)
     disc_dir_bin = None
     disc_bin_system = None
-    disc_perspective = 'ego'
     if is_disc:
         disc_dir_bin = relationship.direction.bin_id
         disc_bin_system = relationship.direction.bin_system or EgoFrontBins()
-        disc_perspective = getattr(relationship.direction, 'perspective', 'ego')
 
     for x in range(X0, X1 + 1):
         dx = float(x - ax)
@@ -163,7 +160,7 @@ def generate_points_for_relationship(
                     dot = aoxn*dx + aoyn*dy
                     cross = aoxn*dy - aoyn*dx
                     deg = -math.degrees(math.atan2(cross, dot)) if (abs(dx) > 1e-6 or abs(dy) > 1e-6) else 0.0
-                    bid, _ = disc_bin_system.bin(deg, disc_perspective)
+                    bid, _ = disc_bin_system.bin(deg)
                     if bid == disc_dir_bin:
                         out.add((x, y))
                 else:
@@ -191,7 +188,7 @@ def generate_points_for_relationship(
                         dot = aoxn*dx + aoyn*dy
                         cross = aoxn*dy - aoyn*dx
                         deg = -math.degrees(math.atan2(cross, dot)) if (abs(dx) > 1e-6 or abs(dy) > 1e-6) else 0.0
-                        bid, _ = disc_bin_system.bin(deg, disc_perspective)
+                        bid, _ = disc_bin_system.bin(deg)
                         if bid == disc_dir_bin:
                             out.add((x, y))
                     else:
@@ -204,7 +201,7 @@ def generate_points_for_relationship(
 
 
 if __name__ == "__main__":
-    relationship = PairwiseRelationshipDiscrete.relationship((4, 6), (0, 0), anchor_ori=(1, 0), bin_system=CardinalBins(), distance_bin_system=StandardDistanceBins(), perspective='ego')
+    relationship = PairwiseRelationshipDiscrete.relationship((4, 6), (0, 0), anchor_ori=(1, 0), bin_system=CardinalBinsEgo(), distance_bin_system=StandardDistanceBins())
     points = generate_points_for_relationship((0, 0), relationship, (-20, 20), (-20, 20), (1, 0))
     for p in sorted(points):
         dist = math.hypot(p[0] - 0.0, p[1] - 0.0)

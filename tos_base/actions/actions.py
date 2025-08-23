@@ -193,7 +193,7 @@ class ObserveAction(BaseAction):
                 rel = PairwiseRelationshipDiscrete.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
             else:
                 rel = PairwiseRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=(mode == 'full'))
-            pairwise_str = rel.to_string('ego')
+            pairwise_str = rel.to_string()
 
             # orientation (gate/object)
             if isinstance(obj, Gate):
@@ -306,7 +306,7 @@ class ObserveApproxAction(ObserveAction):
                 # NOTE always use b_obj.ori for orientation
                 prox_rel = ProximityRelationship.from_positions(tuple(a_obj.pos), tuple(b_obj.pos), tuple(b_obj.ori))
                 if prox_rel is not None:
-                    relationships.append(prox_rel.to_string(a_obj.name, b_obj.name, 'ego'))
+                    relationships.append(prox_rel.to_string(a_obj.name, b_obj.name))
                     relation_triples.append(RelationTriple(subject=a_obj.name, anchor=b_obj.name, relation=prox_rel, orientation=tuple(b_obj.ori)))
         final_answer = "\n".join(f"• {rel}" for rel in relationships)
         return final_answer, relationships, relation_triples
@@ -445,7 +445,7 @@ class QueryRelAction(BaseAction):
         o1_pos = room.get_object_by_name(self.obj1).pos if self.obj1 != 'initial_pos' else agent.init_pos
         o2_pos = room.get_object_by_name(self.obj2).pos if self.obj2 != 'initial_pos' else agent.init_pos
         rel = PairwiseRelationship.relationship(tuple(o1_pos), tuple(o2_pos), anchor_ori=tuple(agent.init_ori), full=True)
-        ans = rel.to_string('allo')
+        ans = rel.to_string()
         return ActionResult(True, self.get_feedback(True, answer=ans), str(self), 'query', {"answer": ans, "objects": [self.obj1, self.obj2], "pair": [self.obj1, self.obj2]})
 
     @staticmethod
