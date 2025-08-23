@@ -184,7 +184,7 @@ class DirectionRel:
     def __eq__(self, other):
         if type(other) is not DirectionRel:
             return False
-        return self.pair == other.pair and abs(self.degree - other.degree) < 1e-6
+        return self.pair == other.pair and abs(self.degree - other.degree) < 1e-3
     
     def __hash__(self):
         # Round degree to 6 decimal places for consistent hashing
@@ -254,7 +254,7 @@ class DirectionRel:
 
     @staticmethod
     def _format_degree(v: float) -> str:
-        if abs(v) < 1e-12: return "0°"
+        if abs(v) < 1e-3: return "0°"
         sign = '+' if v > 0 else '-'
         return f"{sign}{abs(v):.0f}°"
 
@@ -278,7 +278,7 @@ class DirectionRel:
         anchor = anchor / (np.linalg.norm(anchor) or 1.0)
         v = diff.astype(float)
         v = v / (np.linalg.norm(v) or 1.0)
-        deg = 0.0 if np.linalg.norm(v) < 1e-12 else float(-np.degrees(np.arctan2(anchor[0]*v[1]-anchor[1]*v[0], np.dot(anchor, v))))
+        deg = 0.0 if np.linalg.norm(v) < 1e-3 else float(-np.degrees(np.arctan2(anchor[0]*v[1]-anchor[1]*v[0], np.dot(anchor, v))))
         return cls(pair, deg)
 
     @classmethod
@@ -518,7 +518,7 @@ class ProximityRelationship:
         """Create proximity relationship between two close objects (both must be in agent's FOV)."""
         # Check if objects are close enough to each other
         a_to_b_dist = np.linalg.norm(np.array(a_pos) - np.array(b_pos))
-        if a_to_b_dist > cls.PROXIMITY_THRESHOLD:
+        if a_to_b_dist > cls.PROXIMITY_THRESHOLD - 1e-3:
             return None
             
         # Create pairwise relationship between the two objects using agent's perspective

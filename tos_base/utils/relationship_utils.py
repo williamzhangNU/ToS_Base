@@ -26,6 +26,7 @@ def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -
         lo2, hi2 = float(lo)*float(lo), float(hi)*float(hi)
         if not (dsq > lo2 - 1e-6 and dsq <= hi2 + 1e-6):
             return False
+        
         # Direction bin check
         bin_system = relationship.direction.bin_system
         # atan2(cross, dot) with normalized anchor; v length cancels out

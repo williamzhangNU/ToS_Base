@@ -407,8 +407,6 @@ class AnalystAgentProxy(AgentProxy):
         self.observe_strategy = observe_strategy  # 'oracle' or 'strategist'
         self.phase = 'observe'
 
-        self.solver.set_initial_position('initial_pos', (0, 0)) # agent initial position unknown, so set to (0, 0)
-
     def _ingest_from_turns(self) -> None:
         for i, t in enumerate(self.turns):
             obs = t.actions[-1]
@@ -552,6 +550,7 @@ if __name__ == "__main__":
             main=5
         )
         print(room)
+        print(room.mask)
         print(room.gates)
         ObserveAction.MODE = 'full'
         RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
