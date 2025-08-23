@@ -4,7 +4,7 @@ import numpy as np
 
 from .base import BaseAction, ActionResult
 from ..core.object import Gate
-from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, LocalRelationship, RelationTriple
+from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, RelationTriple
 
 """
 Specific action implementations for spatial exploration.
@@ -90,10 +90,10 @@ class RotateAction(BaseAction):
     """Rotate by specified degrees"""
     
     format_desc = "Rotate(degrees)"
-    description = "Rotate clockwise by specified degrees relative to your current orientation, only valid degrees are 0, 90, 180, 270."
-    example = "Rotate(90)"
+    description = "Rotate by specified degrees relative to your current orientation. Positive = clockwise, negative = counterclockwise. Valid: -270, -180, -90, 0, 90, 180, 270."
+    example = "Rotate(-90)"
     format_pattern = r"^Rotate\(([0-9-]+)\)$"
-    VALID_DEGREES = [0, 90, 180, 270]
+    VALID_DEGREES = [0, 90, 180, 270, -90, -180, -270]
     
     def __init__(self, degrees: int):
         super().__init__(degrees)
@@ -105,7 +105,10 @@ class RotateAction(BaseAction):
         agent.ori = agent.ori @ rotation_matrix
     
     def success_message(self, **kwargs) -> str:
-        return f"You rotated clockwise {self.degrees}°."
+        if self.degrees == 0:
+            return "You rotated 0°."
+        direction = 'clockwise' if self.degrees > 0 else 'counterclockwise'
+        return f"You rotated {direction} {abs(self.degrees)}°."
     
     def error_message(self, error_type: str) -> str:
         if error_type == "invalid_degree":
@@ -204,7 +207,7 @@ class ObserveAction(BaseAction):
                     ori_str = ori_rel.to_string('ego', kind='orientation')
             answer_str = f"{obj.name}: {pairwise_str}, faces {ori_str}"
             relationships.append(answer_str)
-            relation_triples.append(RelationTriple(obj_a=obj.name, obj_b=anchor_name, relation=rel, anchor_name=anchor_name, anchor_ori=tuple(agent.ori)))
+            relation_triples.append(RelationTriple(subject=obj.name, anchor=anchor_name, relation=rel, orientation=tuple(agent.ori)))
         
         final_answer = "\n" + "\n".join(f"• {rel}" for rel in relationships)
         return final_answer, relationships, relation_triples
@@ -295,17 +298,18 @@ class ObserveApproxAction(ObserveAction):
         return "ObserveApprox()"
     
     def _collect_local_relationships(self, agent, visible_objects, anchor_name: str):
-        # local pair relations using discrete relationship binning
+        # proximity-based pair relations using discrete relationship binning
         relationships, relation_triples = [], []
         n = len(visible_objects)
         for i in range(n):
             for j in range(i + 1, n):
                 a_obj, b_obj = visible_objects[i], visible_objects[j]
-                local_rel = LocalRelationship.from_positions(tuple(a_obj.pos), tuple(b_obj.pos), tuple(agent.pos), tuple(agent.ori))
-                if local_rel is not None:
-                    relationships.append(local_rel.to_string(a_obj.name, b_obj.name))
-                    relation_triples.append(RelationTriple(obj_a=a_obj.name, obj_b=b_obj.name, relation=local_rel, anchor_name=anchor_name, anchor_ori=tuple(agent.ori)))
-        final_answer = "\n" + "\n".join(f"• {rel}" for rel in relationships)
+                prox_rel = ProximityRelationship.from_positions(tuple(a_obj.pos), tuple(b_obj.pos), tuple(agent.ori))
+                if prox_rel is not None:
+                    relationships.append(prox_rel.to_string(a_obj.name, b_obj.name, 'ego'))
+                    # Proximity is object-object; anchor is the other object
+                    relation_triples.append(RelationTriple(subject=a_obj.name, anchor=b_obj.name, relation=prox_rel, orientation=tuple(agent.ori)))
+        final_answer = "\n".join(f"• {rel}" for rel in relationships)
         return final_answer, relationships, relation_triples
 
     def execute(self, room, agent, **kwargs) -> ActionResult:
@@ -322,7 +326,7 @@ class ObserveApproxAction(ObserveAction):
         pairwise_answer, relationships, pairwise_relation_triples = self._collect_obj_observations(agent=agent, visible_objects=visible_objects, anchor_name=anchor_name, mode='full', with_orientation=with_orientation, discrete=True)
         local_answer, local_relationships, local_relation_triples = self._collect_local_relationships(agent, visible_objects, anchor_name)
 
-        final_answer = f"{pairwise_answer}" + ((f"\n Local relations: {local_answer}") if local_answer else "")
+        final_answer = f"{pairwise_answer}" + ((f"\nLocal relations:\n{local_answer}") if local_answer else "")
         return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe', {
             'answer': final_answer,
             'visible_objects': [obj.name for obj in visible_objects],

@@ -1,14 +1,15 @@
 """Direction and POV evaluation tasks."""
 
 from typing import List, Tuple
-import numpy as np
 
 from .tasks import BaseEvaluationTask
-from ..core.object import Object
 from ..core.relationship import (
+    PairwiseRelationshipDiscrete,
+    DirectionRelDiscrete,
+    DistanceRelBinned,
+    PairwiseRelationship,
     DirPair,
     Dir,
-    PairwiseRelationship,
 )
 
 
@@ -17,7 +18,7 @@ class DirectionEvaluationTask(BaseEvaluationTask):
 
     QUESTION_TEMPLATE_DIR = (
         "From a top-down view, what is the spatial relationship of {obj_name} relative to {anchor_obj_name}?\n"
-        "Each choice is \"<relation>, <angle>, <distance>\" for A relative to B.\n\n"
+        "Each choice is \"<direction-bin>, <distance-bin>\" (allocentric).\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
@@ -35,7 +36,7 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         self.np_random.shuffle(pairs)
         i, j = pairs[0]
         obj1, obj2 = self.room.objects[i], self.room.objects[j]
-        rel = PairwiseRelationship.relationship(tuple(obj1.pos), tuple(obj2.pos))
+        rel = PairwiseRelationshipDiscrete.relationship(tuple(obj1.pos), tuple(obj2.pos))
         choices, correct_idx = self.generate_choices(rel, perspective='allo')
         choices_text, correct_label = self.format_choices(choices, correct_idx)
 
@@ -49,74 +50,94 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         self.eval_data.reasoning = self._generate_reasoning()
         return self.eval_data.question
 
-    def generate_choices(self, rel: PairwiseRelationship, perspective: str) -> Tuple[List[str], int]:
+    def generate_choices(self, rel, perspective: str) -> Tuple[List[str], int]:
         rnd = self.np_random
-        bearing = rel.bearing
-        dist_v = rel.distance_value
+        # Allocentric: discrete bins, hard distractors via adjacent-bin transforms
+        if perspective == 'allo':
+            dir_labels = DirectionRelDiscrete.ALLO_LABELS
+            dist_labels = DistanceRelBinned.DISTANCE_BIN_LABELS
+            zero_label = DistanceRelBinned.DIST_ZERO_LABEL
+            d_idx, d_lab = DirectionRelDiscrete.bin_bearing(rel.direction.degree, 'allo')
+            s_idx_raw, s_lab = DistanceRelBinned.bin_distance(rel.dist.value)
+            s_idx = 0 if s_idx_raw < 0 else s_idx_raw
 
-        def wrap_deg(x: float) -> float:
-            return float(((x + 180) % 360) - 180)
+            def fmt(d: str, s: str) -> str: return f"{d}, {s}"
+            def wrap8(k: int) -> int: return (k + 8) % 8
+            def clamp(k: int) -> int: return max(0, min(k, len(dist_labels) - 1))
 
-        def jdeg(v: float, small=True) -> float:
-            step = rnd.choice([10, 15, 20] if small else [30, 45, 60, 90]) * (1 if rnd.random() < 0.5 else -1)
-            return wrap_deg(v + step)
+            correct = fmt(d_lab, s_lab)
+            choices, seen = [correct], {correct}
 
-        def jdist(d: float, small=True) -> float:
-            f = rnd.choice([0.9, 1.1] if small else [0.75, 1.25, 1.5])
-            return max(0.01, round(d * f, 2))
+            dir_shifts = [1, -1, 2, -2, 4]
+            dist_shifts = [-1, 1]
 
+            cands = []
+            cands += [fmt(dir_labels[wrap8(d_idx + k)], s_lab) for k in dir_shifts]
+            if s_idx_raw >= 0:
+                cands += [fmt(d_lab, dist_labels[clamp(s_idx + k)]) for k in dist_shifts]
+            else:
+                cands += [fmt(d_lab, dist_labels[0])]
+            for dk in [1, -1, 2, -2]:
+                for sk in [-1, 1]:
+                    cands.append(fmt(dir_labels[wrap8(d_idx + dk)], dist_labels[clamp(s_idx + sk)]))
+
+            for s in cands:
+                if len(choices) == 8: break
+                if s not in seen:
+                    choices.append(s); seen.add(s)
+
+            all_dist_opts = dist_labels + [zero_label]
+            while len(choices) < 8:
+                s = fmt(rnd.choice(dir_labels), rnd.choice(all_dist_opts))
+                if s not in seen:
+                    choices.append(s); seen.add(s)
+
+            rnd.shuffle(choices)
+            return choices, choices.index(correct)
+
+        # Ego: keep numeric relation, degree, distance (unchanged POV style)
+        def wrap_deg(x: float) -> float: return float(((x + 180) % 360) - 180)
+        def jdeg(v: float) -> float:
+            return wrap_deg(v + rnd.choice([10, 15, 20, 30, 45]) * (1 if rnd.random() < 0.5 else -1))
+        def jdist(d: float) -> float:
+            return max(0.01, round(d * rnd.choice([0.9, 1.1, 0.75, 1.25]), 2))
         def flip_h(p: DirPair) -> DirPair:
             m = {Dir.LEFT: Dir.RIGHT, Dir.RIGHT: Dir.LEFT}
             return DirPair(m.get(p.horiz, p.horiz), p.vert)
-
         def flip_v(p: DirPair) -> DirPair:
             m = {Dir.FORWARD: Dir.BACKWARD, Dir.BACKWARD: Dir.FORWARD}
             return DirPair(p.horiz, m.get(p.vert, p.vert))
-
         def rot90(p: DirPair) -> DirPair:
             return PairwiseRelationship.rotate_pair_90(p)
+        def fmt_num(p: DirPair, deg: float, s: float) -> str:
+            return f"{PairwiseRelationship.pair_to_string(p, 'ego')}, {PairwiseRelationship.format_degree(deg)}, {PairwiseRelationship.distance_to_string(s)}"
 
-        def fmt(p: DirPair, deg: float, s: float) -> str:
-            dir_s = PairwiseRelationship.pair_to_string(p, perspective)
-            deg_s = PairwiseRelationship.format_degree(deg)
-            return f"{dir_s}, {deg_s}, {PairwiseRelationship.distance_to_string(s)}"
-
-        correct = fmt(rel.dir_pair, wrap_deg(rel.degree), dist_v)
+        P, A, S = rel.dir_pair, wrap_deg(rel.degree), rel.distance_value
+        correct = fmt_num(P, A, S)
         choices, seen = [correct], {correct}
 
-        masks = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (1, 0, 1), (0, 1, 1), (1, 1, 1)]
+        masks = [(1, 1, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 1), (1, 0, 1), (0, 1, 1)]
         rnd.shuffle(masks)
-
         def make(m):
             dchg, achg, schg = m
-            P, A, S = rel.dir_pair, rel.degree, dist_v
+            p, a, s = P, A, S
             if dchg:
-                if achg:
-                    P, A = rot90(P), wrap_deg(A + 90)
-                else:
-                    P = rnd.choice([flip_h, flip_v])(P)
-            if achg and not dchg:
-                A = jdeg(A, small=True if rnd.random() < 0.7 else False)
-            if schg:
-                S = jdist(S, small=True)
-            return fmt(P, A, S)
+                if achg: p, a = rot90(p), wrap_deg(a + 90)
+                else: p = rnd.choice([flip_h, flip_v])(p)
+            if achg and not dchg: a = jdeg(a)
+            if schg: s = jdist(s)
+            return fmt_num(p, a, s)
 
         for m in masks:
             for _ in range(3):
                 s = make(m)
                 if s not in seen:
-                    choices.append(s)
-                    seen.add(s)
-                    break
-            if len(choices) == 8:
-                break
-
+                    choices.append(s); seen.add(s); break
+            if len(choices) == 8: break
         while len(choices) < 8:
             s = make(rnd.choice(masks))
             if s not in seen:
-                choices.append(s)
-                seen.add(s)
-
+                choices.append(s); seen.add(s)
         rnd.shuffle(choices)
         return choices, choices.index(correct)
 

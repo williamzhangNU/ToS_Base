@@ -108,9 +108,10 @@ class BaseAction(ABC):
     
     @staticmethod
     def _get_rotation_matrix(degrees: int) -> np.ndarray:
-        """Get rotation matrix for specified degrees clockwise."""
+        """Get rotation matrix. Positive is clockwise; negative is counterclockwise."""
+        deg = degrees % 360
         rotations = {0: [[1,0],[0,1]], 90: [[0,-1],[1,0]], 180: [[-1,0],[0,-1]], 270: [[0,1],[-1,0]]}
-        return np.array(rotations[degrees])
+        return np.array(rotations[deg])
     
     @staticmethod
     def is_final() -> bool:

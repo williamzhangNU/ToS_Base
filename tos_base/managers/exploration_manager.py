@@ -15,7 +15,6 @@ class ExplorationTurnLog:
     edge_coverage: float
     step: int
     action_counts: Dict[str, int]
-    action_info: Dict[str, Any]
     room_state: Optional['Room'] = None
     agent_state: Optional['Agent'] = None
 
@@ -25,7 +24,6 @@ class ExplorationTurnLog:
             "edge_coverage": self.edge_coverage,
             "step": self.step,
             "action_counts": dict(self.action_counts),
-            "action_info": self.action_info,
             "room_state": self.room_state.to_dict() if self.room_state else {},
             "agent_state": self.agent_state.to_dict() if self.agent_state else {}
         }
@@ -116,7 +114,7 @@ class ExplorationManager:
                 result = self._execute_and_update(action)
                 action_results.append(result)
                 info.update(result.data)
-            self._log_exploration(action_sequence, info)
+            self._log_exploration(action_sequence)
             return info, action_results
 
         assert action_sequence.final_action, "Action sequence requires a final action."
@@ -135,7 +133,7 @@ class ExplorationManager:
                 action_results.append(obs_result)
                 assert obs_result.success, f"Observe action failed: {obs_result.message}"
                 info.update(obs_result.data)
-                self._log_exploration(action_sequence, info)
+                self._log_exploration(action_sequence)
                 return info, action_results
 
         # Execute final action
@@ -146,7 +144,7 @@ class ExplorationManager:
         info.update(result.data)
 
         # Always log before return
-        self._log_exploration(action_sequence, info)
+        self._log_exploration(action_sequence)
         return info, action_results
     
     def finish_exploration(self, return_to_origin: bool = True) -> Room:
@@ -221,10 +219,9 @@ class ExplorationManager:
 
 
     
-    def _log_exploration(self, action_sequence: ActionSequence, info: Dict[str, Any]) -> None:
+    def _log_exploration(self, action_sequence: ActionSequence) -> None:
         """Log exploration history and efficiency."""
         # Log current turn with coverage snapshot
-        info['agent_room_id'] = getattr(self.agent, 'room_id', None)
         self._update_exp_summary()
         step_idx = len(self.turn_logs) + 1
         turn_log = ExplorationTurnLog(
@@ -232,7 +229,6 @@ class ExplorationManager:
             edge_coverage=self.exp_summary.get('edge_coverage', 0.0),
             step=step_idx,
             action_counts=dict(self.exp_summary.get('action_counts', {})),
-            action_info=deepcopy(info),
             room_state=self.exploration_room.copy(),
             agent_state=self.agent.copy()
         )

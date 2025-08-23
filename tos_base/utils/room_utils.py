@@ -11,8 +11,8 @@ from .generate_room_layout import generate_room_layout
 class RoomGenerator:
     """Room generator.
     1. Coordinates:
-        - World coordinates are (x, y). Mask indexing is [y, x]. That is, columns map to x and rows map to y.
-        - In mask indexing, column increasing means x increasing; row increasing means y increasing.
+        - World coordinates are (x, y). Mask indexing is [x, y]. That is, rows map to x and columns map to y.
+        - In mask indexing, row increasing means x increasing; column increasing means y increasing.
         - Neighbor convention on masks: "up" is y+1 and "down" is y-1; "right" is x+1 and "left" is x-1.
         - For visualization, we render with origin at bottom-left to keep y increasing upwards in world space.
     2. Room id:
@@ -21,8 +21,9 @@ class RoomGenerator:
     """
     @staticmethod
     def _default_mask(room_size: tuple[int, int]) -> np.ndarray:
-        w, h = int(room_size[0]), int(room_size[1])
-        mask = np.ones((h + 1, w + 1), dtype=np.int8)
+        x_size, y_size = int(room_size[0]), int(room_size[1])
+        # mask shape follows mask[x, y] convention: first axis = rows = x, second axis = cols = y
+        mask = np.ones((x_size + 1, y_size + 1), dtype=np.int8)
         mask[[0, -1], :] = -1
         mask[:, [0, -1]] = -1
         return mask
@@ -31,9 +32,9 @@ class RoomGenerator:
     def _get_valid_positions(mask: np.ndarray, room_id: int | None = None) -> List[Tuple[int, int]]:
         """Get valid positions in the mask."""
         if room_id is not None:
-            valid = np.argwhere(mask.T == int(room_id))
+            valid = np.argwhere(mask == int(room_id))
         else:
-            valid = np.argwhere((mask.T >= 1) & (mask.T < 100))
+            valid = np.argwhere((mask >= 1) & (mask < 100))
         return valid
     
     @staticmethod
@@ -42,9 +43,9 @@ class RoomGenerator:
         h, w = msk.shape
         cnt = 0
         # vertical doors (100): look up and down for room ids
-        ys, xs = np.where(msk == 100)
-        for y, x in zip(ys.tolist(), xs.tolist()):
-            up, down = int(msk[y + 1, x]), int(msk[y - 1, x])
+        xs, ys = np.where(msk == 100)
+        for x, y in zip(xs.tolist(), ys.tolist()):
+            up, down = int(msk[x, y + 1]), int(msk[x, y - 1])
             if 1 <= up < 100 and 1 <= down < 100 and up != down:
                 g = Gate(
                     name=f"door_{cnt}",
@@ -55,9 +56,9 @@ class RoomGenerator:
                 )
                 gates.append(g); cnt += 1
         # horizontal doors (101): look left and right for room ids
-        ys, xs = np.where(msk == 101)
-        for y, x in zip(ys.tolist(), xs.tolist()):
-            left, right = int(msk[y, x - 1]), int(msk[y, x + 1])
+        xs, ys = np.where(msk == 101)
+        for x, y in zip(xs.tolist(), ys.tolist()):
+            left, right = int(msk[x - 1, y]), int(msk[x + 1, y])
             if 1 <= left < 100 and 1 <= right < 100 and left != right:
                 g = Gate(
                     name=f"door_{cnt}",
@@ -84,7 +85,8 @@ class RoomGenerator:
         - Agent is sampled from main room (room id = 1).
         """
         n = int(max(room_size[0], room_size[1]))
-        mask = generate_room_layout(n=n, level=int(level), main=main, np_random=np_random)
+        # generate layout in conventional [row(y), col(x)] then transpose to our [x, y] convention
+        mask = generate_room_layout(n=n, level=int(level), main=main, np_random=np_random).T
 
         gates = RoomGenerator._gen_gates_from_mask(mask)
 
@@ -150,13 +152,14 @@ class RoomPlotter:
             BLUE, RED, GRN = 34, 31, 32
             # grid from mask if available
             if has_mask:
-                h, w = room.mask.shape
-                min_x, max_x, min_y, max_y = 0, w - 1, 0, h - 1
-                grid = [[' '] * w for _ in range(h)]
+                h, w = room.mask.shape  # h: number of rows (x), w: number of cols (y)
+                min_x, max_x, min_y, max_y = 0, h - 1, 0, w - 1
+                # Build grid as rows over world y (vertical), cols over world x (horizontal)
+                grid = [[' '] * h for _ in range(w)]
                 # draw background: rooms '.', walls '#', doors '+'
-                for y in range(h):
-                    for x in range(w):
-                        v = int(room.mask[y, x])
+                for wy in range(w):
+                    for wx in range(h):
+                        v = int(room.mask[wx, wy])
                         if v == -1:
                             ch = ' '
                         elif v == 0:
@@ -165,15 +168,15 @@ class RoomPlotter:
                             ch = '+'
                         else:
                             ch = '·'
-                        grid[h - 1 - y][x] = ch
+                        grid[w - 1 - wy][wx] = ch
                 # room labels at centers
                 rids = sorted(int(r) for r in np.unique(room.mask) if 1 <= int(r) < 100)
                 for rid in rids:
-                    ys, xs = np.where(room.mask == rid)
+                    xs, ys = np.where(room.mask == rid)
                     if len(xs) == 0:
                         continue
-                    cy, cx = int(np.mean(ys)), int(np.mean(xs))
-                    grid[h - 1 - cy][cx] = str(rid % 10)
+                    cx, cy = int(np.mean(xs)), int(np.mean(ys))
+                    grid[w - 1 - cy][cx] = str(rid % 10)
             else:
                 # bounds/grid from objects if no mask
                 min_x, max_x, min_y, max_y = room.get_boundary()
@@ -183,20 +186,23 @@ class RoomPlotter:
             # objects + gates with orientation
             for obj in room.all_objects:
                 x, y = int(obj.pos[0]) - min_x, max_y - int(obj.pos[1])
-                if 0 <= y < h and 0 <= x < w:
+                # grid may be (w rows, h cols) when has_mask, or (h rows, w cols) when no mask
+                height, width = len(grid), len(grid[0]) if grid else (0)
+                if 0 <= y < height and 0 <= x < width:
                     ch = 'D' if obj in getattr(room, 'gates', []) else (arrow(obj.ori) if getattr(obj, 'has_orientation', True) else '●')
                     grid[y][x] = col(ch, RED if obj in getattr(room, 'gates', []) else BLUE)
             # agent (current + init)
             if agent is not None:
                 ax, ay = int(agent.pos[0]) - min_x, max_y - int(agent.pos[1])
-                if 0 <= ay < h and 0 <= ax < w:
+                height, width = len(grid), len(grid[0]) if grid else (0)
+                if 0 <= ay < height and 0 <= ax < width:
                     grid[ay][ax] = col(arrow(agent.ori), GRN)
                 iax, iay = int(agent.init_pos[0]) - min_x, max_y - int(agent.init_pos[1])
-                if 0 <= iay < h and 0 <= iax < w and not (iax == ax and iay == ay):
+                if 0 <= iay < height and 0 <= iax < width and not (iax == ax and iay == ay):
                     grid[iay][iax] = col('×', GRN)
             print(f"--- {room.name} ---")
-            for y in range(h):
-                print(' '.join(grid[y]))
+            for yy in range(len(grid)):
+                print(' '.join(grid[yy]))
             if agent is not None:
                 def name_ori(v):
                     m = {(0,1): 'N', (1,0): 'E', (0,-1): 'S', (-1,0): 'W'}
@@ -208,8 +214,8 @@ class RoomPlotter:
             fig, ax = plt.subplots(figsize=(6, 6))
             ax.set_facecolor('white')
             if has_mask:
-                h, w = room.mask.shape
-                min_x, max_x, min_y, max_y = 0, w - 1, 0, h - 1
+                h, w = room.mask.shape  # h: rows=x, w: cols=y
+                min_x, max_x, min_y, max_y = 0, h - 1, 0, w - 1
                 # build label map for background coloring
                 label = np.zeros_like(room.mask, dtype=int)
                 label[room.mask == 0] = 1
@@ -222,14 +228,15 @@ class RoomPlotter:
                 while len(colors) <= label.max():
                     colors += colors[3:]
                 from matplotlib.colors import ListedColormap
-                ax.imshow(label, origin='lower', cmap=ListedColormap(colors[:label.max()+1]),
+                # transpose so that imshow's x-axis corresponds to world x (rows)
+                ax.imshow(label.T, origin='lower', cmap=ListedColormap(colors[:label.max()+1]),
                           extent=(min_x-0.5, max_x+0.5, min_y-0.5, max_y+0.5), interpolation='nearest', zorder=0, alpha=0.18)
                 # room id labels
                 for rid in rids:
-                    ys, xs = np.where(room.mask == rid)
+                    xs, ys = np.where(room.mask == rid)
                     if len(xs) == 0:
                         continue
-                    cx, cy = float(np.mean(xs)), float(np.mean(ys))
+                    cx, cy = float(np.mean(xs)), float(np.mean(ys)) # x, y
                     ax.text(cx, cy, str(rid), color='white', ha='center', va='center', fontsize=8, zorder=1, alpha=0.85)
             else:
                 min_x, max_x, min_y, max_y = room.get_boundary()

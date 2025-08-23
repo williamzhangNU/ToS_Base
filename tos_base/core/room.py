@@ -126,21 +126,21 @@ class Room(BaseRoom):
         self.idx_to_name = {i + 1: o.name for i, o in enumerate(self.all_objects)}
         for o in self.all_objects:
             x, y = int(o.pos[0]), int(o.pos[1])
-            self.object_map[y, x] = self.name_to_idx[o.name]
+            self.object_map[x, y] = self.name_to_idx[o.name]
 
     def get_boundary(self):
-        """Bounds from mask shape: x in [0,w-1], y in [0,h-1]."""
+        """Bounds from mask shape with mapping mask[x, y]: x in [0,h-1], y in [0,w-1]."""
         h, w = self.mask.shape
-        return 0, w - 1, 0, h - 1
+        return 0, h - 1, 0, w - 1
 
     def get_random_point(self, rng: np.random.Generator, n_points: int = 1, room_id: int | None = None) -> np.ndarray:
         """Random valid mask coordinate(s); filter by room_id if provided.
         Returns shape (2,) when n_points==1, else (n_points, 2).
         """
         if room_id is not None:
-            valid = np.argwhere(self.mask.T == int(room_id))
+            valid = np.argwhere(self.mask == int(room_id))
         else:
-            valid = np.argwhere((self.mask.T >= 1) & (self.mask.T < 100))
+            valid = np.argwhere((self.mask >= 1) & (self.mask < 100))
         rng.shuffle(valid)
         pts = valid[:n_points]
         return pts[0] if n_points == 1 else pts
@@ -175,7 +175,7 @@ class Room(BaseRoom):
         # Assign room_id for non-gate objects from mask
         for obj in self.objects:
             x, y = int(obj.pos[0]), int(obj.pos[1])
-            rid = int(self.mask[y, x])
+            rid = int(self.mask[x, y])
             assert rid > 0, f"Object {obj.name} is not in a room"
             obj.room_id = rid
 
@@ -211,12 +211,12 @@ class Room(BaseRoom):
     def get_cell_info(self, x: int, y: int) -> Dict[str, Any]:
         info: Dict[str, Any] = {"room_id": None, "object_name": None, "gate_name": None}
         if self.mask is not None:
-            if 0 <= y < self.mask.shape[0] and 0 <= x < self.mask.shape[1]:
-                rid = int(self.mask[y, x])
+            if 0 <= x < self.mask.shape[0] and 0 <= y < self.mask.shape[1]:
+                rid = int(self.mask[x, y])
                 info["room_id"] = rid if rid > 0 else None
         if getattr(self, 'object_map', None) is not None and self.object_map is not None:
-            if 0 <= y < self.object_map.shape[0] and 0 <= x < self.object_map.shape[1]:
-                idx = int(self.object_map[y, x])
+            if 0 <= x < self.object_map.shape[0] and 0 <= y < self.object_map.shape[1]:
+                idx = int(self.object_map[x, y])
                 if idx > 0:
                     name = self.idx_to_name.get(idx)
                     if name is not None:

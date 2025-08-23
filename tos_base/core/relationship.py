@@ -1,10 +1,105 @@
 from enum import Enum, auto
-from typing import Union, Optional, ClassVar, Tuple
+from typing import Union, Optional, ClassVar, Tuple, Protocol
 import numpy as np
 from dataclasses import dataclass
+from abc import ABC, abstractmethod
 
 
 """Relationship primitives for spatial reasoning."""
+
+
+# ---- Bin System Protocol ----
+class BinSystem(Protocol):
+    @abstractmethod
+    def bin(self, degree: float, perspective: str = 'allo') -> Tuple[int, str]:
+        """Return (bin_id, bin_label) for given degree."""
+        pass
+    
+    @classmethod
+    @abstractmethod
+    def prompt(cls, perspective: str = 'allo') -> str:
+        """Return description of the bin system."""
+        pass
+
+
+class DistanceBinSystem(Protocol):
+    @abstractmethod
+    def bin(self, value: float) -> Tuple[int, str]:
+        """Return (bin_id, bin_label) for given distance value."""
+        pass
+    
+    @classmethod
+    @abstractmethod
+    def prompt(cls) -> str:
+        """Return description of the distance bin system."""
+        pass
+
+
+class EgoFrontBins:
+    """Ego-centric front-focused bins."""
+    BINS = [
+        (-5, 5, 'front'),
+        (5, 25, 'front-slight-right'),  
+        (25, 45, 'front-right'),
+        (-25, -5, 'front-slight-left'),
+        (-45, -25, 'front-left'),
+        (45, 180, 'beyond-fov')
+    ]
+    
+    def bin(self, degree: float, perspective: str = 'ego') -> Tuple[int, str]:
+        v = float(degree)
+        for i, (lo, hi, label) in enumerate(self.BINS):
+            if lo <= v <= hi:
+                return i, label
+        return 5, 'beyond-fov'
+    
+    @classmethod
+    def prompt(cls, perspective: str = 'ego') -> str:
+        parts = [f"[{lo}°,{hi}°]→{label}" if lo == -5 else f"({lo}°,{hi}°]→{label}" 
+                for lo, hi, label in cls.BINS]
+        return f"Bearing bins (egocentric): {', '.join(parts)}."
+
+
+class CardinalBins:
+    """Cardinal direction bins (8 directions) with ego/allo perspective support."""
+    ALLO_LABELS = ['north', 'north east', 'east', 'south east', 'south', 'south west', 'west', 'north west']
+    EGO_LABELS = ['front', 'front right', 'right', 'back right', 'back', 'back left', 'left', 'front left']
+    
+    def bin(self, degree: float, perspective: str = 'allo') -> Tuple[int, str]:
+        v = float(degree)
+        w = (v + 360.0) % 360.0
+        idx = int(((w + 22.5) // 45.0) % 8)
+        labels = self.EGO_LABELS if perspective == 'ego' else self.ALLO_LABELS
+        return idx, labels[idx]
+    
+    @classmethod
+    def prompt(cls, perspective: str = 'allo') -> str:
+        labels = cls.EGO_LABELS if perspective == 'ego' else cls.ALLO_LABELS
+        parts = [f"[{i * 45 - 22.5}°,{i * 45 + 22.5}°]→{label}"
+                for i, label in enumerate(labels)]
+        perspective_name = "egocentric" if perspective == 'ego' else "allocentric"
+        return f"Bearing bins ({perspective_name}): {', '.join(parts)}."
+
+
+class StandardDistanceBins:
+    """Standard distance bins."""
+    BINS = [(0.0, 2.0, 'near'), (2.0, 5.0, 'mid distance'), (5.0, 10.0, 'slightly far'), (10.0, 20.0, 'far'), (20.0, 50.0, 'very far')]
+    ZERO_LABEL = 'same distance'
+    
+    def bin(self, value: float) -> Tuple[int, str]:
+        d = float(value)
+        if d <= 1e-6:
+            return -1, self.ZERO_LABEL
+        for i, (lo, hi, label) in enumerate(self.BINS):
+            if lo < d <= hi:
+                return i, label
+        raise ValueError(f"Invalid distance: {d}")
+    
+    @classmethod
+    def prompt(cls) -> str:
+        parts = [f"=0→{cls.ZERO_LABEL}"] + [f"({lo},{hi}]→{label}"
+                 for lo, hi, label in cls.BINS]
+        return f"Distance bins: {', '.join(parts)}."
 
 
 class Dir(Enum):
@@ -25,7 +120,7 @@ class Dir(Enum):
         return cls.SAME if abs(d) < 1e-6 else (cls.RIGHT if d > 0 else cls.LEFT)
 
 
-@dataclass()
+@dataclass(frozen=True)
 class DirPair:
     """(horiz, vert) pair."""
     horiz: Dir
@@ -51,6 +146,15 @@ class DirectionRel:
 
     # Field of view
     FIELD_OF_VIEW: ClassVar[float] = 90.0
+    
+    def __eq__(self, other):
+        if type(other) is not DirectionRel:
+            return False
+        return self.pair == other.pair and abs(self.degree - other.degree) < 1e-6
+    
+    def __hash__(self):
+        # Round degree to 6 decimal places for consistent hashing
+        return hash((self.pair, round(self.degree, 6)))
 
     # Perspective labels
     EGO: ClassVar[dict[Dir, str]] = {Dir.SAME: 'same', Dir.FORWARD: 'front', Dir.BACKWARD: 'back', Dir.RIGHT: 'right', Dir.LEFT: 'left', Dir.UNKNOWN: 'unknown'}
@@ -81,6 +185,10 @@ class DirectionRel:
         return self._ori_to_string(self.pair, perspective, None if gate_dir is None else gate_dir.pair)
 
     @classmethod
+    def pair_to_string(cls, d: DirPair, perspective: str = 'ego') -> str:
+        return cls._dir_to_string(d, perspective)
+
+    @classmethod
     def _dir_to_string(cls, d: Union[Dir, DirPair], perspective: str = 'ego') -> str:
         labels = cls.EGO if perspective == 'ego' else cls.ALLO
         if isinstance(d, Dir): return labels[d]
@@ -90,13 +198,6 @@ class DirectionRel:
         if h == Dir.SAME or v == Dir.SAME:
             return f"directly {labels[h] if h != Dir.SAME else labels[v]}"
         return f"{labels[v]}-{labels[h]}"
-
-    @classmethod
-    def pair_to_string(cls, d: DirPair, perspective: str = 'ego') -> str:
-        return cls._dir_to_string(d, perspective)
-
-
-# RelationTriple defined near the end after all classes
 
     @classmethod
     def _ori_to_string(cls, o: DirPair, perspective: str = 'ego', gate_dir: DirPair = None) -> str:
@@ -159,6 +260,15 @@ class DirectionRel:
 @dataclass()
 class DistanceRel:
     value: float
+    
+    def __eq__(self, other):
+        if type(other) is not DistanceRel:
+            return False
+        return abs(self.value - other.value) < 1e-6
+    
+    def __hash__(self):
+        # Round value to 6 decimal places for consistent hashing
+        return hash(round(self.value, 6))
 
     def to_string(self, perspective: str = 'ego') -> str:
         d = float(self.value)
@@ -176,82 +286,73 @@ class DistanceRel:
 
 
 @dataclass()
-class DirectionRelDiscrete(DirectionRel):
-    """Discrete bins for direction (inherits continuous, overrides discrete-only API)."""
-    # Degree bins
-    DEGREE_BINS: ClassVar[list[tuple[float, float]]] = [(0, 15), (15, 30), (30, 45), (45, 180)]
-    DEGREE_BIN_LABELS: ClassVar[dict[str, list[str] | str]] = {
-        'pos': ['slight-right', 'right', 'sharp-right', 'beyond-fov'],
-        'neg': ['slight-left', 'left', 'sharp-left', 'beyond-fov'],
-        'zero': 'directly front',
-    }
+class DirectionRelBinned(DirectionRel):
+    """Direction with modular bin system."""
+    bin_system: BinSystem = None
+    bin_id: int = 0
+    bin_label: str = ""
+    perspective: str = 'allo'
+    
+    def __post_init__(self):
+        if self.bin_system is not None:
+            self.bin_id, self.bin_label = self.bin_system.bin(self.degree, self.perspective)
 
     @classmethod
-    def bin_bearing(cls, degree: float) -> Tuple[int, str, str]:
-        v = float(degree)
-        if abs(v) < 1e-6:
-            return -1, str(cls.DEGREE_BIN_LABELS['zero']), 'zero'
-        side = 'neg' if v < 0 else 'pos'
-        a = abs(v)
-        for i, (lo, hi) in enumerate(cls.DEGREE_BINS):
-            if lo < a <= hi:
-                return i, cls.DEGREE_BIN_LABELS[side][i], side  # type: ignore[index]
-        return len(cls.DEGREE_BINS) - 1, cls.DEGREE_BIN_LABELS[side][-1], side  # type: ignore[index]
+    def from_relation(cls, rel: DirectionRel, bin_system: BinSystem, perspective: str = 'allo') -> 'DirectionRelBinned':
+        bin_id, bin_label = bin_system.bin(rel.degree, perspective)
+        return cls(pair=rel.pair, degree=rel.degree, bin_system=bin_system, 
+                  bin_id=bin_id, bin_label=bin_label, perspective=perspective)
 
-    @classmethod
-    def from_relation(cls, rel: DirectionRel) -> 'DirectionRelDiscrete':
-        return cls(pair=rel.pair, degree=rel.degree)  # metadata is derivable via binning
-
-    @classmethod
-    def prompt(cls) -> str:
-        parts = [f"(0→{cls.DEGREE_BIN_LABELS['zero']})"]
-        parts += [f"({lo},{hi}]→{cls.DEGREE_BIN_LABELS['neg'][i]}/{cls.DEGREE_BIN_LABELS['pos'][i]}"
-                  for i, (lo, hi) in enumerate(cls.DEGREE_BINS)]
-        return "Bearing bins: " + ", ".join(parts) + "."
-
-    def to_string(self, perspective: str = 'ego', kind: str = 'relation') -> str:
-        assert kind == 'relation' and perspective == 'ego'
-        # compute current bin on demand
-        _, label, _ = self.bin_bearing(self.degree)
-        return label
+    def to_string(self, perspective: str = None, kind: str = 'relation') -> str:
+        assert kind == 'relation'
+        # Use provided perspective or stored perspective
+        use_perspective = perspective or self.perspective
+        if use_perspective != self.perspective and self.bin_system is not None:
+            # Re-bin with new perspective
+            _, label = self.bin_system.bin(self.degree, use_perspective)
+            return label
+        return self.bin_label
 
 
 @dataclass()
-class DistanceRelDiscrete(DistanceRel):
-    """Discrete bins for distance (inherits continuous)."""
+class DistanceRelBinned(DistanceRel):
+    """Discrete bins for distance using modular bin system."""
+    bin_system: DistanceBinSystem = None
+    bin_id: int = 0
+    bin_label: str = ""
+    
+    def __post_init__(self):
+        if self.bin_system is not None:
+            self.bin_id, self.bin_label = self.bin_system.bin(self.value)
 
-    # Distance bins moved here from DistanceRel
-    DISTANCE_BINS: ClassVar[list[tuple[float, float]]] = [(0.0, 2.0), (2.0, 5.0), (5.0, 10.0), (10.0, 20.0)]  # (lo, hi]
-    DISTANCE_BIN_LABELS: ClassVar[list[str]] = ['near', 'mid distance', 'far', 'very far']
-    DIST_ZERO_LABEL: ClassVar[str] = 'same distance'
+    @classmethod
+    def from_value(cls, value: float, bin_system: DistanceBinSystem = None) -> 'DistanceRelBinned':
+        bin_system = bin_system or StandardDistanceBins()
+        bin_id, bin_label = bin_system.bin(value)
+        return cls(value=value, bin_system=bin_system, bin_id=bin_id, bin_label=bin_label)
 
     @classmethod
     def bin_distance(cls, value: float) -> Tuple[int, str]:
-        d = float(value)
-        if d <= 1e-6: return -1,cls.DIST_ZERO_LABEL
-        for i, (lo, hi) in enumerate(cls.DISTANCE_BINS):
-            if lo < d <= hi: return i, cls.DISTANCE_BIN_LABELS[i]
-        raise ValueError(f"Invalid distance: {d}")
-
-    @classmethod
-    def from_value(cls, value: float) -> 'DistanceRelDiscrete':
-        return cls(float(value))
-
-    @classmethod
-    def prompt(cls) -> str:
-        parts = [f"=0→{cls.DIST_ZERO_LABEL}"] + [f"({lo},{hi}]→{label}"
-                 for (lo, hi), label in zip(cls.DISTANCE_BINS, cls.DISTANCE_BIN_LABELS)]
-        return "Distance bins: " + ", ".join(parts) + "."
+        # For backward compatibility
+        bin_system = StandardDistanceBins()
+        return bin_system.bin(value)
 
     def to_string(self, perspective: str = 'ego') -> str:
-        bin_idx, label = self.bin_distance(self.value)
-        return label
+        return self.bin_label
 
 
 @dataclass(frozen=False)
 class PairwiseRelationship:
     direction: Optional[DirectionRel] = None
     dist: Optional[DistanceRel] = None
+    
+    def __eq__(self, other):
+        if type(other) is not PairwiseRelationship:
+            return False
+        return self.direction == other.direction and self.dist == other.dist
+    
+    def __hash__(self):
+        return hash((self.direction, self.dist))
 
     @property
     def bearing(self) -> DirectionRel:
@@ -331,120 +432,120 @@ class PairwiseRelationship:
 
 @dataclass()
 class PairwiseRelationshipDiscrete(PairwiseRelationship):
-    direction: DirectionRelDiscrete  # type: ignore[assignment]
-    dist: DistanceRelDiscrete  # type: ignore[assignment]
+    direction: DirectionRelBinned  # type: ignore[assignment]
+    dist: DistanceRelBinned  # type: ignore[assignment]
+    
+    def __eq__(self, other):
+        if type(other) is not PairwiseRelationshipDiscrete:
+            return False
+        return (self.direction.bin_id == other.direction.bin_id and 
+                self.dist.bin_id == other.dist.bin_id)
+    
+    def __hash__(self):
+        return hash((self.direction.bin_id, self.dist.bin_id))
 
     @classmethod
-    def prompt(cls) -> str:
+    def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None, perspective: str = 'ego') -> str:
+        bin_system = bin_system or EgoFrontBins()
+        distance_bin_system = distance_bin_system or StandardDistanceBins()
+        perspective_name = "egocentric" if perspective == 'ego' else "allocentric"
         return (
-            "Discrete relationship reporting:\n"
-            f"- {DirectionRelDiscrete.prompt()}\n"
-            f"- {DistanceRelDiscrete.prompt()}"
+            f"Discrete relationship reporting ({perspective_name}):\n"
+            f"- {bin_system.prompt(perspective)}\n"
+            f"- {distance_bin_system.prompt()}"
         )
     
     @classmethod
-    def relationship(cls, pos1: tuple, pos2: tuple, anchor_ori: Optional[tuple] = None) -> 'PairwiseRelationshipDiscrete':
+    def relationship(cls, pos1: tuple, pos2: tuple, anchor_ori: Optional[tuple] = None, 
+                    bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None,
+                    perspective: str = 'ego') -> 'PairwiseRelationshipDiscrete':
+        bin_system = bin_system or EgoFrontBins()
+        distance_bin_system = distance_bin_system or StandardDistanceBins()
         rel = PairwiseRelationship.relationship(pos1, pos2, anchor_ori=anchor_ori, full=True)
-        d = DirectionRelDiscrete.from_relation(rel.direction)
-        s = DistanceRelDiscrete.from_value(rel.dist.value if rel.dist else 0.0)
+        d = DirectionRelBinned.from_relation(rel.direction, bin_system, perspective)
+        s = DistanceRelBinned.from_value(rel.dist.value if rel.dist else 0.0, distance_bin_system)
         return cls(direction=d, dist=s)
 
-    def to_string(self, perspective: str = 'ego') -> str:
-        return f"{self.direction.to_string(perspective, 'relation')}, {self.dist.to_string(perspective)}"
+    def to_string(self, perspective: str = None) -> str:
+        return f"{self.direction.to_string(perspective, 'relation')}, {self.dist.to_string()}"
     
     
 
 
 @dataclass()
-class LocalRelationship:
-    side: Optional[str]
-    proximity: Optional[str]
-
+class ProximityRelationship:
+    """Object-to-object proximity relationship for nearby objects in agent's FOV."""
+    pairwise_rel: PairwiseRelationshipDiscrete
+    
+    # Proximity threshold - objects must be within this distance to have proximity relationship
+    PROXIMITY_THRESHOLD: ClassVar[float] = 5.0
+    
+    def __eq__(self, other):
+        if type(other) is not ProximityRelationship:
+            return False
+        return self.pairwise_rel == other.pairwise_rel
+    
+    def __hash__(self):
+        return hash(self.pairwise_rel)
+    
     @classmethod
-    def from_positions(cls, a_pos: tuple, b_pos: tuple, anchor_pos: tuple, anchor_ori: tuple) -> 'LocalRelationship':
-
-        def _norm_angle(x: float) -> float:
-            return (x + 180.0) % 360.0 - 180.0
-        
-        rel_a = PairwiseRelationshipDiscrete.relationship(tuple(a_pos), tuple(anchor_pos), anchor_ori=tuple(anchor_ori))
-        rel_b = PairwiseRelationshipDiscrete.relationship(tuple(b_pos), tuple(anchor_pos), anchor_ori=tuple(anchor_ori))
-        
-        # Check if direction or distance bins are the same (indicating locality)
-        i_a, _, s_a = DirectionRelDiscrete.bin_bearing(rel_a.direction.degree)
-        i_b, _, s_b = DirectionRelDiscrete.bin_bearing(rel_b.direction.degree)
-        dir_same = (i_a == i_b) and (s_a == s_b)
-        j_a, _ = DistanceRelDiscrete.bin_distance(rel_a.dist.value)
-        j_b, _ = DistanceRelDiscrete.bin_distance(rel_b.dist.value)
-        dist_same = (j_a == j_b)
-
-        if not dir_same and not dist_same:
+    def from_positions(cls, a_pos: tuple, b_pos: tuple, perspective_ori: tuple = (0, 1)) -> Optional['ProximityRelationship']:
+        """Create proximity relationship between two objects (both must be in agent's FOV)."""
+        # Check if objects are close enough to each other
+        a_to_b_dist = np.linalg.norm(np.array(a_pos) - np.array(b_pos))
+        if a_to_b_dist > cls.PROXIMITY_THRESHOLD:
             return None
-
-        a_bearing = PairwiseRelationship.get_bearing_degree(a_pos, anchor_pos, anchor_ori)
-        b_bearing = PairwiseRelationship.get_bearing_degree(b_pos, anchor_pos, anchor_ori)
-        a_dist = PairwiseRelationship.get_distance(a_pos, anchor_pos).value
-        b_dist = PairwiseRelationship.get_distance(b_pos, anchor_pos).value
-        side = 'right' if _norm_angle(a_bearing - b_bearing) > 0 else 'left' if _norm_angle(a_bearing - b_bearing) < 0 else 'same direction'
-        prox = 'closer' if a_dist < b_dist else 'farther' if a_dist > b_dist else 'same distance'
-        return cls(side=side, proximity=prox)
-
-    def to_string(self, a_name: str, b_name: str) -> str:
-        return (f"{a_name} is {self.side} of {b_name}, {self.proximity} to agent")
+            
+        # Create pairwise relationship between the two objects using agent's perspective
+        cardinal_bins = CardinalBins()
+        distance_bins = StandardDistanceBins()
+        pairwise_rel = PairwiseRelationshipDiscrete.relationship(a_pos, b_pos, perspective_ori, cardinal_bins, distance_bins, 'ego')
+        
+        return cls(pairwise_rel=pairwise_rel)
+    
+    @classmethod
+    def prompt(cls, perspective: str = 'ego') -> str:
+        cardinal_bins = CardinalBins()
+        distance_bins = StandardDistanceBins()
+        return (
+            f"Proximity relationship reporting ({perspective}):\n"
+            f"Object-to-object relationships for nearby objects (≤{cls.PROXIMITY_THRESHOLD} units).\n"
+            f"- {cardinal_bins.prompt(perspective)}\n"
+            f"- {distance_bins.prompt()}"
+        )
+    
+    def to_string(self, a_name: str, b_name: str, perspective: str = 'ego') -> str:
+        rel_str = self.pairwise_rel.to_string(perspective)
+        return f"{a_name} is {rel_str} from {b_name} (close objects)"
 
 
 
 @dataclass()
 class RelationTriple:
-    """A -> B with relation, optional anchor name and orientation."""
-    obj_a: str
-    obj_b: str
-    relation: Union[PairwiseRelationship, LocalRelationship]
-    anchor_name: Optional[str] = None
-    anchor_ori: Optional[tuple] = None
+    """subject -> anchor with relation and perspective (anchor's orientation).
+    Relationship is evaluated as subject relative to anchor from anchor's perspective.
+    """
+    subject: str
+    anchor: str
+    relation: Union[PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship]
+    orientation: Optional[tuple] = None  # anchor object's orientation
 
 
 
 
-def relationship_applies(obj1, obj2, relationship, anchor_pos: Optional[tuple] = None, anchor_ori: tuple = (0, 1)) -> bool:
-    """Check if a relationship applies. Only Pairwise(Discrete) or LocalRelationship allowed."""
-    p1 = getattr(obj1, 'pos', obj1)
-    p2 = getattr(obj2, 'pos', obj2)
-
-    if isinstance(relationship, PairwiseRelationshipDiscrete):
-        rel = PairwiseRelationshipDiscrete.relationship(tuple(p1), tuple(p2), anchor_ori=anchor_ori)
-        i1, _, s1 = DirectionRelDiscrete.bin_bearing(relationship.degree)
-        i2, _, s2 = DirectionRelDiscrete.bin_bearing(rel.degree)
-        j1, _ = DistanceRelDiscrete.bin_distance(relationship.distance_value)
-        j2, _ = DistanceRelDiscrete.bin_distance(rel.distance_value)
-        return i1 == i2 and s1 == s2 and j1 == j2
-    
-
-    if isinstance(relationship, PairwiseRelationship):
-        cur = PairwiseRelationship.relationship(tuple(p1), tuple(p2), anchor_ori=anchor_ori, full=True)
-        # direction-only
-        if relationship.dist is None and relationship.direction is not None:
-            same_pair = cur.dir_pair == relationship.dir_pair
-            deg_close = abs(cur.degree - relationship.degree) <= 1e-6
-            return same_pair and deg_close
-        # distance-only
-        if relationship.direction is None and relationship.dist is not None:
-            return abs(cur.distance_value - relationship.distance_value) <= 1e-6
-        # full
-        same_pair = cur.dir_pair == relationship.dir_pair
-        deg_close = abs(cur.degree - relationship.degree) <= 1e-6
-        dist_close = abs(cur.distance_value - relationship.distance_value) <= 1e-6
-        return same_pair and deg_close and dist_close
 
 
-    if isinstance(relationship, LocalRelationship):
-        assert anchor_pos is not None, "anchor_pos required for LocalRelationship check"
-        cur = LocalRelationship.from_positions(tuple(p1), tuple(p2), tuple(anchor_pos), tuple(anchor_ori))
-        return (cur is not None) and (cur.side == relationship.side) and (cur.proximity == relationship.proximity)
 
-    raise ValueError(f"Invalid relationship type: {type(relationship)}")
+
 
 
 if __name__ == "__main__":
-    print(PairwiseRelationshipDiscrete.prompt())
+    # ego_bins = EgoFrontBins()
+    # cardinal_bins = CardinalBins()
+    # print(PairwiseRelationshipDiscrete.prompt(cardinal_bins, perspective='ego'))
+    # print(PairwiseRelationshipDiscrete.prompt(cardinal_bins, perspective='allo'))
 
-
+    relationship = PairwiseRelationshipDiscrete.relationship((4, 6), (0, 0), anchor_ori=(1, 0), bin_system=CardinalBins(), distance_bin_system=StandardDistanceBins(), perspective='ego')
+    print(relationship)
+    print(relationship.to_string('ego'))
+    print(relationship.to_string('allo'))

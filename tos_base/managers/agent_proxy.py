@@ -102,9 +102,13 @@ class AgentProxy:
                     known.add(frozenset({self.anchor, n}))
 
     def _rotate_by(self, delta: int) -> List:
-        delta = delta % 360
-        assert delta in (0, 90, 180, 270), "Invalid rotation delta"
-        return [self.mgr.execute_action(RotateAction(delta))] if delta else []
+        assert delta is not None, "Invalid rotation delta"
+        delta = int(delta) % 360
+        assert delta % 90 == 0, "Invalid rotation delta"
+        if delta > 180:
+            delta -= 360
+        return [] if delta == 0 else [self.mgr.execute_action(RotateAction(delta))]
+
 
     def _rotate_to_face(self, target_pos: np.ndarray) -> List:
         vec = target_pos - self.agent.pos
@@ -388,23 +392,21 @@ class AnalystAgentProxy(AgentProxy):
 
     def __init__(self, room: Room, agent: Agent, grid_size: int | None = None,
                  max_queries: int = 16, rel_threshold: int = 0, pos_threshold: int | None = None,
-                 max_eval_pairs: int = 20, eval_samples: int = 30, observe_strategy: str = 'oracle'):
+                 max_eval_pairs: int = 20, eval_samples: int = 30, observe_strategy: str = 'oracle',
+                 metric_type: str = 'allocentric_bins'):
         super().__init__(room, agent)
-        names = [o.name for o in self.room.all_objects] + ['initial_pos']
         g = (max(self.room.mask.shape) if getattr(self.room, 'mask', None) is not None else 10)
-        self.solver = SpatialSolver(names, grid_size=(g if grid_size is None else grid_size))
+        self.solver = SpatialSolver([o.name for o in self.room.all_objects] + ['initial_pos'], grid_size=(g if grid_size is None else grid_size))
         self.metric_mode = 'relationships'
+        self.metric_type = metric_type  # 'relationships', 'allocentric_bins'
         self.max_queries = int(max_queries)
         self.rel_threshold = int(rel_threshold)
-        self.pos_threshold = int(pos_threshold) if pos_threshold is not None else len(names)
+        self.pos_threshold = int(pos_threshold) if pos_threshold is not None else len(self.room.all_objects)
         self.max_eval_pairs = int(max_eval_pairs)
         self.eval_samples = int(eval_samples)
         self.observe_strategy = observe_strategy  # 'oracle' or 'strategist'
         self.phase = 'observe'
 
-        # anchor position known for local checks at initial position
-        # if hasattr(self.agent, 'init_pos'):
-        #     self.solver.set_initial_position('initial_pos', tuple(self.agent.init_pos))
         self.solver.set_initial_position('initial_pos', (0, 0)) # agent initial position unknown, so set to (0, 0)
 
     def _ingest_last_observation(self) -> None:
@@ -417,6 +419,7 @@ class AnalystAgentProxy(AgentProxy):
         triples = obs.data.get('relation_triples', []) if hasattr(obs, 'data') else []
         if triples:
             self.solver.add_observation(triples)
+            print(self.solver.compute_allocentric_bin_metrics())
 
     def _observe_nodes_oracle(self, is_initial: bool, prefix_actions: List = None) -> None:
         """Oracle strategy: greedy observation based on visible unknown nodes."""
@@ -447,7 +450,7 @@ class AnalystAgentProxy(AgentProxy):
         o1_pos = self.room.get_object_by_name(a).pos if a != 'initial_pos' else self.agent.init_pos
         o2_pos = self.room.get_object_by_name(b).pos if b != 'initial_pos' else self.agent.init_pos
         rel = PairwiseRelationship.relationship(tuple(o1_pos), tuple(o2_pos), anchor_ori=tuple(self.agent.init_ori), full=True)
-        self.solver.add_observation([RelationTriple(obj_a=a, obj_b=b, relation=rel, anchor_name='initial_pos', anchor_ori=tuple(self.agent.init_ori))])
+        self.solver.add_observation([RelationTriple(subject=a, anchor=b, relation=rel, orientation=tuple(self.agent.init_ori))])
 
     def _explore_room(self, is_initial: bool, prefix_actions: List = None) -> None:
         """Explore room using selected observation strategy."""
@@ -460,7 +463,10 @@ class AnalystAgentProxy(AgentProxy):
 
     def _compute_metrics(self) -> tuple[Dict[str, int], int, Dict[tuple, Set[str]], int]:
         """Compute current solver metrics for query selection."""
-        return self.solver.compute_metrics('dir', max_samples_per_var=self.eval_samples)
+        if self.metric_type == 'allocentric_bins':
+            return self.solver.compute_allocentric_bin_metrics(max_samples_per_var=self.eval_samples)
+        else:
+            return self.solver.compute_metrics('dir', max_samples_per_var=self.eval_samples)
 
     # ---- Greedy global query with simulation ----
     def _simulate_effect(self, a: str, b: str, mode: str,
@@ -474,18 +480,13 @@ class AnalystAgentProxy(AgentProxy):
         
         # Use efficient copy and incremental constraint addition
         sim_solver = self.solver.copy()
-        new_constraint = Constraint(a, b, rel, anchor_pos=None, anchor_ori=north_ori)
-        
-        # Use incremental solving
-        if sim_solver.solver is not None:
-            sim_solver.solver.solve_incremental(new_constraint)
-        else:
-            sim_solver.constraints.append(new_constraint)
-            sim_solver.solver = AC3Solver(sim_solver.variables, sim_solver.constraints)
-            sim_solver.solver.solve()
+        sim_solver.add_observation([RelationTriple(subject=a, anchor=b, relation=rel, orientation=north_ori)])
         
         # Compute new metrics
-        _, new_pos, _, new_rels = sim_solver.compute_metrics('dir', max_samples_per_var=self.eval_samples)
+        if self.metric_type == 'allocentric_bins':
+            _, new_pos, _, new_rels = sim_solver.compute_allocentric_bin_metrics(max_samples_per_var=self.eval_samples)
+        else:
+            _, new_pos, _, new_rels = sim_solver.compute_metrics('dir', max_samples_per_var=self.eval_samples)
         
         return (baseline_rels - new_rels), (baseline_pos - new_pos)
 
@@ -578,24 +579,25 @@ def get_agent_proxy(name: str, room: Room, agent: Agent) -> AgentProxy:
 
 if __name__ == "__main__":
     from ..utils.room_utils import RoomGenerator, RoomPlotter
+    from tqdm import tqdm
+    for seed in tqdm(range(2,3)):
+        room, agent = RoomGenerator.generate_room(
+            room_size=[15, 15],
+            n_objects=2,
+            np_random=np.random.default_rng(seed),
+            level=0,
+            main=10
+        )
+        print(room)
+        print(room.gates)
+        ObserveAction.MODE = 'full'
+        RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
 
-    room, agent = RoomGenerator.generate_room(
-        room_size=[20, 20],
-        n_objects=2,
-        np_random=np.random.default_rng(6),
-        level=0,
-        main=10
-    )
-    print(room)
-    print(room.gates)
-    ObserveAction.MODE = 'full'
-    RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
-
-    # proxy = OracleAgentProxy(room, agent)        # node_seeker (complete nodes)
-    # proxy = StrategistAgentProxy(room, agent)    # node_sweeper
-    # proxy = InquisitorAgentProxy(room, agent)    # edge_seeker (complete edges)
-    # proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
-    proxy = AnalystAgentProxy(room, agent)
-    proxy.run()
-    print(proxy.to_text())
-    print(proxy.mgr.get_exp_summary())
+        # proxy = OracleAgentProxy(room, agent)        # node_seeker (complete nodes)
+        # proxy = StrategistAgentProxy(room, agent)    # node_sweeper
+        # proxy = InquisitorAgentProxy(room, agent)    # edge_seeker (complete edges)
+        # proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
+        proxy = AnalystAgentProxy(room, agent)
+        proxy.run()
+        print(proxy.to_text())
+        print(proxy.mgr.get_exp_summary())
