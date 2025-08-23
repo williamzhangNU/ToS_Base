@@ -16,8 +16,8 @@ def generate_room_layout(n: int, level: int, main: int = None, np_random: np.ran
         - 1 to level+1: Room ID
         - 0: Wall
         - -1: Impassable area (outside rooms)
-        - 100: North-south door
-        - 101: East-west door
+        - 100: East-west door, mask up down
+        - 101: North-south door, mask left right
     """
     assert np_random is not None, "np_random must be provided"
 
