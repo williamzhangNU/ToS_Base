@@ -196,17 +196,15 @@ class ObserveAction(BaseAction):
             pairwise_str = rel.to_string('ego')
 
             # orientation (gate/object)
-            if with_orientation and getattr(obj, 'has_orientation', False):
-                if isinstance(obj, Gate):
-                    g_ori = obj.get_ori_for_room(int(agent.room_id)) if getattr(agent, 'room_id', None) is not None else obj.ori
-                    ori_rel = PairwiseRelationship.get_orientation(tuple(g_ori), tuple(agent.ori))
-                    gate_dir = PairwiseRelationship.get_direction(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
-                    ori_str = ori_rel.to_string('ego', kind='orientation', gate_dir=gate_dir)
-                    answer_str = f"{obj.name}: {ori_str}, {pairwise_str}"
-                else:
-                    ori_rel = PairwiseRelationship.get_orientation(tuple(obj.ori), tuple(agent.ori))
-                    ori_str = ori_rel.to_string('ego', kind='orientation')
-                    answer_str = f"{obj.name}: {pairwise_str}, faces {ori_str}"
+            if isinstance(obj, Gate):
+                g_ori = obj.get_ori_for_room(int(agent.room_id)) if getattr(agent, 'room_id', None) is not None else obj.ori
+                ori_rel = PairwiseRelationship.get_orientation(tuple(g_ori), tuple(agent.ori))
+                gate_dir = PairwiseRelationship.get_direction(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
+                ori_str = ori_rel.to_string('ego', kind='orientation', gate_dir=gate_dir)
+            else:
+                ori_rel = PairwiseRelationship.get_orientation(tuple(obj.ori), tuple(agent.ori))
+                ori_str = ori_rel.to_string('ego', kind='orientation')
+            answer_str = f"{obj.name}: {pairwise_str}, {ori_str}"
             relationships.append(answer_str)
             relation_triples.append(RelationTriple(subject=obj.name, anchor=anchor_name, relation=rel, orientation=tuple(agent.ori)))
         

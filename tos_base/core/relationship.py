@@ -64,14 +64,14 @@ class CardinalBins:
     """Cardinal direction bins (8 directions) with ego/allo perspective support."""
     ALLO_LABELS = ['north', 'north east', 'east', 'south east', 'south', 'south west', 'west', 'north west']
     EGO_LABELS = [
-        "12 o'clock",  # front
-        '1:30',         # front-right
-        "3 o'clock",   # right
-        '4:30',         # back-right
-        "6 o'clock",   # back
-        '7:30',         # back-left
-        "9 o'clock",   # left
-        '10:30'         # front-left
+        "around 12 o'clock",  # front
+        'around 1:30',         # front-right
+        "around 3 o'clock",   # right
+        'around 4:30',         # back-right
+        "around 6 o'clock",   # back
+        'around 7:30',         # back-left
+        "around 9 o'clock",   # left
+        'around 10:30'         # front-left
     ]
     
     def bin(self, degree: float, perspective: str = 'allo') -> Tuple[int, str]:
@@ -214,10 +214,10 @@ class DirectionRel:
         if gate_dir is not None:
             if o.vert != Dir.SAME and o.horiz == Dir.SAME:
                 side = {Dir.FORWARD: 'front', Dir.BACKWARD: 'back'}.get(gate_dir.vert)
-                if side: return f"gate at {side} wall"
+                if side: return f"on {side} wall"
             if o.horiz != Dir.SAME and o.vert == Dir.SAME:
                 side = {Dir.RIGHT: 'right', Dir.LEFT: 'left'}.get(gate_dir.horiz)
-                if side: return f"gate at {side} wall"
+                if side: return f"on {side} wall"
         # object facing
         if o.horiz != Dir.SAME and o.vert == Dir.SAME: primary = o.horiz
         elif o.vert != Dir.SAME and o.horiz == Dir.SAME: primary = o.vert
@@ -225,7 +225,7 @@ class DirectionRel:
         mapping = ( {Dir.FORWARD:'forward', Dir.BACKWARD:'backward', Dir.RIGHT:'right', Dir.LEFT:'left'}
                     if perspective=='ego' else
                     {Dir.FORWARD:'north', Dir.BACKWARD:'south', Dir.RIGHT:'east', Dir.LEFT:'west'} )
-        return mapping.get(primary, 'unknown')
+        return f"facing {mapping.get(primary, 'unknown')}"
 
     @staticmethod
     def _format_degree(v: float) -> str:
@@ -476,7 +476,7 @@ class PairwiseRelationshipDiscrete(PairwiseRelationship):
         return cls(direction=d, dist=s)
 
     def to_string(self, perspective: str = None) -> str:
-        return f"around {self.direction.to_string(perspective, 'relation')}, {self.dist.to_string()}"
+        return f"{self.direction.to_string(perspective, 'relation')}, {self.dist.to_string()}"
     
     
 
@@ -499,7 +499,7 @@ class ProximityRelationship:
     
     @classmethod
     def from_positions(cls, a_pos: tuple, b_pos: tuple, perspective_ori: tuple = (0, 1)) -> Optional['ProximityRelationship']:
-        """Create proximity relationship between two objects (both must be in agent's FOV)."""
+        """Create proximity relationship between two close objects (both must be in agent's FOV)."""
         # Check if objects are close enough to each other
         a_to_b_dist = np.linalg.norm(np.array(a_pos) - np.array(b_pos))
         if a_to_b_dist > cls.PROXIMITY_THRESHOLD:
@@ -525,7 +525,7 @@ class ProximityRelationship:
     
     def to_string(self, a_name: str, b_name: str, perspective: str = 'ego') -> str:
         rel_str = self.pairwise_rel.to_string(perspective)
-        return f"from {b_name}'s view, {a_name} is {rel_str}  (close)"
+        return f"from {b_name}'s view, {a_name} is {rel_str}"
 
 
 

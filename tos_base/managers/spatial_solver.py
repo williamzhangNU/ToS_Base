@@ -4,11 +4,11 @@ import random
 import copy
 
 # Import the relationship classes from the existing codebase
-from ragen.env.spatial.Base.tos_base.core.relationship import (
+from ..core.relationship import (
     PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship,
     RelationTriple, CardinalBins, StandardDistanceBins
 )
-from ragen.env.spatial.Base.tos_base.utils.relationship_utils import relationship_applies, generate_points_for_relationship
+from ..utils.relationship_utils import relationship_applies, generate_points_for_relationship
 
 
 @dataclass

@@ -1,4 +1,4 @@
-from ragen.env.spatial.Base.tos_base.core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, EgoFrontBins, StandardDistanceBins, CardinalBins, Dir, DirectionRel
+from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, EgoFrontBins, StandardDistanceBins, CardinalBins, Dir, DirectionRel
 from typing import Union
 import math
 
