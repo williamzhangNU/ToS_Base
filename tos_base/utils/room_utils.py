@@ -2,7 +2,7 @@ import numpy as np
 from typing import Optional, Tuple, List
 import matplotlib.pyplot as plt
 
-from ..core.room import Room
+from ..core.room import Room, BaseRoom
 from ..core.constant import CANDIDATE_OBJECTS, ObjectInfo
 from ..core.object import Object, Agent, Gate
 from .generate_room_layout import generate_room_layout
@@ -111,6 +111,43 @@ class RoomGenerator:
         agent.room_id = 1
         agent.init_room_id = agent.room_id
         return room, agent
+
+    @staticmethod
+    def generate_base_room(
+        room_size: Tuple[int, int],
+        n_objects: int,
+        np_random: np.random.Generator,
+        room_name: str = 'room',
+        candidate_objects: List[ObjectInfo] = CANDIDATE_OBJECTS,
+    ) -> Tuple[BaseRoom, Agent]:
+        """Generate a BaseRoom: no mask, no gates; set all room_id to 1."""
+        # create a dummy mask just for sampling object positions within a bounding box
+        x_size, y_size = int(room_size[0]), int(room_size[1])
+        mask = RoomGenerator._default_mask((x_size, y_size))
+        objects = RoomGenerator._gen_objects(
+            n=n_objects,
+            random_generator=np_random,
+            room_size=[x_size, y_size],
+            perspective_taking=True,
+            candidate_list=candidate_objects,
+            mask=mask,
+        )
+        # assign room_id=1 to all objects
+        for o in objects:
+            o.room_id = 1
+        base = BaseRoom(objects=objects, name=room_name)
+        # sample agent not colliding with objects
+        def _rand_pt():
+            xs = np_random.integers(0, x_size + 1)
+            ys = np_random.integers(0, y_size + 1)
+            return np.array([int(xs), int(ys)], dtype=int)
+        agent_pos = _rand_pt()
+        while any(np.allclose(agent_pos, obj.pos) for obj in objects):
+            agent_pos = _rand_pt()
+        agent = Agent(name='agent', pos=agent_pos)
+        agent.room_id = 1
+        agent.init_room_id = 1
+        return base, agent
     
     @staticmethod
     def _gen_objects(
@@ -144,7 +181,7 @@ class RoomGenerator:
 class RoomPlotter:
     @staticmethod
     def plot(room: Room, agent: Agent | None, mode: str = 'text', save_path: str | None = None):
-        has_mask = getattr(room, 'mask', None) is not None
+        has_mask = getattr(room, 'mask', None) is not None and isinstance(room, Room)
         if mode == 'text':
             # helpers
             arrow = lambda v: { (0,1): '↑', (1,0): '→', (0,-1): '↓', (-1,0): '←' }.get(tuple(v), '•')
@@ -189,7 +226,8 @@ class RoomPlotter:
                 # grid may be (w rows, h cols) when has_mask, or (h rows, w cols) when no mask
                 height, width = len(grid), len(grid[0]) if grid else (0)
                 if 0 <= y < height and 0 <= x < width:
-                    ch = 'D' if obj in getattr(room, 'gates', []) else (arrow(obj.ori) if getattr(obj, 'has_orientation', True) else '●')
+                    is_gate = isinstance(obj, Gate) if hasattr(room, 'gates') else False
+                    ch = 'D' if is_gate else (arrow(obj.ori) if getattr(obj, 'has_orientation', True) else '●')
                     grid[y][x] = col(ch, RED if obj in getattr(room, 'gates', []) else BLUE)
             # agent (current + init)
             if agent is not None:
@@ -252,7 +290,7 @@ class RoomPlotter:
             offs = [(0.12,0.18), (0.18,-0.18), (-0.18,0.18), (-0.18,-0.18)]
             for obj in room.all_objects:
                 x, y = float(obj.pos[0]), float(obj.pos[1])
-                if isinstance(obj, Gate):
+                if isinstance(obj, Gate) and hasattr(room, 'gates'):
                     color, marker, label = 'crimson', 'D', ('gate' if 'gate' not in seen_labels else None)
                     seen_labels.add('gate')
                 else:

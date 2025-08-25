@@ -247,6 +247,7 @@ class SpatialSolver:
         # 1) seeding from pairwise constraints only
         g = int(self.grid_size)
         x_rng, y_rng = (-g, g), (-g, g)
+        relation_triples.sort(key=lambda t: t.anchor != 'initial_pos')
         for t in relation_triples:
             cons = Constraint(t.subject, t.anchor, t.relation, t.orientation or (0, 1))
             new_constraints.append(cons)

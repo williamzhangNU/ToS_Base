@@ -1,4 +1,4 @@
-from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, EgoFrontBins, StandardDistanceBins, CardinalBinsEgo, Dir, DirectionRel
+from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, EgoFrontBins, StandardDistanceBins, CardinalBinsEgo
 from typing import Union
 import math
 
@@ -48,22 +48,7 @@ def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -
                 return False
 
         if has_dir:
-            # compute dir pair relative to anchor ori using transform without object allocations
-            h = Dir.SAME if abs(dx) < 1e-6 else (Dir.RIGHT if dx > 0 else Dir.LEFT)
-            v = Dir.SAME if abs(dy) < 1e-6 else (Dir.FORWARD if dy > 0 else Dir.BACKWARD)
-            ori_key = (int(anchor_ori[0]), int(anchor_ori[1]))
-            t = DirectionRel.TRANSFORMS[ori_key]
-            if t is None:
-                th, tv = h, v
-            else:
-                th, tv = t[h], t[v]
-            # swap rule from DirectionRel.transform
-            if th in (Dir.FORWARD, Dir.BACKWARD) or tv in (Dir.RIGHT, Dir.LEFT):
-                th, tv = tv, th
-            rp = relationship.dir_pair
-            if rp is None or (th != rp.horiz or tv != rp.vert):
-                return False
-            # degree check
+            # Only degree comparison is needed now
             dot = axn*dx + ayn*dy
             cross = axn*dy - ayn*dx
             deg = -math.degrees(math.atan2(cross, dot)) if (abs(dx) > 1e-6 or abs(dy) > 1e-6) else 0.0
@@ -98,6 +83,8 @@ def generate_points_for_relationship(
     Notes:
     - Only Pairwise/PairwiseDiscrete supported.
     - Handles distance-only or distance+degree. Degree-only not supported.
+
+    TODO debug
     """
     ax, ay = int(anchor_pos[0]), int(anchor_pos[1])
     xmin, xmax = int(x_range[0]), int(x_range[1])

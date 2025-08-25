@@ -128,10 +128,15 @@ class Room(BaseRoom):
             x, y = int(o.pos[0]), int(o.pos[1])
             self.object_map[x, y] = self.name_to_idx[o.name]
 
-    def get_boundary(self):
-        """Bounds from mask shape with mapping mask[x, y]: x in [0,h-1], y in [0,w-1]."""
+    def get_boundary(self, room_id: int | None = None):
+        """Bounds from mask shape; if room_id provided, bound to that room's extents."""
         h, w = self.mask.shape
-        return 0, h - 1, 0, w - 1
+        if room_id is None:
+            return 0, h - 1, 0, w - 1
+        rid = int(room_id)
+        coords = np.argwhere(self.mask == rid)
+        assert coords.size > 0, f"No coordinates found for room_id {room_id}"
+        return int(coords[:, 0].min()), int(coords[:, 0].max()), int(coords[:, 1].min()), int(coords[:, 1].max())
 
     def get_random_point(self, rng: np.random.Generator, n_points: int = 1, room_id: int | None = None) -> np.ndarray:
         """Random valid mask coordinate(s); filter by room_id if provided.

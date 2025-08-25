@@ -6,7 +6,7 @@ import numpy as np
 
 from ..core.room import Room
 from ..actions.base import BaseAction
-from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, GoThroughDoorAction, ObserveApproxAction, QueryRelAction
+from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, GoThroughDoorAction, ObserveApproxAction, QueryAction, ReturnAction
 from .spatial_solver import SpatialSolver, Variable, Constraint, AC3Solver
 from ..core.relationship import PairwiseRelationship, RelationTriple
 from .exploration_manager import ExplorationManager
@@ -414,13 +414,11 @@ class AnalystAgentProxy(AgentProxy):
             if triples:
                 self.solver.add_observation(triples)
 
-    def _query_and_ingest(self, a: str, b: str) -> None:
-        res = self.mgr.execute_action(QueryRelAction(a, b))
+    def _query_and_ingest(self, obj: str) -> None:
+        res = self.mgr.execute_action(QueryAction(obj))
         self._add_turn([res])
-        o1_pos = self.room.get_object_by_name(a).pos if a != 'initial_pos' else self.agent.init_pos
-        o2_pos = self.room.get_object_by_name(b).pos if b != 'initial_pos' else self.agent.init_pos
-        rel = PairwiseRelationship.relationship(tuple(o1_pos), tuple(o2_pos), anchor_ori=tuple(self.agent.init_ori), full=True)
-        self.solver.add_observation([RelationTriple(subject=a, anchor=b, relation=rel, orientation=tuple(self.agent.init_ori))])
+        triples = res.data.get('relation_triples', []) if hasattr(res, 'data') else []
+        self.solver.add_observation(triples)
 
     def _compute_metrics(self) -> tuple[Dict[str, int], int, Dict[tuple, Set[str]], int]:
         """Compute current solver metrics for query selection."""
@@ -430,25 +428,21 @@ class AnalystAgentProxy(AgentProxy):
             return self.solver.compute_metrics('dir', max_samples_per_var=self.eval_samples)
 
     # ---- Greedy global query with simulation ----
-    def _simulate_effect(self, a: str, b: str, mode: str,
+    def _simulate_effect(self, obj: str, mode: str,
                          baseline_rels: int, baseline_pos: int) -> tuple[float, float]:
-        """Efficiently simulate adding a constraint using incremental solver."""
-        # Get relationship between objects
-        o1_pos = self.room.get_object_by_name(a).pos if a != 'initial_pos' else self.agent.init_pos
-        o2_pos = self.room.get_object_by_name(b).pos if b != 'initial_pos' else self.agent.init_pos
-        north_ori = tuple(self.agent.init_ori)
-        rel = PairwiseRelationship.relationship(tuple(o1_pos), tuple(o2_pos), anchor_ori=north_ori, full=True)
-        
-        # Use efficient copy and incremental constraint addition
+        """Simulate by calling QueryAction(obj) and ingesting its triples on a copy."""
+        if obj != 'initial_pos' and (not self.room.has_object(obj)):
+            raise ValueError(f"Object {obj} not found in room")
         sim_solver = self.solver.copy()
-        sim_solver.add_observation([RelationTriple(subject=a, anchor=b, relation=rel, orientation=north_ori)])
-        
-        # Compute new metrics
+        # run QueryAction once to build triples
+        res = QueryAction(obj).execute(self.room, self.agent)
+        triples = res.data.get('relation_triples', [])
+        if triples:
+            sim_solver.add_observation(triples)
         if self.metric_type == 'allocentric_bins':
             _, new_pos, _, new_rels = sim_solver.compute_allocentric_bin_metrics(max_samples_per_var=self.eval_samples)
         else:
             _, new_pos, _, new_rels = sim_solver.compute_metrics('dir', max_samples_per_var=self.eval_samples)
-        
         return (baseline_rels - new_rels), (baseline_pos - new_pos)
 
     def _global_query_loop(self) -> None:
@@ -464,8 +458,8 @@ class AnalystAgentProxy(AgentProxy):
             if total_rels <= self.rel_threshold and total_pos <= self.pos_threshold:
                 break
                 
-            # Get candidate pairs and score them efficiently
-            best_pair, best_gain = self._find_best_query_pair(dom_sizes, rel_sets, total_rels, total_pos)
+            # Get candidate object (against current agent anchor) and score
+            best_obj, best_gain = self._find_best_query_obj(dom_sizes, rel_sets, total_rels, total_pos)
             
             # Switch mode if no good queries found, TODO update here for stop criteria
             if best_gain <= 1e-9:
@@ -476,38 +470,39 @@ class AnalystAgentProxy(AgentProxy):
                 continue
                 
             # Execute best query
-            self._query_and_ingest(best_pair[0], best_pair[1])
+            self._query_and_ingest(best_obj)
             q += 1
 
-    def _find_best_query_pair(self, dom_sizes: dict, rel_sets: dict, total_rels: int, total_pos: int) -> tuple:
-        """Find the best query pair by efficient candidate ranking and simulation."""
+    def _find_best_query_obj(self, dom_sizes: dict, rel_sets: dict, total_rels: int, total_pos: int) -> tuple:
+        """Find best object to query against agent anchor."""
         names = [o.name for o in self.room.all_objects] + ['initial_pos']
-        
-        # Score and sort candidates
+
         candidates = []
-        for i in range(len(names)):
-            for j in range(i + 1, len(names)):
-                a, b = names[i], names[j]
-                if self.metric_mode == 'positions':
-                    score = dom_sizes.get(a, 0) * dom_sizes.get(b, 0)
-                else:
-                    key = (a, b) if (a, b) in rel_sets else (b, a)
-                    score = len(rel_sets.get(key, set()))
-                candidates.append(((a, b), score))
-        
-        # Sort by score and take top candidates
+        for obj in names:
+            if self.metric_mode == 'positions':
+                score = dom_sizes.get(obj, 0)
+            else:
+                # approximate by max relation set with any other
+                best_rel = 0
+                for other in names:
+                    if other == obj:
+                        continue
+                    key = (obj, other) if (obj, other) in rel_sets else (other, obj)
+                    best_rel = max(best_rel, len(rel_sets.get(key, set())))
+                score = best_rel
+            candidates.append((obj, score))
+
         candidates.sort(key=lambda x: x[1], reverse=True)
-        top_candidates = [pair for pair, _ in candidates[:self.max_eval_pairs]]
-        
-        # Simulate each candidate and find best
-        best_pair, best_gain = (None, None), -1.0
-        for a, b in top_candidates:
-            d_rel, d_pos = self._simulate_effect(a, b, self.metric_mode, total_rels, total_pos)
+        top_objs = [obj for obj, _ in candidates[:self.max_eval_pairs]]
+
+        best_obj, best_gain = None, -1.0
+        for obj in top_objs:
+            d_rel, d_pos = self._simulate_effect(obj, self.metric_mode, total_rels, total_pos)
             gain = d_rel if self.metric_mode == 'relationships' else d_pos
             if gain > best_gain:
-                best_gain, best_pair = gain, (a, b)
-                
-        return best_pair, best_gain
+                best_gain, best_obj = gain, obj
+
+        return best_obj, best_gain
 
     def run(self) -> List[Turn]:
         """Run analyst: delegate exploration to oracle/strategist, then query."""
@@ -520,6 +515,9 @@ class AnalystAgentProxy(AgentProxy):
         self.turns = list(d_turns[:-1]) if d_turns else []
         # Ingest all observed relation triples into solver
         self._ingest_from_turns()
+        # Ensure return to initial state before queries
+        ret = self.mgr.execute_action(ReturnAction())
+        self._add_turn([ret])
         # Global greedy queries
         self._global_query_loop()
         # Terminate
@@ -552,6 +550,7 @@ if __name__ == "__main__":
         print(room)
         print(room.mask)
         print(room.gates)
+        print(agent)
         ObserveAction.MODE = 'full'
         RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
 

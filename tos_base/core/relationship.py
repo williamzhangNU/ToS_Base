@@ -50,29 +50,35 @@ class DistanceBinSystem(Protocol):
 
 class EgoFrontBins:
     """Ego-centric front-focused bins."""
-    BINS = [
-        (-5, 5),
-        (5, 25),  
-        (25, 45),
-        (-25, -5),
-        (-45, -25),
-        (45, 180),
-        (-180, -45),
-    ]
-    LABELS = ['front', 'front-slight-right', 'front-right', 'front-slight-left', 'front-left', 'beyond-fov', 'beyond-fov']
-    
-    def bin(self, degree: float) -> Tuple[int, str]:
+    BINS = [(-180, -45), (-45, -25), (-25, -5), (-5, 5), (5, 25), (25, 45), (45, 180)]
+    LABELS = ['beyond-fov', 'front-left', 'front-slight-left', 'front', 'front-slight-right', 'front-right', 'beyond-fov']
+    # (left_closed, right_closed) per bin index:
+    CLOSE = {
+        0:(False, False), 1:(True, False), 2:(True, False),
+        3:(True, True),  4:(False, True), 5:(False, True),
+        6:(False, True),
+    }
+
+    def bin(self, degree: float):
+        eps = 1e-3
         v = float(degree)
         for i, (lo, hi) in enumerate(self.BINS):
-            if lo <= v <= hi:
+            lc, rc = self.CLOSE[i]
+            lo2 = lo - (eps if lc else 0.0)
+            hi2 = hi + (eps if rc else 0.0)
+            if lo2 < v < hi2:
                 return i, self.LABELS[i]
         return len(self.LABELS) - 1, self.LABELS[-1]
-    
+
     @classmethod
     def prompt(cls) -> str:
         parts = []
-        for (lo, hi), label in zip(cls.BINS, cls.LABELS):
-            parts.append(f"[{lo}°,{hi}°]→{label}" if lo == -5 else f"({lo}°,{hi}°]→{label}")
+        for i in range(1, 6):
+            (lo, hi), (lc, rc) = cls.BINS[i], cls.CLOSE[i]
+            l, r = ('[', ']') if lc else ('(', ']') if rc else ('(', ')')
+            l = '[' if lc else '('
+            r = ']' if rc else ')'
+            parts.append(f"{l}{lo}°,{hi}°{r}→{cls.LABELS[i]}")
         return f"Bearing bins (egocentric): {', '.join(parts)}."
 
 
@@ -116,9 +122,9 @@ class CardinalBinsEgo(_CardinalBinsBase):
 
 class StandardDistanceBins:
     """Standard distance bins."""
-    BINS = [(0.0, 1.0), (1.0, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 16.0), (16.0, 32.0), (32.0, 64.0)]
+    BINS = [(0.0, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 16.0), (16.0, 32.0), (32.0, 64.0)]
     ZERO_LABEL = 'same distance'
-    LABELS = ['very near', 'near', 'mid distance', 'slightly far', 'far', 'very far', 'extremely far']
+    LABELS = ['near', 'mid distance', 'slightly far', 'far', 'very far', 'extremely far']
     
     def bin(self, value: float) -> Tuple[int, str]:
         d = float(value)
@@ -173,84 +179,26 @@ class DirPair:
 
 
 @dataclass()
-class DirectionRel:
-    """Direction (DirPair) + bearing degree."""
-    pair: DirPair
-    degree: float = 0.0  # +: right/east, -: left/west, 0: front/north
+class DegreeRel:
+    """Bearing degree only (no Dir/DirPair)."""
+    degree: float = 0.0  # +: clockwise, -: counterclockwise, 0: forward/north
 
-    # Field of view
     FIELD_OF_VIEW: ClassVar[float] = 90.0
-    
+
     def __eq__(self, other):
-        if type(other) is not DirectionRel:
+        if type(other) is not DegreeRel:
             return False
-        return self.pair == other.pair and abs(self.degree - other.degree) < 1e-3
-    
+        return abs(self.degree - other.degree) < 1e-3
+
     def __hash__(self):
-        # Round degree to 6 decimal places for consistent hashing
-        return hash((self.pair, round(self.degree, 6)))
+        return hash(round(self.degree, 6))
 
-    # Perspective labels
-    EGO: ClassVar[dict[Dir, str]] = {Dir.SAME: 'same', Dir.FORWARD: 'front', Dir.BACKWARD: 'back', Dir.RIGHT: 'right', Dir.LEFT: 'left', Dir.UNKNOWN: 'unknown'}
-    ALLO: ClassVar[dict[Dir, str]] = {Dir.SAME: 'same', Dir.FORWARD: 'north', Dir.BACKWARD: 'south', Dir.RIGHT: 'east', Dir.LEFT: 'west', Dir.UNKNOWN: 'unknown'}
-    
-    # Transformations
-    TRANSFORMS: ClassVar[dict[tuple[int, int], dict[Dir, Dir]]] = {
-        (0, 1): {d: d for d in Dir},
-        (1, 0): {Dir.FORWARD: Dir.LEFT, Dir.BACKWARD: Dir.RIGHT, Dir.RIGHT: Dir.FORWARD, Dir.LEFT: Dir.BACKWARD, Dir.SAME: Dir.SAME, Dir.UNKNOWN: Dir.UNKNOWN},
-        (0, -1): {Dir.FORWARD: Dir.BACKWARD, Dir.BACKWARD: Dir.FORWARD, Dir.RIGHT: Dir.LEFT, Dir.LEFT: Dir.RIGHT, Dir.SAME: Dir.SAME, Dir.UNKNOWN: Dir.UNKNOWN},
-        (-1, 0): {Dir.FORWARD: Dir.RIGHT, Dir.BACKWARD: Dir.LEFT, Dir.RIGHT: Dir.BACKWARD, Dir.LEFT: Dir.FORWARD, Dir.SAME: Dir.SAME, Dir.UNKNOWN: Dir.UNKNOWN},
-    }
-
-
-    # ---- prompts ----
     @classmethod
     def prompt(cls) -> str:
-        return "Continuous bearing: degree in [-180, 180]."
+        return "Bearing is a degree in [-180, 180]. +: clockwise, -: counterclockwise."
 
-    # ---- stringify ----
-    def to_string(self, perspective: str = 'ego', kind: str = 'relation',
-                  gate_dir: 'DirectionRel' = None) -> str:
-        assert perspective in ('ego', 'allo')
-        assert kind in ('relation', 'orientation')
-        if kind == 'relation':
-            return f"{self._dir_to_string(self.pair, perspective)}, {self._format_degree(self.degree)}"
-        # orientation
-        return self._ori_to_string(self.pair, perspective, None if gate_dir is None else gate_dir.pair)
-
-    @classmethod
-    def pair_to_string(cls, d: DirPair, perspective: str = 'ego') -> str:
-        return cls._dir_to_string(d, perspective)
-
-    @classmethod
-    def _dir_to_string(cls, d: Union[Dir, DirPair], perspective: str = 'ego') -> str:
-        labels = cls.EGO if perspective == 'ego' else cls.ALLO
-        if isinstance(d, Dir): return labels[d]
-        h, v = d.horiz, d.vert
-        if Dir.UNKNOWN in (h, v): return 'unknown'
-        if h == v == Dir.SAME: return 'same'
-        if h == Dir.SAME or v == Dir.SAME:
-            return f"directly {labels[h] if h != Dir.SAME else labels[v]}"
-        return f"{labels[v]}-{labels[h]}"
-
-    @classmethod
-    def _ori_to_string(cls, o: DirPair, perspective: str = 'ego', gate_dir: DirPair = None) -> str:
-        # special case for gates
-        if gate_dir is not None:
-            if o.vert != Dir.SAME and o.horiz == Dir.SAME:
-                side = {Dir.FORWARD: 'front', Dir.BACKWARD: 'back'}.get(gate_dir.vert)
-                if side: return f"on {side} wall"
-            if o.horiz != Dir.SAME and o.vert == Dir.SAME:
-                side = {Dir.RIGHT: 'right', Dir.LEFT: 'left'}.get(gate_dir.horiz)
-                if side: return f"on {side} wall"
-        # object facing
-        if o.horiz != Dir.SAME and o.vert == Dir.SAME: primary = o.horiz
-        elif o.vert != Dir.SAME and o.horiz == Dir.SAME: primary = o.vert
-        else: raise ValueError(f"Invalid orientation: {o}")
-        mapping = ( {Dir.FORWARD:'forward', Dir.BACKWARD:'backward', Dir.RIGHT:'right', Dir.LEFT:'left'}
-                    if perspective=='ego' else
-                    {Dir.FORWARD:'north', Dir.BACKWARD:'south', Dir.RIGHT:'east', Dir.LEFT:'west'} )
-        return f"facing {mapping.get(primary, 'unknown')}"
+    def to_string(self, perspective: str = 'ego', kind: str = 'relation', gate_dir: 'DegreeRel' = None) -> str:
+        return self._format_degree(self.degree)
 
     @staticmethod
     def _format_degree(v: float) -> str:
@@ -258,7 +206,42 @@ class DirectionRel:
         sign = '+' if v > 0 else '-'
         return f"{sign}{abs(v):.0f}°"
 
-    # ---- geometry / transforms ----
+    @classmethod
+    def from_positions(cls, pos1: tuple, pos2: tuple, anchor_ori: tuple = (0, 1)) -> 'DegreeRel':
+        p1, p2 = np.array(pos1, float), np.array(pos2, float)
+        diff = p1 - p2
+        ax, ay = float(anchor_ori[0]), float(anchor_ori[1])
+        a_len = float(np.hypot(ax, ay)) or 1.0
+        axn, ayn = ax / a_len, ay / a_len
+        dx, dy = float(diff[0]), float(diff[1])
+        if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+            deg = 0.0
+        else:
+            dot = axn * dx + ayn * dy
+            cross = axn * dy - ayn * dx
+            deg = -float(np.degrees(np.arctan2(cross, dot)))
+        return cls(deg)
+
+
+class OrientationRel:
+    """Orientation only (Dir/DirPair based)."""
+
+    # Perspective labels
+    EGO: ClassVar[dict[Dir, str]] = {Dir.SAME: 'same', Dir.FORWARD: 'front', Dir.BACKWARD: 'back', Dir.RIGHT: 'right', Dir.LEFT: 'left', Dir.UNKNOWN: 'unknown'}
+    ALLO: ClassVar[dict[Dir, str]] = {Dir.SAME: 'same', Dir.FORWARD: 'north', Dir.BACKWARD: 'south', Dir.RIGHT: 'east', Dir.LEFT: 'west', Dir.UNKNOWN: 'unknown'}
+
+    # Transformations (used for orientation only)
+    TRANSFORMS: ClassVar[dict[tuple[int, int], dict[Dir, Dir]]] = {
+        (0, 1): {d: d for d in Dir},
+        (1, 0): {Dir.FORWARD: Dir.LEFT, Dir.BACKWARD: Dir.RIGHT, Dir.RIGHT: Dir.FORWARD, Dir.LEFT: Dir.BACKWARD, Dir.SAME: Dir.SAME, Dir.UNKNOWN: Dir.UNKNOWN},
+        (0, -1): {Dir.FORWARD: Dir.BACKWARD, Dir.BACKWARD: Dir.FORWARD, Dir.RIGHT: Dir.LEFT, Dir.LEFT: Dir.RIGHT, Dir.SAME: Dir.SAME, Dir.UNKNOWN: Dir.UNKNOWN},
+        (-1, 0): {Dir.FORWARD: Dir.RIGHT, Dir.BACKWARD: Dir.LEFT, Dir.RIGHT: Dir.BACKWARD, Dir.LEFT: Dir.FORWARD, Dir.SAME: Dir.SAME, Dir.UNKNOWN: Dir.UNKNOWN},
+    }
+
+    @classmethod
+    def prompt(cls) -> str:
+        return "Orientation: facing forward/back/right/left; gates report wall side."
+
     @classmethod
     def transform(cls, pair: DirPair, orientation: tuple) -> DirPair:
         ori = tuple(map(int, orientation))
@@ -268,27 +251,41 @@ class DirectionRel:
         return DirPair(v, h) if (h in (Dir.FORWARD, Dir.BACKWARD)) or (v in (Dir.RIGHT, Dir.LEFT)) else DirPair(h, v)
 
     @classmethod
-    def get_direction(cls, pos1: tuple, pos2: tuple, orientation: tuple = None) -> 'DirectionRel':
-        p1, p2 = np.array(pos1), np.array(pos2)
-        diff = p1 - p2
-        pair = DirPair(Dir.from_horizontal_delta(diff[0]), Dir.from_vertical_delta(diff[1]))
-        pair = cls.transform(pair, orientation) if orientation is not None else pair
-        # degree relative to orientation (default (0,1))
-        anchor = np.array((0,1) if orientation is None else orientation, dtype=float)
-        anchor = anchor / (np.linalg.norm(anchor) or 1.0)
-        v = diff.astype(float)
-        v = v / (np.linalg.norm(v) or 1.0)
-        deg = 0.0 if np.linalg.norm(v) < 1e-3 else float(-np.degrees(np.arctan2(anchor[0]*v[1]-anchor[1]*v[0], np.dot(anchor, v))))
-        return cls(pair, deg)
-
-    @classmethod
     def get_relative_orientation(cls, obj_ori: tuple, anchor_ori: tuple) -> DirPair:
-        base = cls.get_direction(obj_ori, (0, 0)).pair
+        base_h = Dir.from_horizontal_delta(float(obj_ori[0]))
+        base_v = Dir.from_vertical_delta(float(obj_ori[1]))
+        base = DirPair(base_h, base_v)
         return cls.transform(base, anchor_ori)
 
     @classmethod
-    def from_positions(cls, pos1: tuple, pos2: tuple, anchor_ori: tuple = (0, 1)) -> 'DirectionRel':
-        return cls.get_direction(pos1, pos2, anchor_ori)
+    def to_string(cls, o: DirPair, perspective: str = 'ego', kind: str = 'orientation', if_gate: bool = False) -> str:
+        if if_gate:
+            # Gate orientation relative to agent orientation → wall side
+            # same → back wall; reverse → front wall; left → right wall; right → left wall
+            # Determine primary axis of orientation 'o'
+            if o.horiz != Dir.SAME and o.vert == Dir.SAME:
+                primary = o.horiz
+            elif o.vert != Dir.SAME and o.horiz == Dir.SAME:
+                primary = o.vert
+            else:
+                raise ValueError(f"Invalid orientation: {o}")
+            if primary == Dir.FORWARD:
+                return "on back wall"
+            if primary == Dir.BACKWARD:
+                return "on front wall"
+            if primary == Dir.LEFT:
+                return "on right wall"
+            if primary == Dir.RIGHT:
+                return "on left wall"
+            raise ValueError(f"Invalid orientation: {o}")
+        # object facing
+        if o.horiz != Dir.SAME and o.vert == Dir.SAME: primary = o.horiz
+        elif o.vert != Dir.SAME and o.horiz == Dir.SAME: primary = o.vert
+        else: raise ValueError(f"Invalid orientation: {o}")
+        mapping = ( {Dir.FORWARD:'forward', Dir.BACKWARD:'backward', Dir.RIGHT:'right', Dir.LEFT:'left'}
+                    if perspective=='ego' else
+                    {Dir.FORWARD:'north', Dir.BACKWARD:'south', Dir.RIGHT:'east', Dir.LEFT:'west'} )
+        return f"facing {mapping.get(primary, 'unknown')}"
 
 
 @dataclass()
@@ -320,21 +317,20 @@ class DistanceRel:
 
 
 @dataclass()
-class DirectionRelBinned(DirectionRel):
-    """Direction with modular bin system."""
+class DegreeRelBinned(DegreeRel):
+    """Degree with modular bin system."""
     bin_system: BinSystem = None
     bin_id: int = 0
     bin_label: str = ""
-    
+
     def __post_init__(self):
         if self.bin_system is not None:
             self.bin_id, self.bin_label = self.bin_system.bin(self.degree)
 
     @classmethod
-    def from_relation(cls, rel: DirectionRel, bin_system: BinSystem) -> 'DirectionRelBinned':
+    def from_relation(cls, rel: DegreeRel, bin_system: BinSystem) -> 'DegreeRelBinned':
         bin_id, bin_label = bin_system.bin(rel.degree)
-        return cls(pair=rel.pair, degree=rel.degree, bin_system=bin_system, 
-                  bin_id=bin_id, bin_label=bin_label)
+        return cls(degree=rel.degree, bin_system=bin_system, bin_id=bin_id, bin_label=bin_label)
 
     def to_string(self) -> str:
         return self.bin_label
@@ -369,7 +365,7 @@ class DistanceRelBinned(DistanceRel):
 
 @dataclass(frozen=False)
 class PairwiseRelationship:
-    direction: Optional[DirectionRel] = None
+    direction: Optional[DegreeRel] = None
     dist: Optional[DistanceRel] = None
     
     def __eq__(self, other):
@@ -381,14 +377,10 @@ class PairwiseRelationship:
         return hash((self.direction, self.dist))
 
     @property
-    def bearing(self) -> DirectionRel:
+    def bearing(self) -> DegreeRel:
         return self.direction  # type: ignore[return-value]
 
     # --- external API helpers (hide DirectionRel/DistanceRel) ---
-    @property
-    def dir_pair(self) -> Optional[DirPair]:
-        return None if self.direction is None else self.direction.pair
-
     @property
     def degree(self) -> float:
         return 0.0 if self.direction is None else float(self.direction.degree)
@@ -397,25 +389,16 @@ class PairwiseRelationship:
     def distance_value(self) -> float:
         return 0.0 if self.dist is None else float(self.dist.value)
 
-    @staticmethod
-    def pair_to_string(d: DirPair, perspective: str = 'ego') -> str:
-        return DirectionRel._dir_to_string(d, perspective)
 
     @staticmethod
     def format_degree(v: float) -> str:
-        return DirectionRel._format_degree(v)
+        return DegreeRel._format_degree(v)
 
     @staticmethod
     def distance_to_string(value: float) -> str:
         return DistanceRel(float(value)).to_string()
 
-    @staticmethod
-    def rotate_pair_90(p: DirPair) -> DirPair:
-        t = DirectionRel.TRANSFORMS[(-1, 0)]
-        h, v = t[p.horiz], t[p.vert]
-        if h in (Dir.FORWARD, Dir.BACKWARD) or v in (Dir.RIGHT, Dir.LEFT):
-            h, v = v, h
-        return DirPair(h, v)
+    
 
     def to_string(self) -> str:
         if self.direction is None and self.dist is None:
@@ -423,30 +406,24 @@ class PairwiseRelationship:
         if self.direction is None:
             return self.distance_to_string(self.distance_value)
         if self.dist is None:
-            # default textualization: allocentric
             return self.direction.to_string('allo', 'relation')
         return f"{self.direction.to_string('allo', 'relation')}, {self.dist.to_string()}"
 
     @classmethod
     def relationship(cls, pos1: tuple, pos2: tuple, anchor_ori: Optional[tuple] = None, full: bool = True) -> 'PairwiseRelationship':
-        d = DirectionRel.get_direction(pos1, pos2, (anchor_ori if anchor_ori is not None else (0, 1)))
+        d = DegreeRel.from_positions(pos1, pos2, (anchor_ori if anchor_ori is not None else (0, 1)))
         if not full:
             return cls(direction=d, dist=None)
         return cls(direction=d, dist=DistanceRel.get_distance(pos1, pos2))
 
 
     @classmethod
-    def get_direction(cls, pos1: tuple, pos2: tuple, anchor_ori: Optional[tuple] = None) -> DirectionRel:
-        return DirectionRel.get_direction(pos1, pos2, anchor_ori)
-
-    @classmethod
-    def get_orientation(cls, obj_ori: tuple, anchor_ori: tuple) -> DirectionRel:
-        dp = DirectionRel.get_relative_orientation(tuple(obj_ori), tuple(anchor_ori))
-        return DirectionRel(dp, 0.0)
+    def get_direction(cls, pos1: tuple, pos2: tuple, anchor_ori: Optional[tuple] = None) -> DegreeRel: # TODO remove after modifying cogmap manager
+        return DegreeRel.from_positions(pos1, pos2, (anchor_ori if anchor_ori is not None else (0, 1)))
 
     @classmethod
     def get_bearing_degree(cls, pos1: tuple, pos2: tuple, anchor_ori: tuple = (0, 1)) -> float:
-        return DirectionRel.from_positions(pos1, pos2, anchor_ori).degree
+        return DegreeRel.from_positions(pos1, pos2, anchor_ori).degree
 
     @classmethod
     def get_distance(cls, pos1: tuple, pos2: tuple) -> DistanceRel:
@@ -454,12 +431,15 @@ class PairwiseRelationship:
 
     @classmethod
     def prompt(cls) -> str:
-        return "Relationship reporting: precise direction (pair, degree), distance."
+        return (
+            "Relationship reporting: bearing as degree; distance is Euclidean. "
+            "Use discrete bins for tasks and proximity."
+        )
 
 
 @dataclass()
 class PairwiseRelationshipDiscrete(PairwiseRelationship):
-    direction: DirectionRelBinned  # type: ignore[assignment]
+    direction: DegreeRelBinned  # type: ignore[assignment]
     dist: DistanceRelBinned  # type: ignore[assignment]
     
     def __eq__(self, other):
@@ -487,7 +467,7 @@ class PairwiseRelationshipDiscrete(PairwiseRelationship):
         bin_system = bin_system or EgoFrontBins()
         distance_bin_system = distance_bin_system or StandardDistanceBins()
         rel = PairwiseRelationship.relationship(pos1, pos2, anchor_ori=anchor_ori, full=True)
-        d = DirectionRelBinned.from_relation(rel.direction, bin_system)
+        d = DegreeRelBinned.from_relation(rel.direction, bin_system)
         s = DistanceRelBinned.from_value(rel.dist.value if rel.dist else 0.0, distance_bin_system)
         return cls(direction=d, dist=s)
 

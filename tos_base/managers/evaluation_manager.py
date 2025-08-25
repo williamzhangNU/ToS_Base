@@ -113,6 +113,11 @@ class EvaluationManager:
         self.current_index += 1
         return self.current_index < len(self.tasks)
     
+    def get_last_room_state(self) -> Tuple[Room, Agent]:
+        """Get current room and agent state."""
+        task = self.tasks[self.current_index - 1]
+        return task.room, task.agent
+    
     def get_eval_summary(self) -> Dict[str, Any]:
         """Calculate evaluation summary from turn logs."""
         total_tasks = len(self.tasks)

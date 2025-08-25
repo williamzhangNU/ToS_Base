@@ -114,6 +114,14 @@ class BaseAction(ABC):
         return np.array(rotations[deg])
     
     @staticmethod
+    def get_anchor_name(room, agent) -> str:
+        if np.allclose(agent.pos, agent.init_pos):
+            return 'initial_pos'
+        at_objs = [o for o in room.all_objects if np.allclose(o.pos, agent.pos)]
+        assert len(at_objs) == 1, "Only one object can be at the same position as the agent"
+        return at_objs[0].name
+    
+    @staticmethod
     def is_final() -> bool:
         """Check if this is a final action (ends the sequence)"""
         return False

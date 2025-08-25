@@ -13,12 +13,12 @@ from .actions import (
     ObserveDirAction,
     GoThroughDoorAction,
     TermAction,
-    QueryRelAction,
+    QueryAction,
     ActionSequence,
     ACTION_CLASSES
 )
 
 __all__ = [
     'BaseAction', 'ActionResult', 'ActionSequence', 'ACTION_CLASSES',
-    'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'ObserveApproxAction', 'ObserveRelAction', 'ObserveDirAction', 'GoThroughDoorAction', 'TermAction', 'QueryRelAction'
+    'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'ObserveApproxAction', 'ObserveRelAction', 'ObserveDirAction', 'GoThroughDoorAction', 'TermAction', 'QueryAction'
 ] 

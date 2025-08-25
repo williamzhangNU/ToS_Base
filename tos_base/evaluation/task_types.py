@@ -86,3 +86,26 @@ class EvalTaskType(Enum):
             return task_class(np_random, room, agent, config or {})
         else:
             raise ValueError(f"Unknown evaluation task: {task_name}") 
+        
+
+if __name__ == "__main__":
+    from ..utils.room_utils import RoomPlotter, RoomGenerator
+    from tqdm import tqdm
+
+
+    task_name = 'e2a'
+    for seed in tqdm(range(97, 98)):
+        np_random = np.random.default_rng(seed)
+        room, agent = RoomGenerator.generate_room(
+            room_size=(15, 15),
+            n_objects=8,
+            np_random=np_random,
+            room_name='room',
+            level=1,
+            main=6,
+        )
+        task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
+        # print(f'room: {room}')
+        # print(f'agent: {agent}')
+        print(task.generate_question(), task.answer)
+        RoomPlotter.plot(room, agent, mode='img', save_path='room.png')

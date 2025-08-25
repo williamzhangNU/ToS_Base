@@ -4,7 +4,7 @@ import numpy as np
 
 from .base import BaseAction, ActionResult
 from ..core.object import Gate
-from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, RelationTriple
+from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, RelationTriple, OrientationRel, DegreeRel
 
 """
 Specific action implementations for spatial exploration.
@@ -59,10 +59,6 @@ class MoveAction(BaseAction):
     def __init__(self, target: str):
         super().__init__(target)
         self.target = target
-
-    def _move_agent_to_pos(self, agent, target_pos):
-        """Move agent to target position (absolute coordinates)."""
-        agent.pos = target_pos.copy()
     
     def success_message(self, **kwargs) -> str:
         return f"You moved at {self.target}."
@@ -79,7 +75,7 @@ class MoveAction(BaseAction):
         target_obj = room.get_object_by_name(self.target)
         if not kwargs.get('move_anyway', False) and not self._is_visible(agent, target_obj):
             return ActionResult(False, self.get_feedback(False, "not_visible"), str(self), 'move', {'target_name': self.target})        
-        self._move_agent_to_pos(agent, target_obj.pos)
+        agent.pos  = target_obj.pos # only change pos, not ori or room_id
 
         return ActionResult(True, self.get_feedback(True), str(self), 'move', {'target_name': self.target})
     
@@ -98,12 +94,7 @@ class RotateAction(BaseAction):
     def __init__(self, degrees: int):
         super().__init__(degrees)
         self.degrees = int(degrees)
-
-    def _rotate_agent(self, agent, degrees: int):
-        """Rotate agent by specified degrees (clockwise)."""
-        rotation_matrix = self._get_rotation_matrix(degrees)
-        agent.ori = agent.ori @ rotation_matrix
-    
+        
     def success_message(self, **kwargs) -> str:
         if self.degrees == 0:
             return "You rotated 0°."
@@ -119,7 +110,7 @@ class RotateAction(BaseAction):
         """Execute rotate action on room state."""
         if self.degrees is None or self.degrees not in self.VALID_DEGREES:
             return ActionResult(False, self.get_feedback(False, "invalid_degree"), str(self), 'rotate', {'degrees': self.degrees})
-        self._rotate_agent(agent, self.degrees)   
+        agent.ori = agent.ori @ self._get_rotation_matrix(self.degrees)  
         return ActionResult(True, self.get_feedback(True), str(self), 'rotate', {'degrees': self.degrees})
     
     def __repr__(self):
@@ -130,13 +121,13 @@ class ReturnAction(BaseAction):
     """Return to anchor position"""
     
     format_desc = "Return()"
-    description = "Return to the starting anchor position"
+    description = "Return to the starting position and orientation."
     example = "Return()"
     format_pattern = r"^Return\(\)$"
     cost = 0
     
     def success_message(self, **kwargs) -> str:
-        return "You returned to anchor."
+        return "You returned to starting position and orientation."
     
     def error_message(self, error_type: str) -> str:
         return "Cannot return to anchor: execution failed."
@@ -177,12 +168,6 @@ class ObserveAction(BaseAction):
     def __init__(self):
         super().__init__()
 
-    def _get_anchor_name(self, room, agent) -> str:
-        if np.allclose(agent.pos, agent.init_pos):
-            return 'initial_pos'
-        at_objs = [o for o in room.all_objects if np.allclose(o.pos, agent.pos)]
-        assert len(at_objs) == 1, "Only one object can be at the same position as the agent"
-        return at_objs[0].name
     
     def _collect_obj_observations(self, agent, visible_objects, anchor_name: str, mode: str = 'dir', with_orientation: bool = True, discrete: bool = False):
         relationships: List[str] = []
@@ -195,15 +180,13 @@ class ObserveAction(BaseAction):
                 rel = PairwiseRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=(mode == 'full'))
             pairwise_str = rel.to_string()
 
-            # orientation (gate/object)
+            # orientation (gate/object) via OrientationRel only
             if isinstance(obj, Gate):
-                g_ori = obj.get_ori_for_room(int(agent.room_id)) if getattr(agent, 'room_id', None) is not None else obj.ori
-                ori_rel = PairwiseRelationship.get_orientation(tuple(g_ori), tuple(agent.ori))
-                gate_dir = PairwiseRelationship.get_direction(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
-                ori_str = ori_rel.to_string('ego', kind='orientation', gate_dir=gate_dir)
+                ori_pair = OrientationRel.get_relative_orientation(tuple(obj.get_ori_for_room(int(agent.room_id))), tuple(agent.ori))
+                ori_str = OrientationRel.to_string(ori_pair, 'ego', 'orientation', if_gate=True)
             else:
-                ori_rel = PairwiseRelationship.get_orientation(tuple(obj.ori), tuple(agent.ori))
-                ori_str = ori_rel.to_string('ego', kind='orientation')
+                ori_pair = OrientationRel.get_relative_orientation(tuple(obj.ori), tuple(agent.ori))
+                ori_str = OrientationRel.to_string(ori_pair, 'ego', 'orientation')
             answer_str = f"{obj.name}: {pairwise_str}, {ori_str}"
             relationships.append(answer_str)
             relation_triples.append(RelationTriple(subject=obj.name, anchor=anchor_name, relation=rel, orientation=tuple(agent.ori)))
@@ -231,7 +214,7 @@ class ObserveAction(BaseAction):
                 'answer': answer, 'visible_objects': [], 'relationships': []
             })
 
-        anchor_name = self._get_anchor_name(room, agent)
+        anchor_name = self.get_anchor_name(room, agent) if not kwargs.get('free_position', False) else 'free_position'
         final_answer, relationships, relation_triples = self._collect_obj_observations(agent=agent, visible_objects=visible_objects, anchor_name=anchor_name, mode=self.MODE, with_orientation=with_orientation, discrete=False)
 
         
@@ -317,16 +300,16 @@ class ObserveApproxAction(ObserveAction):
         visible_objects = [obj for obj in room.all_objects if self._is_visible(agent, obj) and obj.name not in neglect_objects]
         if not visible_objects:
             answer = "Nothing in view."
-            return ActionResult(True, self.get_feedback(True, answer=answer), str(self), 'observe', {
+            return ActionResult(True, self.get_feedback(True, answer=answer), str(self), 'observe_approx', {
                 'answer': answer, 'visible_objects': [], 'relationships': [], 'local_relationships': []
             })
 
-        anchor_name = self._get_anchor_name(room, agent)
+        anchor_name = self.get_anchor_name(room, agent) if not kwargs.get('free_position', False) else 'free_position'
         pairwise_answer, relationships, pairwise_relation_triples = self._collect_obj_observations(agent=agent, visible_objects=visible_objects, anchor_name=anchor_name, mode='full', with_orientation=with_orientation, discrete=True)
         local_answer, local_relationships, local_relation_triples = self._collect_local_relationships(agent, visible_objects, anchor_name)
 
         final_answer = f"{pairwise_answer}" + ((f"\nLocal relations:\n{local_answer}") if local_answer else "")
-        return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe', {
+        return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe_approx', {
             'answer': final_answer,
             'visible_objects': [obj.name for obj in visible_objects],
             'relationships': relationships,
@@ -421,38 +404,77 @@ class GoThroughDoorAction(BaseAction):
         agent.room_id = next_room_id
         return ActionResult(True, self.get_feedback(True, room_id=int(agent.room_id)), str(self), 'go_through_door', {"door": self.door_name, "room_id": int(agent.room_id)})
 
-class QueryRelAction(BaseAction):
-    """Query accurate allocentric relationship between two objects"""
 
-    format_desc = "QueryRel(obj1, obj2)"
-    description = "Return accurate allocentric spatial relationship between two objects."
-    example = "QueryRel(table, chair)"
-    format_pattern = r"^QueryRel\(([A-Za-z0-9_ -]+),\s*([A-Za-z0-9_ -]+)\)$"
+class QueryAction(BaseAction):
+    """Query accurate allocentric relationship between an object and the agent anchor"""
+
+    format_desc = "Query(obj)"
+    description = "Return accurate spatial relationship between the object and the agent's anchor."
+    example = "Query(table)"
+    format_pattern = r"^Query\(([A-Za-z0-9_ -]+)\)$"
     cost = 5
-    def __init__(self, obj1: str, obj2: str):
-        super().__init__((obj1, obj2))
-        self.obj1, self.obj2 = obj1, obj2
+    def __init__(self, obj: str):
+        super().__init__(obj)
+        self.obj = obj
 
     def success_message(self, **kwargs) -> str:
-        return f"Relationship: {self.obj1}→{self.obj2}: {kwargs.get('answer','unknown')}"
+        return f"{self.obj}: {kwargs.get('answer','unknown')}"
 
     def error_message(self, error_type: str) -> str:
-        return f"Cannot query relationship: {error_type}"
+        return f"Cannot query: {error_type}"
 
     def execute(self, room, agent, **kwargs) -> ActionResult:
-        if self.obj1 != 'initial_pos' and self.obj2 != 'initial_pos' and (not room.has_object(self.obj1) or not room.has_object(self.obj2)):
+        if self.obj != 'initial_pos' and (not room.has_object(self.obj)):
             return ActionResult(False, self.get_feedback(False, "object not found"), str(self), 'query', {})
-        o1_pos = room.get_object_by_name(self.obj1).pos if self.obj1 != 'initial_pos' else agent.init_pos
-        o2_pos = room.get_object_by_name(self.obj2).pos if self.obj2 != 'initial_pos' else agent.init_pos
-        rel = PairwiseRelationship.relationship(tuple(o1_pos), tuple(o2_pos), anchor_ori=tuple(agent.init_ori), full=True)
+        # compute relationship from agent's CURRENT pose
+        obj_pos = room.get_object_by_name(self.obj).pos if self.obj != 'initial_pos' else agent.init_pos
+        rel = PairwiseRelationship.relationship(tuple(obj_pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
         ans = rel.to_string()
-        return ActionResult(True, self.get_feedback(True, answer=ans), str(self), 'query', {"answer": ans, "objects": [self.obj1, self.obj2], "pair": [self.obj1, self.obj2]})
+        return ActionResult(True, self.get_feedback(True, answer=ans), str(self), 'query',{
+            "answer": ans,
+            "object": self.obj,
+            'relation_triples': [RelationTriple(subject=self.obj, anchor=self.get_anchor_name(room, agent), relation=rel, orientation=tuple(agent.ori))]
+        })
 
     @staticmethod
     def is_final() -> bool: return False
     @staticmethod
     def is_query() -> bool: return True
-    def __repr__(self): return f"QueryRel({self.obj1}, {self.obj2})"
+    def __repr__(self): return f"Query({self.obj})"
+
+
+# class QueryRelAction(BaseAction):
+#     """Query accurate allocentric relationship between two objects"""
+
+#     format_desc = "QueryRel(obj1, obj2)"
+#     description = "Return accurate allocentric spatial relationship between two objects."
+#     example = "QueryRel(table, chair)"
+#     format_pattern = r"^QueryRel\(([A-Za-z0-9_ -]+),\s*([A-Za-z0-9_ -]+)\)$"
+#     cost = 5
+#     def __init__(self, obj1: str, obj2: str):
+#         super().__init__((obj1, obj2))
+#         self.obj1, self.obj2 = obj1, obj2
+
+#     def success_message(self, **kwargs) -> str:
+#         return f"Relationship: {self.obj1}→{self.obj2}: {kwargs.get('answer','unknown')}"
+
+#     def error_message(self, error_type: str) -> str:
+#         return f"Cannot query relationship: {error_type}"
+
+#     def execute(self, room, agent, **kwargs) -> ActionResult:
+#         if self.obj1 != 'initial_pos' and self.obj2 != 'initial_pos' and (not room.has_object(self.obj1) or not room.has_object(self.obj2)):
+#             return ActionResult(False, self.get_feedback(False, "object not found"), str(self), 'query', {})
+#         o1_pos = room.get_object_by_name(self.obj1).pos if self.obj1 != 'initial_pos' else agent.init_pos
+#         o2_pos = room.get_object_by_name(self.obj2).pos if self.obj2 != 'initial_pos' else agent.init_pos
+#         rel = PairwiseRelationship.relationship(tuple(o1_pos), tuple(o2_pos), anchor_ori=tuple(agent.init_ori), full=True)
+#         ans = rel.to_string()
+#         return ActionResult(True, self.get_feedback(True, answer=ans), str(self), 'query', {"answer": ans, "objects": [self.obj1, self.obj2], "pair": [self.obj1, self.obj2]})
+
+#     @staticmethod
+#     def is_final() -> bool: return False
+#     @staticmethod
+#     def is_query() -> bool: return True
+#     def __repr__(self): return f"QueryRel({self.obj1}, {self.obj2})"
 
 
 
@@ -466,8 +488,8 @@ class QueryRelAction(BaseAction):
 # Action registry for easy lookup
 # Expose all observe variants; default flows may still prefer ObserveApprox
 ACTION_CLASSES = [
-    MoveAction, RotateAction, ReturnAction, GoThroughDoorAction, 
-    ObserveApproxAction, TermAction, QueryRelAction
+    MoveAction, RotateAction, ReturnAction, GoThroughDoorAction,
+    ObserveApproxAction, TermAction, QueryAction
 ]
 
 
@@ -552,12 +574,11 @@ class ActionSequence:
         examples = (
             f"Valid Example:\nActions: [Move(table), Rotate(90), Observe()]\n\n" +
             f"Valid Example:\nActions: [Observe()]\n\n" +
-            f"Valid Example (queries only):\nActions: [QueryRel(table, chair), QueryRel(lamp, sofa)]\n\n" +
+            f"Valid Example (queries only):\nActions: [Query(table), Query(lamp)]\n\n" +
             f"Invalid Example (no final action):\nActions: [Move(table)]\n\n"+
             f"Invalid Example (more than one final action):\nActions: [Observe(), Rotate(90), Observe()]\n\n" +
             f"Invalid Example (termination with other actions):\nActions: [Move(table), Term()]\n\n" +
-            f"Invalid Example (mixing queries with others):\nActions: [Move(table), QueryRel(a,b)]\n\n"
-            
+            f"Invalid Example (mixing queries with others):\nActions: [Move(table), Query(a)]\n\n"
         )
         
         return ACTION_INSTRUCTION.format(
@@ -591,7 +612,7 @@ if __name__ == "__main__":
     print('ObserveApprox ->', results[0].message)
 
     # Query-only: two queries
-    seq = ActionSequence.parse("Actions: [QueryRel(table, chair), QueryRel(lamp, chair)]")
+    seq = ActionSequence.parse("Actions: [Query(table), Query(lamp)]")
     info, results = mgr.execute_action_sequence(seq)
     print('Query ->', "; ".join(r.message for r in results))
     print('Counts:', mgr.action_counts, 'Cost:', mgr.action_cost)
