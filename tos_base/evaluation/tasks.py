@@ -133,7 +133,7 @@ class BaseEvaluationTask(ABC):
         return task_types.get(task_type, cls).from_dict(data)
 
     # ---- Shared helper: find a point that changes discrete pairwise relationships ----
-    def sample_point_with_discrete_change(
+    def _sample_point_with_discrete_change(
         self,
         reference_pos: Tuple[int, int],
         anchor_pos: Tuple[int, int],
@@ -180,19 +180,7 @@ class BaseEvaluationTask(ABC):
             if float(np.linalg.norm(np.array((x, y)) - np.array(reference_pos))) >= float(min_distance) - 1e-6:
                 return (int(x), int(y))
         return None
-
-
-
-class SpatialManipulationTaskBase(BaseEvaluationTask):
-    """Base class for tasks that manipulate objects and position agents."""
-
-    def _position_agent_at(self, pos: np.ndarray) -> None:
-        self.agent.pos = np.array(pos)
-        for rotation in self.np_random.permutation([0, 90, 180, 270]):
-            RotateAction(rotation).execute(self.room, self.agent)
-            if ObserveApproxAction().execute(self.room, self.agent).data['visible_objects']:
-                break
-
+    
     def _take_observations(self, neglect_objects: List[str] = None) -> str:
         obs_result = ObserveApproxAction().execute(self.room, self.agent, neglect_objects=neglect_objects or [], free_position=True)
         return action_results_to_text([obs_result])
@@ -205,16 +193,3 @@ class SpatialManipulationTaskBase(BaseEvaluationTask):
             action_results.append(RotateAction(90).execute(self.room, self.agent))
             action_results.append(ObserveApproxAction().execute(self.room, self.agent, neglect_objects=neglect_objects or [], free_position=True))
         return action_results_to_text(action_results)
-
-    def _get_diagonal_position(self, target_obj: Object, ref_obj1: Object, ref_obj2: Object, neglect_trivial: bool = False) -> np.ndarray:
-        joints = [(ref_obj1.pos[0], ref_obj2.pos[1]), (ref_obj2.pos[0], ref_obj1.pos[1])]
-        if not neglect_trivial:
-            joints.extend([tuple(ref_obj1.pos), tuple(ref_obj2.pos)])
-        joint = self.np_random.choice(list(set(joints)))
-        joint_dir = np.array(joint) - target_obj.pos
-        jx, jy = joint
-        for _ in range(200):
-            p = self.room.get_random_point(self.np_random)
-            if (p[0] - jx) * joint_dir[0] >= 0 and (p[1] - jy) * joint_dir[1] >= 0:
-                return p
-        return self.room.get_random_point(self.np_random)

@@ -1,6 +1,6 @@
 """E2A: object coordinates and orientations identification task."""
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 import numpy as np
 
 from .tasks import BaseEvaluationTask
@@ -14,33 +14,18 @@ class E2AEvaluationTask(BaseEvaluationTask):
     QUESTION_TEMPLATE = (
         "Treat your starting position as the origin (0, 0), facing north.\n"
         "Consider the global map coordinates (x right, y up).\n"
-        "What are the coordinates and orientations of these objects: {object_names}?\n\n"
+        "Choose the option that correctly lists some objects with their coordinates and orientations.\n\n"
         "Answer format: [obj at (x, y) facing orientation, ...] where orientation is north/east/south/west\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
 
     def generate_question(self) -> str:
-        # select ≥3 objects from the whole environment
-        names = [o.name for o in self.room.objects]
-        self.np_random.shuffle(names)
-        pick_names = names[:max(3, min(5, len(names)))]
-        objects = [self.room.get_object_by_name(n) for n in pick_names]
-        object_names = [obj.name for obj in objects]
-
-        # transform points so that initial agent position is origin
-        def rel(p):
-            return (int(p[0]) - self.agent.init_pos[0], int(p[1]) - self.agent.init_pos[1])
-        correct_answer = [(obj.name, rel(obj.pos), self._get_orientation_string(obj)) for obj in objects]
-
-        # 2) choices: include challenging wrong options using discrete-change helper
-        choices, correct_idx = self.generate_choices(correct_answer, objects)
+        # choices: each option picks its own random subset of objects
+        choices, correct_idx = self.generate_choices()
         choices_text, correct_label = self.format_choices(choices, correct_idx)
 
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(
-            object_names=", ".join(object_names),
-            choices_text=choices_text,
-        )
+        self.eval_data.question = self.QUESTION_TEMPLATE.format(choices_text=choices_text)
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
         self.eval_data.reasoning = self._generate_reasoning()
@@ -49,43 +34,76 @@ class E2AEvaluationTask(BaseEvaluationTask):
     def _get_orientation_string(self, obj: Object) -> str:
         return {(0, 1): "north", (1, 0): "east", (0, -1): "south", (-1, 0): "west"}[tuple(obj.ori)]
 
-    def generate_choices(self, correct_answer: List[Tuple], objects: List[Object]) -> Tuple[List[str], int]:
+    def generate_choices(self) -> Tuple[List[str], int]:
+        # helper: pick random subset
+        def pick_subset(k: Optional[int] = None) -> List[Object]:
+            pool = list(self.room.objects)
+            self.np_random.shuffle(pool)
+            k = k or int(self.np_random.integers(3, min(6, len(pool)) + 1)) 
+            return pool[:k]
+
+        # correct option
+        objs_c = pick_subset(4)
+        correct_answer = [
+            (o.name, tuple(map(int, o.pos)), self._get_orientation_string(o))
+            for o in objs_c
+        ]
         correct_str = self._format_answer(correct_answer)
-        choices = [correct_str]
+        choices, seen = [correct_str], {correct_str}
 
-        abs_coords = [tuple(map(int, obj.pos)) for obj in objects]
-
-        # wrong options: change a random subset (>=1) of selected objects
-        origin = tuple(map(int, self.agent.init_pos))
-        for _ in range(3):
-            k = int(self.np_random.integers(1, max(2, len(objects))))
-            idxs = list(range(len(objects)))
-            self.np_random.shuffle(idxs)
-            idxs = idxs[:k]
-            new_coords = list(abs_coords)
+        # wrong options: independent subsets, mutate pos/orientation for ≥1 item
+        def mutate_positions(coords, idxs, objs):
+            origin = tuple(map(int, self.agent.init_pos))
+            new_coords = list(coords)
             for i in idxs:
-                rid_i = int(objects[i].room_id) if getattr(objects[i], 'room_id', None) is not None else 1
-                p = self.sample_point_with_discrete_change(
-                    reference_pos=abs_coords[i],
+                o = objs[i]
+                rid_i = int(getattr(o, 'room_id', 1) or 1)
+                p = self._sample_point_with_discrete_change(
+                    reference_pos=coords[i],
                     anchor_pos=origin,
                     room_id=rid_i,
                     min_distance=2.0,
                     bin_system=CardinalBinsAllo(),
-                    anchor_ori=(0,1),
+                    anchor_ori=(0, 1),
                     must_be_free=False,
-                ) or abs_coords[i]
+                ) or coords[i]
                 new_coords[i] = p
-            wrong = []
-            for (name, _, ori), newc in zip(correct_answer, new_coords):
-                wrong.append((name, (int(newc[0]) - origin[0], int(newc[1]) - origin[1]), ori))
-            choices.append(self._format_answer(wrong))
+            return new_coords
+
+        def mutate_orientations(orients, idxs):
+            labels = ["north", "east", "south", "west"]
+            out = list(orients)
+            for i in idxs:
+                out[i] = self.np_random.choice([l for l in labels if l != out[i]])
+            return out
+
+        while len(choices) < 4:
+            objs = pick_subset(4)
+            base = [(o.name, tuple(map(int, o.pos)), self._get_orientation_string(o)) for o in objs]
+            coords, oris = [c for (_, c, _) in base], [r for (_, _, r) in base]
+            mode = int(self.np_random.integers(0, 3))  # 0: pos, 1: ori, 2: both
+            if mode in (0, 2):
+                idxs = self.np_random.choice(len(base), size=int(self.np_random.integers(1, len(base) + 1)), replace=False)
+                coords = mutate_positions(coords, idxs, objs)
+            if mode in (1, 2):
+                idxs = self.np_random.choice(len(base), size=int(self.np_random.integers(1, len(base) + 1)), replace=False)
+                oris = mutate_orientations(oris, idxs)
+            cand = [(n, c, r) for (n, *_), c, r in zip(base, coords, oris)]
+            s = self._format_answer(cand)
+            if s not in seen:
+                choices.append(s); seen.add(s)
 
         self.np_random.shuffle(choices)
-        correct_idx = choices.index(correct_str)
-        return choices, correct_idx
+        return choices, choices.index(correct_str)
 
     def _format_answer(self, answer: List[Tuple]) -> str:
-        return ", ".join([f"{name} at {coord} facing {orientation}" for name, coord, orientation in answer])
+        # convert absolute coords to relative to start position
+        ox, oy = tuple(map(int, self.agent.init_pos))
+        rel_items = []
+        for name, abs_coord, orientation in answer:
+            rx, ry = int(abs_coord[0]) - ox, int(abs_coord[1]) - oy
+            rel_items.append((name, (rx, ry), orientation))
+        return ", ".join([f"{name} at {coord} facing {orientation}" for name, coord, orientation in rel_items])
 
 
 

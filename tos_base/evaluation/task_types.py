@@ -93,8 +93,8 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
 
-    task_name = 'e2a'
-    for seed in tqdm(range(97, 98)):
+    task_name = 'rot_dual'
+    for seed in tqdm(range(0, 1)):
         np_random = np.random.default_rng(seed)
         room, agent = RoomGenerator.generate_room(
             room_size=(15, 15),
