@@ -83,7 +83,7 @@ class FalseBeliefEvaluationTask(BaseEvaluationTask):
         assert len(oriented_objects) >= 1, "Need oriented object(s)"
         target_obj = self.np_random.choice(oriented_objects)
         rotation_degrees = int(self.np_random.choice([0, 90, 180, 270]))
-        rotations = {90: [[0, -1], [1, 0]], 180: [[-1, 0], [0, -1]], 270: [[0, 1], [-1, 0]]}
+        rotations = {0: [[1, 0], [0, 1]], 90: [[0, -1], [1, 0]], 180: [[-1, 0], [0, -1]], 270: [[0, 1], [-1, 0]]}
         target_obj.ori = target_obj.ori @ rotations[rotation_degrees]
         return target_obj.name, rotation_degrees
 

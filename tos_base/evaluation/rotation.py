@@ -47,6 +47,8 @@ class RotEvaluationTask(BaseEvaluationTask):
             name, ang, _ = pts[j]
             if last is None or ((ang - last) % 360.0) > eps:
                 names.append(name); angs.append(ang); last = ang
+        if (angs[0] - angs[-1]) % 360.0 < eps:
+            angs.pop(); names.pop()
         # normalize: start from smallest angle (e.g., [90,180,270,45] -> [45,90,180,270] for CW)
         k = int(np.argmin(angs))
         return names[k:] + names[:k], angs[k:] + angs[:k]

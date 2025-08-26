@@ -406,10 +406,10 @@ class GoThroughDoorAction(BaseAction):
 
 
 class QueryAction(BaseAction):
-    """Query accurate allocentric relationship between an object and the agent anchor"""
+    """Query accurate spatial relationship between an object and the agent anchor"""
 
     format_desc = "Query(obj)"
-    description = "Return accurate spatial relationship between the object and the agent's anchor."
+    description = "Return accurate spatial relationship between the object from agent's perspective."
     example = "Query(table)"
     format_pattern = r"^Query\(([A-Za-z0-9_ -]+)\)$"
     cost = 5
@@ -418,7 +418,7 @@ class QueryAction(BaseAction):
         self.obj = obj
 
     def success_message(self, **kwargs) -> str:
-        return f"{self.obj}: {kwargs.get('answer','unknown')}"
+        return f"You query {self.obj}: {kwargs.get('answer','unknown')}"
 
     def error_message(self, error_type: str) -> str:
         return f"Cannot query: {error_type}"

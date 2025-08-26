@@ -4,7 +4,7 @@ import math
 
 
 def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -> bool:
-    """Fast, allocation-free math check for Pairwise/Discrete/Proximity relationships."""
+    """Check if relationship applies to obj1 and obj2 from anchor's perspective."""
     p1 = getattr(obj1, 'pos', obj1)
     p2 = getattr(obj2, 'pos', obj2)
 

@@ -210,9 +210,7 @@ class AC3Solver:
             if not self._constraints_between(var1_name, k) and not self._constraints_between(var2_name, k):
                 continue
             domain_k = self.variables[k].domain
-            if not domain_k:
-                self._pc_cache[key] = False
-                return False
+            assert domain_k, f"Domain is empty for {k}"
             supported = False
             for posk in domain_k:
                 if self._pair_constraints_satisfied(var1_name, pos1, k, posk) and \
@@ -283,22 +281,6 @@ class SpatialSolver:
             self._ensure_domain_initialized(name)
         return {name: var.domain.copy() for name, var in self.solver.variables.items()}
 
-    def get_relationship(self, obj1_name: str, obj2_name: str,
-                         perspective: Tuple[int, int] = (0, 1),
-                         discrete: bool = True, bin_system=None, distance_bin_system=None,
-                         perspective_type: str = 'allo') -> Optional[PairwiseRelationship]:
-        if (obj1_name not in self.solver.variables or obj2_name not in self.solver.variables or
-                len(self.solver.variables[obj1_name].domain) != 1 or
-                len(self.solver.variables[obj2_name].domain) != 1):
-            return None
-        pos1 = next(iter(self.solver.variables[obj1_name].domain))
-        pos2 = next(iter(self.solver.variables[obj2_name].domain))
-        if discrete:
-            bin_system = bin_system or CardinalBinsAllo()
-            distance_bin_system = distance_bin_system or StandardDistanceBins()
-            return PairwiseRelationshipDiscrete.relationship(pos1, pos2, perspective, bin_system, distance_bin_system)
-        return PairwiseRelationship.relationship(pos1, pos2, perspective, full=True)
-
     def _ensure_domain_initialized(self, name: str):
         if not self.solver.variables[name].domain:
             g = int(self.grid_size)
@@ -320,13 +302,13 @@ class SpatialSolver:
         return self.solver.is_pair_value_path_consistent(obj1_name, tuple(pos1), obj2_name, tuple(pos2))
 
     # ---- Metrics ----
-    def compute_metrics(self, mode: str = 'dir', max_samples_per_var: int = 50,
+    def compute_metrics(self, max_samples_per_var: int = 50,
                         perspective: Tuple[int, int] = (0, 1), bin_system=None, distance_bin_system=None,
-                        path_consistent: bool = False) -> tuple[
+                        path_consistent: bool = True) -> tuple[
         Dict[str, int], int, Dict[Tuple[str, str], Set[str]], int
     ]:
         """
-        mode: 'disc' for PairwiseRelationshipDiscrete; 'dir' for direction-only (continuous, full=False).
+        Compute discrete relationship sets using the provided bin systems.
         Returns: (domain_sizes, total_positions, pair_rel_sets, total_relationships)
         """
         bin_system = bin_system or CardinalBinsAllo()
@@ -339,7 +321,7 @@ class SpatialSolver:
             domain_sizes[name] = len(self.solver.variables[name].domain)
         total_positions = sum(domain_sizes.values())
 
-        # Possible relationship sets per unordered pair
+        # Possible relationship sets per unordered pair (discrete only)
         names = sorted(self.solver.variables.keys())
         rel_sets: Dict[Tuple[str, str], Set[str]] = {}
 
@@ -358,20 +340,9 @@ class SpatialSolver:
                     for pb in db:
                         if path_consistent and not self.solver.is_pair_value_path_consistent(a, pa, b, pb):
                             continue
-                        if mode == 'disc':
-                            rel = PairwiseRelationshipDiscrete.relationship(pa, pb, perspective, bin_system, distance_bin_system)
-                            s.add(rel.to_string())
-                        else:
-                            rel = PairwiseRelationship.relationship(pa, pb, perspective, full=False)
-                            s.add(rel.to_string())
+                        rel = PairwiseRelationshipDiscrete.relationship(pa, pb, perspective, bin_system, distance_bin_system)
+                        s.add(rel.to_string())
                 rel_sets[(a, b)] = s
 
         total_relationships = sum(len(v) for v in rel_sets.values())
         return domain_sizes, total_positions, rel_sets, total_relationships
-    
-    def compute_allocentric_bin_metrics(self, max_samples_per_var: int = 50,
-                                        perspective: Tuple[int, int] = (0, 1), bin_system=None) -> tuple[
-        Dict[str, int], int, Dict[Tuple[str, str], Set[str]], int
-    ]:
-        """Deprecated: Use compute_metrics(mode='disc') instead."""
-        return self.compute_metrics('disc', max_samples_per_var, perspective, bin_system)

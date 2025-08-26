@@ -8,7 +8,7 @@ from ..core.room import Room
 from ..actions.base import BaseAction
 from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, GoThroughDoorAction, ObserveApproxAction, QueryAction, ReturnAction
 from .spatial_solver import SpatialSolver, Variable, Constraint, AC3Solver
-from ..core.relationship import PairwiseRelationship, RelationTriple
+from ..core.relationship import PairwiseRelationship, RelationTriple, CardinalBinsAllo
 from .exploration_manager import ExplorationManager
 from ..core.object import Agent
 from ..utils.action_utils import action_results_to_text
@@ -386,135 +386,92 @@ class GreedyInquisitorAgentProxy(InquisitorAgentProxy):
 
 
 class AnalystAgentProxy(AgentProxy):
-    """Analyst Agent: observe (approx) to see nodes, then greedily query allocentric pairs.
-    Greedy criterion switches between reducing relationships vs positions.
-    """
+    """Analyst Agent: observe, then greedily query to reduce discrete (cardinal-bin) relationships."""
 
     def __init__(self, room: Room, agent: Agent, grid_size: int | None = None,
-                 max_queries: int = 16, rel_threshold: int = 0, pos_threshold: int | None = None,
-                 max_eval_pairs: int = 20, eval_samples: int = 30, observe_strategy: str = 'oracle',
-                 metric_type: str = 'allocentric_bins'):
+                 max_queries: int = 16, rel_threshold: int = 0, eval_samples: int = 30):
         super().__init__(room, agent)
         g = (max(self.room.mask.shape) if getattr(self.room, 'mask', None) is not None else 10)
         self.solver = SpatialSolver([o.name for o in self.room.all_objects] + ['initial_pos'], grid_size=(g if grid_size is None else grid_size))
-        self.metric_mode = 'relationships'
-        self.metric_type = metric_type  # 'relationships', 'allocentric_bins'
         self.max_queries = int(max_queries)
         self.rel_threshold = int(rel_threshold)
-        self.pos_threshold = int(pos_threshold) if pos_threshold is not None else len(self.room.all_objects)
-        self.max_eval_pairs = int(max_eval_pairs)
         self.eval_samples = int(eval_samples)
-        self.observe_strategy = observe_strategy  # 'oracle' or 'strategist'
-        self.phase = 'observe'
 
-    def _ingest_from_turns(self) -> None:
+    def _ingest_observations(self) -> None:
         for i, t in enumerate(self.turns):
             obs = t.actions[-1]
             triples = obs.data.get('relation_triples', []) if hasattr(obs, 'data') else []
             if triples:
                 self.solver.add_observation(triples)
 
-    def _query_and_ingest(self, obj: str) -> None:
+    def _query_object(self, obj: str) -> None:
         res = self.mgr.execute_action(QueryAction(obj))
         self._add_turn([res])
         triples = res.data.get('relation_triples', []) if hasattr(res, 'data') else []
         self.solver.add_observation(triples)
 
-    def _compute_metrics(self) -> tuple[Dict[str, int], int, Dict[tuple, Set[str]], int]:
-        """Compute current solver metrics for query selection."""
-        if self.metric_type == 'allocentric_bins':
-            return self.solver.compute_allocentric_bin_metrics(max_samples_per_var=self.eval_samples)
-        else:
-            return self.solver.compute_metrics('dir', max_samples_per_var=self.eval_samples)
+    def _current_metrics(self) -> tuple[Dict[str, int], int, Dict[tuple, Set[str]], int]:
+        """Current discrete metrics using cardinal bins."""
+        return self.solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
 
     # ---- Greedy global query with simulation ----
-    def _simulate_effect(self, obj: str, mode: str,
-                         baseline_rels: int, baseline_pos: int) -> tuple[float, float]:
-        """Simulate by calling QueryAction(obj) and ingesting its triples on a copy."""
+    def _simulate_query_gain(self, obj: str, baseline_rels: int) -> float:
+        """Simulate query on a solver copy; return reduction in relationship count."""
         if obj != 'initial_pos' and (not self.room.has_object(obj)):
             raise ValueError(f"Object {obj} not found in room")
         sim_solver = self.solver.copy()
-        # run QueryAction once to build triples
         res = QueryAction(obj).execute(self.room, self.agent)
         triples = res.data.get('relation_triples', [])
         if triples:
             sim_solver.add_observation(triples)
-        if self.metric_type == 'allocentric_bins':
-            _, new_pos, _, new_rels = sim_solver.compute_allocentric_bin_metrics(max_samples_per_var=self.eval_samples)
-        else:
-            _, new_pos, _, new_rels = sim_solver.compute_metrics('dir', max_samples_per_var=self.eval_samples)
-        return (baseline_rels - new_rels), (baseline_pos - new_pos)
+        _, _, _, new_rels = sim_solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
+        return (baseline_rels - new_rels)
 
     def _global_query_loop(self) -> None:
-        """Optimized greedy query selection loop using incremental metrics."""
+        """Greedy selection by max relationship reduction."""
         q = 0
-        switched = False
-        
         while q < self.max_queries:
-            # Compute current metrics using dedicated function
-            dom_sizes, total_pos, rel_sets, total_rels = self._compute_metrics()
-            
-            # Check termination criteria
-            if total_rels <= self.rel_threshold and total_pos <= self.pos_threshold:
+            _, _, rel_sets, total_rels = self._current_metrics()
+            if total_rels <= self.rel_threshold:
                 break
-                
-            # Get candidate object (against current agent anchor) and score
-            best_obj, best_gain = self._find_best_query_obj(dom_sizes, rel_sets, total_rels, total_pos)
-            
-            # Switch mode if no good queries found, TODO update here for stop criteria
-            if best_gain <= 1e-9:
-                if switched:
-                    break
-                self.metric_mode = 'positions' if self.metric_mode == 'relationships' else 'relationships'
-                switched = True
-                continue
-                
-            # Execute best query
-            self._query_and_ingest(best_obj)
+            best_obj, best_gain = self._best_query(rel_sets, total_rels)
+            if best_gain <= 1e-9 or best_obj is None:
+                break
+            self._query_object(best_obj)
             q += 1
 
-    def _find_best_query_obj(self, dom_sizes: dict, rel_sets: dict, total_rels: int, total_pos: int) -> tuple:
-        """Find best object to query against agent anchor."""
+    def _best_query(self, rel_sets: dict, total_rels: int) -> tuple:
+        """Pick object with highest simulated relationship gain."""
         names = [o.name for o in self.room.all_objects] + ['initial_pos']
-
-        candidates = []
+        scores = []
         for obj in names:
-            if self.metric_mode == 'positions':
-                score = dom_sizes.get(obj, 0)
-            else:
-                # approximate by max relation set with any other
-                best_rel = 0
-                for other in names:
-                    if other == obj:
-                        continue
-                    key = (obj, other) if (obj, other) in rel_sets else (other, obj)
-                    best_rel = max(best_rel, len(rel_sets.get(key, set())))
-                score = best_rel
-            candidates.append((obj, score))
-
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        top_objs = [obj for obj, _ in candidates[:self.max_eval_pairs]]
+            best_rel = 0
+            for other in names:
+                if other == obj:
+                    continue
+                key = (obj, other) if (obj, other) in rel_sets else (other, obj)
+                best_rel = max(best_rel, len(rel_sets.get(key, set())))
+            scores.append((obj, best_rel))
+        scores.sort(key=lambda x: x[1], reverse=True)
+        top_objs = [obj for obj, _ in scores[:20]]
 
         best_obj, best_gain = None, -1.0
         for obj in top_objs:
-            d_rel, d_pos = self._simulate_effect(obj, self.metric_mode, total_rels, total_pos)
-            gain = d_rel if self.metric_mode == 'relationships' else d_pos
+            gain = self._simulate_query_gain(obj, total_rels)
             if gain > best_gain:
                 best_gain, best_obj = gain, obj
-
         return best_obj, best_gain
 
     def run(self) -> List[Turn]:
-        """Run analyst: delegate exploration to oracle/strategist, then query."""
-        # Delegate full exploration (_dfs) to ensure identical behavior
-        delegate_cls = OracleAgentProxy if self.observe_strategy == 'oracle' else StrategistAgentProxy
-        delegate = delegate_cls(self.room, self.agent)
+        """Run analyst: observe with oracle, then query."""
+        # Overview observe
+        delegate = OracleAgentProxy(self.room, self.agent)
         d_turns = delegate.run()
-        # adopt delegate manager/state for accurate history/costs; drop its final Term()
         self.mgr, self.room, self.agent = delegate.mgr, delegate.mgr.exploration_room, delegate.mgr.agent
-        self.turns = list(d_turns[:-1]) if d_turns else []
+        self.turns = list(d_turns[:-1]) if d_turns else [] # drop final Term()
+
         # Ingest all observed relation triples into solver
-        self._ingest_from_turns()
+        self._ingest_observations()
         # Ensure return to initial state before queries
         ret = self.mgr.execute_action(ReturnAction())
         self._add_turn([ret])
@@ -539,7 +496,7 @@ def get_agent_proxy(name: str, room: Room, agent: Agent) -> AgentProxy:
 if __name__ == "__main__":
     from ..utils.room_utils import RoomGenerator, RoomPlotter
     from tqdm import tqdm
-    for seed in tqdm(range(1)):
+    for seed in tqdm(range(1, 2)):
         room, agent = RoomGenerator.generate_room(
             room_size=[12, 12],
             n_objects=5,

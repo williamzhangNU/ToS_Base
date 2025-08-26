@@ -93,15 +93,15 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
 
-    task_name = 'rot_dual'
+    task_name = 'rot'
     for seed in tqdm(range(0, 1)):
         np_random = np.random.default_rng(seed)
         room, agent = RoomGenerator.generate_room(
             room_size=(15, 15),
-            n_objects=8,
+            n_objects=5,
             np_random=np_random,
             room_name='room',
-            level=1,
+            level=2,
             main=6,
         )
         task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
