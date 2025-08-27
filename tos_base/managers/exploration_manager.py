@@ -117,17 +117,6 @@ class ExplorationManager:
         If any motion action fails, execute an observe action and end.
         Returns info and list of action results.
         """
-        
-        # Query-only sequence
-        if getattr(action_sequence, 'query_actions', None):
-            info, action_results = {}, []
-            for action in action_sequence.query_actions:
-                result = self._execute_and_update(action)
-                action_results.append(result)
-                info.update(result.data)
-            self._log_exploration(action_sequence)
-            return info, action_results
-
         assert action_sequence.final_action, "Action sequence requires a final action."
 
         info = {}
