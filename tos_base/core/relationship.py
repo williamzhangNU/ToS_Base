@@ -226,9 +226,6 @@ class DegreeRel:
 class OrientationRel:
     """Orientation only (Dir/DirPair based)."""
 
-    # Perspective labels
-    EGO: ClassVar[dict[Dir, str]] = {Dir.SAME: 'same', Dir.FORWARD: 'front', Dir.BACKWARD: 'back', Dir.RIGHT: 'right', Dir.LEFT: 'left', Dir.UNKNOWN: 'unknown'}
-    ALLO: ClassVar[dict[Dir, str]] = {Dir.SAME: 'same', Dir.FORWARD: 'north', Dir.BACKWARD: 'south', Dir.RIGHT: 'east', Dir.LEFT: 'west', Dir.UNKNOWN: 'unknown'}
 
     # Transformations (used for orientation only)
     TRANSFORMS: ClassVar[dict[tuple[int, int], dict[Dir, Dir]]] = {
@@ -416,10 +413,6 @@ class PairwiseRelationship:
             return cls(direction=d, dist=None)
         return cls(direction=d, dist=DistanceRel.get_distance(pos1, pos2))
 
-
-    @classmethod
-    def get_direction(cls, pos1: tuple, pos2: tuple, anchor_ori: Optional[tuple] = None) -> DegreeRel: # TODO remove after modifying cogmap manager
-        return DegreeRel.from_positions(pos1, pos2, (anchor_ori if anchor_ori is not None else (0, 1)))
 
     @classmethod
     def get_bearing_degree(cls, pos1: tuple, pos2: tuple, anchor_ori: tuple = (0, 1)) -> float:

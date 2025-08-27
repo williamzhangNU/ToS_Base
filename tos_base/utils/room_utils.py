@@ -182,6 +182,10 @@ class RoomPlotter:
     @staticmethod
     def plot(room: Room, agent: Agent | None, mode: str = 'text', save_path: str | None = None):
         has_mask = getattr(room, 'mask', None) is not None and isinstance(room, Room)
+        # gate labels: show gate index and connected rooms, e.g. G0[1-3]
+        gate_labels = {}
+        if room.gates:
+            gate_labels = {g.name: g.name for i, g in enumerate(room.gates)}
         if mode == 'text':
             # helpers
             arrow = lambda v: { (0,1): '↑', (1,0): '→', (0,-1): '↓', (-1,0): '←' }.get(tuple(v), '•')
@@ -228,7 +232,12 @@ class RoomPlotter:
                 if 0 <= y < height and 0 <= x < width:
                     is_gate = isinstance(obj, Gate) if hasattr(room, 'gates') else False
                     ch = 'D' if is_gate else (arrow(obj.ori) if getattr(obj, 'has_orientation', True) else '●')
-                    grid[y][x] = col(ch, RED if obj in getattr(room, 'gates', []) else BLUE)
+                    grid[y][x] = col(ch, RED if is_gate else BLUE)
+                    if is_gate:
+                        # write compact gate tag next to door cell when possible
+                        tag = gate_labels.get(obj.name, '')
+                        if x+1 < width:
+                            grid[y][x+1] = col(tag, RED)
             # agent (current + init)
             if agent is not None:
                 ax, ay = int(agent.pos[0]) - min_x, max_y - int(agent.pos[1])
@@ -241,6 +250,10 @@ class RoomPlotter:
             print(f"--- {room.name} ---")
             for yy in range(len(grid)):
                 print(' '.join(grid[yy]))
+            # gate legend
+            if gate_labels:
+                order = [f"{gate_labels[g.name]}:{g.name}" for g in room.gates]
+                print("Gates:", ", ".join(order))
             if agent is not None:
                 def name_ori(v):
                     m = {(0,1): 'N', (1,0): 'E', (0,-1): 'S', (-1,0): 'W'}
@@ -304,6 +317,9 @@ class RoomPlotter:
                 if getattr(obj, 'has_orientation', True):
                     dx, dy = float(obj.ori[0])*0.4, float(obj.ori[1])*0.4
                     ax.quiver(x, y, dx, dy, angles='xy', scale_units='xy', scale=0.5, color='grey', width=0.005)
+                # gate text label
+                if isinstance(obj, Gate) and gate_labels:
+                    ax.text(x+0.10, y+0.12, gate_labels.get(obj.name, ''), color='crimson', fontsize=8, zorder=4)
             if agent is not None:
                 ax.scatter(agent.pos[0], agent.pos[1], c='green', marker='s', s=70, edgecolors='white', linewidths=0.7, label='agent', zorder=5)
                 ax.scatter(agent.init_pos[0], agent.init_pos[1], c='green', marker='x', s=60, label='agent_init', zorder=4)
@@ -326,8 +342,10 @@ def get_topdown_info(room: Room, agent: Agent) -> str:
     lines = [f"Agent at ({agent.pos[0]}, {agent.pos[1]}) facing {mapping[tuple(agent.ori)]}"]
     for obj in room.all_objects:
         if isinstance(obj, Gate):
+            rs = obj.room_id if isinstance(obj.room_id, (list, tuple)) else [obj.room_id]
+            rooms = [int(r) for r in rs]
             gate_ori_info = f'on east-west wall' if mapping[tuple(obj.ori)] in ('north', 'south') else f'on north-south wall'
-            obj_info = f"Gate: {obj.name} at ({obj.pos[0]}, {obj.pos[1]}) {gate_ori_info}"
+            obj_info = f"Gate: {obj.name} at ({obj.pos[0]}, {obj.pos[1]}) {gate_ori_info}, connects rooms {rooms}"
         else:
             obj_info = f"Object: {obj.name} at ({obj.pos[0]}, {obj.pos[1]}) facing {mapping[tuple(obj.ori)]}"
         lines.append(obj_info)
@@ -336,7 +354,8 @@ def get_topdown_info(room: Room, agent: Agent) -> str:
 
 def get_room_description(room: Room, agent: Agent, with_topdown: bool = False) -> str:
     room_type = "multiple rooms connected by doors" if room.gates else "a room"
-    desc = f"Imagine {room_type}. You face north.\nObjects: {', '.join([o.name for o in room.all_objects])}"
+    assert isinstance(agent.room_id, int), f"Agent room id must be an integer, got {agent.room_id}"
+    desc = f"Imagine {room_type}. You are currently in room {agent.room_id}. You face north.\nObjects: {', '.join([o.name for o in room.all_objects])}"
     if with_topdown:
         desc += "\n" + get_topdown_info(room, agent)
     return desc

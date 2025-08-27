@@ -13,7 +13,8 @@ Contains all concrete action classes and the ActionSequence parser.
 
 
 ACTION_INSTRUCTION = """\
-You can move within and across rooms, turn, observe, and traverse doors.
+You can move within and across rooms, turn, and observe.
+When you are at a door, you can see objects from both connected rooms (within FOV).
 
 Available Actions:
 {actions}
@@ -48,7 +49,7 @@ class MoveAction(BaseAction):
     description = (
         "Move to the same position as the object. "
         "Your orientation does NOT change when you move."
-        "You can ONLY move to object within your field of view. "
+        "You can ONLY move to objects within your field of view and you must have observed it before. "
         "You can ONLY move to objects by name, not directions or others. "
         "Invalid examples: Move(left), Move(forward), Move(back). "
     )
@@ -61,10 +62,11 @@ class MoveAction(BaseAction):
         self.target = target
     
     def success_message(self, **kwargs) -> str:
-        return f"You moved at {self.target}."
+        extra = kwargs.get('extra')
+        return f"You moved at {self.target}." + (f" {extra}" if extra else "")
     
     def error_message(self, error_type: str) -> str:
-        errors = {"not_found": "object not found", "not_visible": "object not visible"}
+        errors = {"not_found": "object not found", "not_visible": "object not visible", "not_observed": "object not observed yet"}
         return f"Cannot move to '{self.target}': {errors.get(error_type, 'execution failed')}."
     
     def execute(self, room, agent, **kwargs) -> ActionResult:
@@ -73,11 +75,23 @@ class MoveAction(BaseAction):
             return ActionResult(False, self.get_feedback(False, "not_found"), str(self), 'move', {'target_name': self.target})
         
         target_obj = room.get_object_by_name(self.target)
+        observed_names = set(kwargs.get('observed_names', [])) # if None, all objects are observed
+        if self.target not in observed_names:
+            return ActionResult(False, self.get_feedback(False, "not_observed"), str(self), 'move', {'target_name': self.target})
         if not kwargs.get('move_anyway', False) and not self._is_visible(agent, target_obj):
             return ActionResult(False, self.get_feedback(False, "not_visible"), str(self), 'move', {'target_name': self.target})        
-        agent.pos  = target_obj.pos # only change pos, not ori or room_id
-
-        return ActionResult(True, self.get_feedback(True), str(self), 'move', {'target_name': self.target})
+        
+        # extra messaging for gates and entering rooms
+        prev_room = agent.room_id
+        extra_msg = f"This gate connects rooms {target_obj.room_id[0]} and {target_obj.room_id[1]}." if isinstance(target_obj, Gate) else None
+        
+        # apply move and room membership
+        agent.pos, agent.room_id = target_obj.pos, target_obj.room_id
+        
+        # entering room from a gate
+        if (extra_msg is None) and (not isinstance(target_obj, Gate)) and isinstance(prev_room, (list, tuple)):
+            extra_msg = f"You are in room {target_obj.room_id}."
+        return ActionResult(True, self.get_feedback(True, extra=extra_msg), str(self), 'move', {'target_name': self.target})
     
     def __repr__(self):
         return f"Move({self.target})"
@@ -182,7 +196,14 @@ class ObserveAction(BaseAction):
 
             # orientation (gate/object) via OrientationRel only
             if isinstance(obj, Gate):
-                ori_pair = OrientationRel.get_relative_orientation(tuple(obj.get_ori_for_room(int(agent.room_id))), tuple(agent.ori))
+                rid = agent.room_id
+                if isinstance(rid, (list, tuple)):
+                    rid = list(set(agent.room_id) & set(obj.room_id))
+                    assert len(rid) == 1, f"intersection of room ids is not unique: {rid}"
+                    rid = rid[0]
+                    print(f'[DEBUG] intersects between agent: {agent} and gate: {obj} is {rid}')
+                gate_ori = obj.get_ori_for_room(int(rid)) if rid is not None else obj.ori
+                ori_pair = OrientationRel.get_relative_orientation(tuple(gate_ori), tuple(agent.ori))
                 ori_str = OrientationRel.to_string(ori_pair, 'ego', 'orientation', if_gate=True)
             else:
                 ori_pair = OrientationRel.get_relative_orientation(tuple(obj.ori), tuple(agent.ori))
@@ -347,63 +368,6 @@ class TermAction(BaseAction):
         return "Term()"
 
 
-class GoThroughDoorAction(BaseAction):
-    """Go through a gate (door) connecting two rooms.
-    Valid only if you are at the door position and facing the doorway:
-    face opposite to the door's orientation for your current room (or the same as
-    the door's orientation for the other room).
-    """
-
-    format_desc = "GoThroughDoor(door_name)"
-    description = (
-        "Go to the connected room. You must be at the door and face the doorway "
-        "On success you appear in the other room facing into it. Your orientation will NOT change."
-    )
-    example = "GoThroughDoor(door1)"
-    format_pattern = r"^GoThroughDoor\(([A-Za-z0-9_ -]+)\)$"
-    cost = 0
-    def __init__(self, door_name: str):
-        super().__init__(door_name)
-        self.door_name = door_name
-
-    def success_message(self, **kwargs) -> str:
-        rid = kwargs.get('room_id')
-        return f"You pass through {self.door_name} into room {rid}." if rid is not None else f"You pass through {self.door_name}."
-
-    def error_message(self, error_type: str) -> str:
-        errors = {
-            "not_found": "door not found",
-            "not_gate": "target is not a door",
-            "not_at_door": "you are not at the door position",
-            "not_facing": "you are not facing the door",
-        }
-        return f"Cannot go through '{self.door_name}': {errors.get(error_type, 'execution failed')}."
-
-    def execute(self, room, agent, **kwargs) -> ActionResult:
-        if not room.has_object(self.door_name):
-            return ActionResult(False, self.get_feedback(False, "not_found"), str(self), 'go_through_door', {})
-        door = room.get_object_by_name(self.door_name)
-        assert isinstance(door, Gate), "Door must be a Gate object"
-        # Treat as door if it is listed in room.gates by name
-        if self.door_name not in [g.name for g in room.gates]:
-            return ActionResult(False, self.get_feedback(False, "not_gate"), str(self), 'go_through_door', {})
-        
-
-        # Must face the doorway and at the door position
-        cur_rid = int(agent.room_id)
-        door_connected_room_ids = [int(x) for x in door.room_id]
-        assert len(door_connected_room_ids) == 2 and cur_rid in door_connected_room_ids, "Door must connect two rooms and you must be at one of the connected rooms"
-        next_room_id = door_connected_room_ids[0] if door_connected_room_ids[1] == cur_rid else door_connected_room_ids[1]
-        req_ori_other = door.get_ori_for_room(next_room_id)
-        if not np.allclose(agent.pos, door.pos):
-            return ActionResult(False, self.get_feedback(False, "not_at_door"), str(self), 'go_through_door', {})
-        if not np.array_equal(agent.ori, req_ori_other):
-            return ActionResult(False, self.get_feedback(False, "not_facing"), str(self), 'go_through_door', {})
-
-        # move to next room with position and orientation unchanged
-        agent.room_id = next_room_id
-        return ActionResult(True, self.get_feedback(True, room_id=int(agent.room_id)), str(self), 'go_through_door', {"door": self.door_name, "room_id": int(agent.room_id)})
-
 
 class QueryAction(BaseAction):
     """Query accurate spatial relationship between an object and the agent anchor"""
@@ -443,44 +407,6 @@ class QueryAction(BaseAction):
     def __repr__(self): return f"Query({self.obj})"
 
 
-# class QueryRelAction(BaseAction):
-#     """Query accurate allocentric relationship between two objects"""
-
-#     format_desc = "QueryRel(obj1, obj2)"
-#     description = "Return accurate allocentric spatial relationship between two objects."
-#     example = "QueryRel(table, chair)"
-#     format_pattern = r"^QueryRel\(([A-Za-z0-9_ -]+),\s*([A-Za-z0-9_ -]+)\)$"
-#     cost = 5
-#     def __init__(self, obj1: str, obj2: str):
-#         super().__init__((obj1, obj2))
-#         self.obj1, self.obj2 = obj1, obj2
-
-#     def success_message(self, **kwargs) -> str:
-#         return f"Relationship: {self.obj1}→{self.obj2}: {kwargs.get('answer','unknown')}"
-
-#     def error_message(self, error_type: str) -> str:
-#         return f"Cannot query relationship: {error_type}"
-
-#     def execute(self, room, agent, **kwargs) -> ActionResult:
-#         if self.obj1 != 'initial_pos' and self.obj2 != 'initial_pos' and (not room.has_object(self.obj1) or not room.has_object(self.obj2)):
-#             return ActionResult(False, self.get_feedback(False, "object not found"), str(self), 'query', {})
-#         o1_pos = room.get_object_by_name(self.obj1).pos if self.obj1 != 'initial_pos' else agent.init_pos
-#         o2_pos = room.get_object_by_name(self.obj2).pos if self.obj2 != 'initial_pos' else agent.init_pos
-#         rel = PairwiseRelationship.relationship(tuple(o1_pos), tuple(o2_pos), anchor_ori=tuple(agent.init_ori), full=True)
-#         ans = rel.to_string()
-#         return ActionResult(True, self.get_feedback(True, answer=ans), str(self), 'query', {"answer": ans, "objects": [self.obj1, self.obj2], "pair": [self.obj1, self.obj2]})
-
-#     @staticmethod
-#     def is_final() -> bool: return False
-#     @staticmethod
-#     def is_query() -> bool: return True
-#     def __repr__(self): return f"QueryRel({self.obj1}, {self.obj2})"
-
-
-
-
-
-
 
 
 
@@ -488,7 +414,7 @@ class QueryAction(BaseAction):
 # Action registry for easy lookup
 # Expose all observe variants; default flows may still prefer ObserveApprox
 ACTION_CLASSES = [
-    MoveAction, RotateAction, ReturnAction, GoThroughDoorAction,
+    MoveAction, RotateAction, ReturnAction,
     ObserveApproxAction, TermAction, QueryAction
 ]
 

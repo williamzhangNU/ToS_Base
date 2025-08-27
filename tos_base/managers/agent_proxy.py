@@ -6,7 +6,7 @@ import numpy as np
 
 from ..core.room import Room
 from ..actions.base import BaseAction
-from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, GoThroughDoorAction, ObserveApproxAction, QueryAction, ReturnAction
+from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, ObserveApproxAction, QueryAction, ReturnAction
 from .spatial_solver import SpatialSolver, Variable, Constraint, AC3Solver
 from ..core.relationship import PairwiseRelationship, RelationTriple, CardinalBinsAllo
 from .exploration_manager import ExplorationManager
@@ -38,6 +38,8 @@ class AgentProxy:
     def __init__(self, room: Room, agent: Agent):
         self.mgr = ExplorationManager(room, agent)
         self.room, self.agent = self.mgr.exploration_room, self.mgr.agent
+        # Focused room id for planning when at gates (agent may belong to two rooms at a door)
+        self.room_focus = self.agent.room_id
 
         self.gates_by_room: Dict[int, Set[str]] = {int(r): set(glist) for r, glist in self.room.gates_by_room.items()}
 
@@ -78,7 +80,7 @@ class AgentProxy:
 
     # --- helpers ---
     def _current_room(self) -> int:
-        return int(self.agent.room_id)
+        return int(self.room_focus)
 
     def _add_turn(self, actions: List) -> None:
         self.turns.append(
@@ -107,7 +109,7 @@ class AgentProxy:
         assert delta % 90 == 0, "Invalid rotation delta"
         if delta > 180:
             delta -= 360
-        return [] if delta == 0 else [self.mgr.execute_action(RotateAction(delta))]
+        return [] if delta == 0 else [self.mgr.execute_success_action(RotateAction(delta))]
 
 
     def _rotate_to_face(self, target_pos: np.ndarray) -> List:
@@ -126,13 +128,12 @@ class AgentProxy:
         target = self.room.get_object_by_name(name)
         acts = []
         acts += self._rotate_to_face(target.pos)
-        acts.append(self.mgr.execute_action(MoveAction(name)))
+        acts.append(self.mgr.execute_success_action(MoveAction(name)))
         return acts
 
     def _observe(self, prefix_actions: List = None) -> None:
         acts = list(prefix_actions or [])
-        # obs = self.mgr.execute_action(ObserveAction())
-        obs = self.mgr.execute_action(ObserveApproxAction())
+        obs = self.mgr.execute_success_action(ObserveApproxAction())
         acts.append(obs)
         self._update_known_from_observe(obs)
         self._add_turn(acts)
@@ -180,20 +181,19 @@ class AgentProxy:
         raise AssertionError(f"No gate between rooms {a} and {b}")
 
     def _traverse_to(self, next_rid: int) -> List:
+        # Move to the connecting gate and face next room; at gate, agent can see both rooms.
         cur = self._current_room()
         gate_name = self._gate_between(cur, next_rid)
         gate_obj = self.room.get_object_by_name(gate_name)
         acts = []
-        # If already at the gate, skip moving and rotating
         if not np.allclose(self.agent.pos, gate_obj.pos):
             acts += self._rotate_to_face(gate_obj.pos)
-            acts.append(self.mgr.execute_action(MoveAction(gate_name)))
-        # Must face doorway: opposite of gate ori for current room (acceptable alternative is same as other room ori)
+            acts.append(self.mgr.execute_success_action(MoveAction(gate_name)))
+        # face next room; TODO may not be needed
         acts += self._rotate_to_ori(-gate_obj.get_ori_for_room(int(cur)))
-        go = self.mgr.execute_action(GoThroughDoorAction(gate_name))
-        acts.append(go)
         self.current_gate = gate_name
-        self.known_nodes_by_room.setdefault(next_rid, set()).add(gate_name) # next room gate is known in next room
+        self.room_focus = int(next_rid)
+        self.known_nodes_by_room.setdefault(next_rid, set()).add(gate_name)
         return acts
 
     def _allowed_rotations(self, is_initial: bool, continuous_rotation: bool = True) -> tuple:
@@ -268,7 +268,7 @@ class AgentProxy:
         start_rid = self._current_room()
         _ = self._dfs(start_rid, is_initial=True, pre_actions=[])
         # final turn contains only Term()
-        self._add_turn([self.mgr.execute_action(TermAction())])
+        self._add_turn([self.mgr.execute_success_action(TermAction())])
         return self.turns
 
     def to_text(self) -> str:
@@ -329,7 +329,9 @@ class InquisitorAgentProxy(AgentProxy):
         unknown = self._unknown_edges_in_room(rid)
         if not unknown:
             return
-        for anchor in self._anchors_with_unknown_edges(rid):
+        objects_with_unknown_edges = self._anchors_with_unknown_edges(rid)
+        while objects_with_unknown_edges:
+            anchor = objects_with_unknown_edges.pop()
             self._observe(self._move_to(anchor))
             for d in (0, 90, 90, 90):
                 if d == 0:
@@ -337,6 +339,7 @@ class InquisitorAgentProxy(AgentProxy):
                 self._observe(self._rotate_by(d))
                 if not any(anchor in p for p in self._unknown_edges_in_room(rid)): # no unknown edges from anchor
                     break
+            objects_with_unknown_edges = self._anchors_with_unknown_edges(rid)
 
     # how to choose anchor node with unknown edges
     def _anchors_with_unknown_edges(self, rid: int) -> List[str]:
@@ -371,7 +374,9 @@ class GreedyInquisitorAgentProxy(InquisitorAgentProxy):
         unknown = self._unknown_edges_in_room(rid)
         if not unknown:
             return
-        for anchor in self._anchors_with_unknown_edges(rid):
+        objects_with_unknown_edges = self._anchors_with_unknown_edges(rid)
+        while objects_with_unknown_edges:
+            anchor = objects_with_unknown_edges.pop()
             self.anchor = anchor
             prefix_actions = self._move_to(anchor)
             while any(anchor in p for p in self._unknown_edges_in_room(rid)): # exist unknown edges from anchor
@@ -381,7 +386,7 @@ class GreedyInquisitorAgentProxy(InquisitorAgentProxy):
                     break
                 self._observe(prefix_actions + self._rotate_by(best))
                 prefix_actions = []
-
+            objects_with_unknown_edges = self._anchors_with_unknown_edges(rid)
             self.anchor = None
 
 
@@ -405,7 +410,7 @@ class AnalystAgentProxy(AgentProxy):
                 self.solver.add_observation(triples)
 
     def _query_object(self, obj: str) -> None:
-        res = self.mgr.execute_action(QueryAction(obj))
+        res = self.mgr.execute_success_action(QueryAction(obj))
         self._add_turn([res])
         triples = res.data.get('relation_triples', []) if hasattr(res, 'data') else []
         self.solver.add_observation(triples)
@@ -473,12 +478,12 @@ class AnalystAgentProxy(AgentProxy):
         # Ingest all observed relation triples into solver
         self._ingest_observations()
         # Ensure return to initial state before queries
-        ret = self.mgr.execute_action(ReturnAction())
+        ret = self.mgr.execute_success_action(ReturnAction())
         self._add_turn([ret])
         # Global greedy queries
         self._global_query_loop()
         # Terminate
-        self._add_turn([self.mgr.execute_action(TermAction())])
+        self._add_turn([self.mgr.execute_success_action(TermAction())])
         return self.turns
 
 def get_agent_proxy(name: str, room: Room, agent: Agent) -> AgentProxy:
@@ -496,12 +501,12 @@ def get_agent_proxy(name: str, room: Room, agent: Agent) -> AgentProxy:
 if __name__ == "__main__":
     from ..utils.room_utils import RoomGenerator, RoomPlotter
     from tqdm import tqdm
-    for seed in tqdm(range(1, 2)):
+    for seed in tqdm(range(2, 3)):
         room, agent = RoomGenerator.generate_room(
-            room_size=[12, 12],
-            n_objects=5,
+            room_size=[15, 15],
+            n_objects=8,
             np_random=np.random.default_rng(seed),
-            level=1,
+            level=2,
             main=5
         )
         print(room)
@@ -514,8 +519,8 @@ if __name__ == "__main__":
         # proxy = OracleAgentProxy(room, agent)        # node_seeker (complete nodes)
         # proxy = StrategistAgentProxy(room, agent)    # node_sweeper
         # proxy = InquisitorAgentProxy(room, agent)    # edge_seeker (complete edges)
-        # proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
-        proxy = AnalystAgentProxy(room, agent)
+        proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
+        # proxy = AnalystAgentProxy(room, agent)
         proxy.run()
         print(proxy.to_text())
         print(proxy.mgr.get_exp_summary())

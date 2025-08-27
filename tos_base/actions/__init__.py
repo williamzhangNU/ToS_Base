@@ -11,7 +11,6 @@ from .actions import (
     ObserveApproxAction,
     ObserveRelAction,
     ObserveDirAction,
-    GoThroughDoorAction,
     TermAction,
     QueryAction,
     ActionSequence,
@@ -20,5 +19,5 @@ from .actions import (
 
 __all__ = [
     'BaseAction', 'ActionResult', 'ActionSequence', 'ACTION_CLASSES',
-    'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'ObserveApproxAction', 'ObserveRelAction', 'ObserveDirAction', 'GoThroughDoorAction', 'TermAction', 'QueryAction'
+    'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'ObserveApproxAction', 'ObserveRelAction', 'ObserveDirAction', 'TermAction', 'QueryAction'
 ] 

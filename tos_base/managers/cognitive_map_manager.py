@@ -1,270 +1,382 @@
 """
 Cognitive Map Manager
 
-Handles cognitive map creation, validation, and comparison functionality.
-Follows the same pattern as ExplorationManager and EvaluationManager.
+Minimal, modular evaluator for cognitive maps.
+
+Responsibilities:
+- Extract JSON from LLM response
+- Transform JSON sections (global/local/rooms/gates) into BaseRoom-compatible data
+- Evaluate global, local, room maps (dir/facing/pos) using consistent coordinates
+- Evaluate gates connectivity
+- Log all results per turn for summary aggregation
 """
 
 import json
 import re
 import numpy as np
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass
+from typing import Dict, Any, Optional, List, Tuple
+from dataclasses import dataclass, field
 import copy
 
 from ..core.room import Room, BaseRoom
 from ..core.object import Object, Agent
-from ..core.relationship import PairwiseRelationship
+from ..core.relationship import (
+    PairwiseRelationshipDiscrete,
+    CardinalBinsAllo,
+    DegreeRel,
+)
 
-COGMAP_INSTRUCTION = """\
-## Cognitive Map Creation
-
-**Objective**  
-Maintain a global 2D cognitive map of the room.
-
-### Coordinate System:
-- Use a {grid_size}x{grid_size} grid
-- Your initial position as origin `[0, 0]`
-- Your initial facing direction as positive Y-axis.
-- Include all objects, including agent, i.e. your current position and orientation.
-
-### Update Notes
-- Record position as 2D coordinate and record orientation if given (north/south/east/west).
-- Confidence: Set "confidence" to "high" (very sure), "medium" (uncertain or estimated), or "low" (unknown).
-- Update current global map using local observations, note current global map may be incomplete or inaccurate.  
-- Assign coordinates based on their spatial relationships
-- Output full map: list **ALL** objects with `[x, y]` coordinates and orientation. For unobserved objects, use `[0, 0]` for position, `unknown` for orientation, and `low` for confidence.
-
-### Rules
-- An object can be anywhere at {grid_size}x{grid_size} grid.
-- A at your right-front, it can be anywhere at your first quadrant, e.g., [1, 3], [4, 2], ...
-- Always first output cognitive map before reasoning about other tasks in your thinking; never reverse the order.
-
-### REQUIRED JSON OUTPUT FORMAT:
-You MUST include this exact JSON structure in your thinking:
-```json
-{{
-  "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
-}}
-```
-
-### Example (MUST follow this format):
-If a table is front right of you facing north:
-```json
-{{
-  "table": {{"position": [3, 2], "facing": "north", "confidence": "medium"}},
-}}
-```
-"""
 
 COGMAP_INSTRUCTION_SHORTER = """\
-## Cognitive Map Creation
+## Cognitive Map (multi-map)
 
-**Task**: Maintain a global 2D cognitive map ({grid_size}×{grid_size}) of the room.
+Keep a concise multi-map JSON of the scene on a {grid_size}×{grid_size} grid.
 
-### Setup
-- Origin [0,0] = initial position
-- +Y axis = initial facing direction
-- Track all objects including agent/yourself (position & orientation)
+- Global: origin [0,0] and +Y is your initial facing direction
+- Local: origin at your current pose; +Y is forward
+- Rooms: each room uses its entry gate as origin; +Y points into that room
+- Gates: list connections as room id pairs
 
-### Mapping Rules
-- Convert relative positions to coordinates (e.g., front-left → x<0, y>0)
-- Convert egocentric directions to global (e.g., forward → north)
-- Assign confidence: high (certain), medium (estimated), low (unknown)
-- Update map with new observations
-- Default: unobserved objects at [0,0], orientation unknown, confidence low
-- You won’t always be at the origin: every move or turn updates your position or orientation.
+Fields:
+- position: [x, y] in the map’s coordinate system (integers or integer-like)
+- facing: one of "north|south|east|west" (omit or set unknown if not applicable)
+- confidence: "high" (certain), "medium" (estimated), "low" (unknown)
+- rooms: map of room_id to its objects in that room’s coordinates
+- gates: { gate_name: { connects: [room_id_a, room_id_b] } }
 
-### Output Rules
-- Always first output cognitive map before reasoning about other tasks in your thinking; never reverse the order.
+Always output the cognitive map JSON first in your thinking. Include at least `global`; `local`, `rooms`, and `gates` are optional.
 
-### JSON OUTPUT FORMAT:
-MUST follow this format to output cognitive map:
+Example:
 ```json
-{{
-  "agent": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
-  "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
-}}
+{
+  "global": {
+    "agent": {"position": [0, 0], "facing": "north", "confidence": "high"},
+    "table": {"position": [2, 1], "facing": "east", "confidence": "medium"}
+  },
+  "local": {
+    "agent": {"position": [0, 0], "facing": "north", "confidence": "high"},
+    "chair": {"position": [-1, 2], "facing": "west", "confidence": "high"}
+  },
+  "rooms": {
+    "1": {"sofa": {"position": [1, 0], "facing": "south", "confidence": "high"}}
+  },
+  "gates": {
+    "gate_a": {"connects": [1, 2]}
+  }
+}
 ```
 """
 
 COGMAP_EXP_REQUIRED_INSTRUCTION = """
-In your thinking (in <think> ... </think>), you MUST follow the following steps:
-Step 1: Briefly reason about cognitive map
-Step 2: Output it strictly following:
+In your thinking (<think> ... </think>):
+1) Briefly reason about your cognitive map
+2) Output the cognitive map JSON (at least `global`; `local`, `rooms`, `gates` optional)
+3) Then reason about exploration and provide only the <answer>...</answer>
+
+Example:
 ```json
-{{
-  "agent": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
-  "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
-}}
+{
+  "global": {
+    "agent": {"position": [0, 0], "facing": "north", "confidence": "high"},
+    "table": {"position": [2, 1], "facing": "east", "confidence": "medium"}
+  },
+  "gates": {"gate_a": {"connects": [1, 2]}}
+}
 ```
-Step 3: Reason about exploration.
-Then provide only the answer in <answer> ... </answer>
 """
 
 COGMAP_EVAL_REQUIRED_INSTRUCTION = """
-In your thinking (in <think> ... </think>), you MUST follow the following steps:
-Step 1: Briefly reason about cognitive map
-Step 2: Output it strictly following:
+In your thinking (<think> ... </think>):
+1) Briefly reason about your cognitive map
+2) Output the cognitive map JSON (at least `global`; `local`, `rooms`, `gates` optional)
+3) Then reason about the question and provide only the <answer>...</answer>
+
+Example:
 ```json
-{{
-  "agent": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
-  "object_name_1": {{"position": [x, y], "facing": "direction", "confidence": "high/medium/low"}},
-}}
+{
+  "global": {
+    "agent": {"position": [0, 0], "facing": "north", "confidence": "high"},
+    "lamp": {"position": [-1, 3], "facing": "west", "confidence": "medium"}
+  },
+  "gates": {"gate_a": {"connects": [1, 2]}}
+}
 ```
-Step 3: Reason about the question.
-Then provide only the answer in <answer> ... </answer>
 """
+
+
+@dataclass
+class CogMapMetrics:
+    """Container for similarity metrics with helpers."""
+    dir: float = 0.0
+    facing: float = 0.0
+    pos: float = 0.0
+    overall: float = 0.0
+
+    def to_dict(self) -> Dict[str, float]:
+        return {"dir": self.dir, "facing": self.facing, "pos": self.pos, "overall": self.overall}
+
+    @staticmethod
+    def average(items: List['CogMapMetrics']) -> 'CogMapMetrics':
+        if not items:
+            return CogMapMetrics()
+        return CogMapMetrics(
+            dir=float(np.mean([i.dir for i in items])),
+            facing=float(np.mean([i.facing for i in items])),
+            pos=float(np.mean([i.pos for i in items])),
+            overall=float(np.mean([i.overall for i in items])),
+        )
+
 
 @dataclass
 class CognitiveMapTurnLog:
-    """Log data for a single cognitive map evaluation turn."""
+    """Per-turn metrics for cognitive map evaluation."""
+    # Hierarchical metrics
+    global_metrics: CogMapMetrics = field(default_factory=CogMapMetrics)
+    local_metrics: CogMapMetrics = field(default_factory=CogMapMetrics)
+    rooms_metrics: CogMapMetrics = field(default_factory=CogMapMetrics)
+    gates: Dict[str, float] = field(default_factory=lambda: {"conn_acc": 0.0})
+    # Extraction status
+    extraction_success: bool = False
+    # Optional for debugging/inspection (predicted global map as BaseRoom)
+    pred_room_state: Optional['BaseRoom'] = None
+
+    # Backward-compatible flat fields reflecting global metrics
     dir_sim: float = 0.0
     facing_sim: float = 0.0
     pos_sim: float = 0.0
     overall_sim: float = 0.0
-    extraction_success: bool = False
-    pred_room_state: Optional['Room'] = None
-    pred_agent_state: Optional['Agent'] = None
 
     def to_dict(self):
         return {
+            "global": self.global_metrics.to_dict(),
+            "local": self.local_metrics.to_dict(),
+            "rooms": self.rooms_metrics.to_dict(),
+            "gates": self.gates,
+            "extraction_success": self.extraction_success,
+            "pred_room_state": self.pred_room_state.to_dict() if self.pred_room_state else {},
+            # flat for backward-compatibility
             "dir_sim": self.dir_sim,
             "facing_sim": self.facing_sim,
             "pos_sim": self.pos_sim,
             "overall_sim": self.overall_sim,
-            "extraction_success": self.extraction_success,
-            "pred_room_state": self.pred_room_state.to_dict() if self.pred_room_state else {},
-            "pred_agent_state": self.pred_agent_state.to_dict() if self.pred_agent_state else {}
         }
 
 
+# =============================== Small transforms =============================== 
+
+def rotation_matrix_from_ori(ori: np.ndarray) -> np.ndarray:
+    """Rotate world into anchor frame so that +Y aligns with anchor forward.
+    Mappings chosen so anchor_ori -> [0,1] (north).
+    """
+    ori_to_R = {
+        (0, 1): np.array([[1, 0], [0, 1]]),           # north → identity
+        (1, 0): np.array([[0, -1], [1, 0]]),           # east  → +90°
+        (0, -1): np.array([[-1, 0], [0, -1]]),         # south → 180°
+        (-1, 0): np.array([[0, 1], [-1, 0]]),          # west  → -90°
+    }
+    key = tuple(int(x) for x in (ori.tolist() if hasattr(ori, 'tolist') else ori))
+    return ori_to_R.get(key, ori_to_R[(0, 1)])
+
+
+def transform_point(pos_world: np.ndarray, anchor_pos: np.ndarray, anchor_ori: np.ndarray) -> np.ndarray:
+    R = rotation_matrix_from_ori(anchor_ori)
+    return (R @ (pos_world.astype(float) - anchor_pos.astype(float))).astype(float)
+
+
+def transform_ori(ori_world: np.ndarray, anchor_ori: np.ndarray) -> np.ndarray:
+    R = rotation_matrix_from_ori(anchor_ori)
+    v = (R @ ori_world.astype(float)).astype(int)
+    vx, vy = int(np.sign(v[0])), int(np.sign(v[1]))
+    return np.array([vx, vy], dtype=int)
+
+
+def _transform_baseroom(room: BaseRoom, anchor_pos: np.ndarray, anchor_ori: np.ndarray) -> BaseRoom:
+    objects: List[Object] = []
+    for obj in room.objects:
+        p = transform_point(obj.pos, anchor_pos, anchor_ori)
+        o = obj.ori
+        if getattr(obj, 'has_orientation', True):
+            o = transform_ori(obj.ori, anchor_ori)
+        objects.append(Object(name=obj.name, pos=p, ori=o, has_orientation=getattr(obj, 'has_orientation', True)))
+    return BaseRoom(objects=objects, name=getattr(room, 'name', 'room'))
+
+
 class CognitiveMapManager:
-    """
-    Manages cognitive map creation, validation, and comparison.
-    Follows the same pattern as ExplorationManager and EvaluationManager.
-    """
+    """Evaluate cognitive map JSON against ground truth."""
     
     DEFAULT_COGMAP_SUMMARY = {
-        "avg_dir_sim": 0.0,
-        "avg_facing_sim": 0.0,
-        "avg_pos_sim": 0.0,
-        "avg_overall_sim": 0.0,
+        "global": {"dir": 0.0, "facing": 0.0, "pos": 0.0, "overall": 0.0},
+        "local": {"dir": 0.0, "facing": 0.0, "pos": 0.0, "overall": 0.0},
+        "rooms": {"dir": 0.0, "facing": 0.0, "pos": 0.0, "overall": 0.0},
+        "gates": {"conn_acc": 0.0},
         "extraction_success_rate": 0.0,
-        'n_successful': 0,
+        "n_successful": 0,
         "n_evaluations": 0,
     }
     
-    def __init__(self, cogmap_type: str = "standard", grid_size: int = 5):
-        """Initialize cognitive map manager with ground truth room."""
+    def __init__(self, cogmap_type: str = "standard", grid_size: int = 5, pos_allow_scale: bool = True):
+        """Initialize cognitive map manager."""
         self.turn_logs: List[CognitiveMapTurnLog] = []
         self.cogmap_summary = copy.deepcopy(self.DEFAULT_COGMAP_SUMMARY)
 
         self.config = {
             "cogmap_type": cogmap_type,
-            "grid_size": grid_size
+            "grid_size": grid_size,
+            "pos_allow_scale": bool(pos_allow_scale),
         }
+        # room_id -> first-entry gate name
+        self.entry_gate_by_room: dict[int, str] = {}
 
     def get_cognitive_map_instruction(self) -> str:
         assert self.config['cogmap_type'] == "standard", "Only standard format is supported"
         return COGMAP_INSTRUCTION_SHORTER.format(grid_size=self.config["grid_size"])
         
-    def evaluate_cognitive_map(self, assistant_response: str, gt_room: Room, gt_agent: Agent) -> Optional[Dict[str, float]]:
+    def evaluate_cognitive_map(self, assistant_response: str, gt_room: Room, gt_agent: Agent) -> Optional[Dict[str, Any]]:
+        """Extract JSON and evaluate global/local/rooms/gates.
+
+        All comparisons are between BaseRooms in the same coordinate system.
+        - Global: GT transformed using agent initial pose as origin
+        - Local: GT filtered by FOV and transformed using current pose
+        - Rooms: GT per-room transformed using entry gate as origin
+        - Gates: compare connectivity lists
         """
-        Evaluate cognitive map from assistant response against ground truth.
-        
-        Args:
-            assistant_response: Assistant response containing JSON cognitive map
-            
-        Returns:
-            Dictionary with similarity metrics or None if extraction fails
-        """
-        # Extract cognitive map from response
-        extracted = self._extract_json_and_create_room(assistant_response)
-        
-        if extracted is None or gt_room is None:
-            # Log failed extraction
-            self.turn_logs.append(CognitiveMapTurnLog())
+        json_data = self._extract_json_from_text(assistant_response)
+        if json_data is None or gt_room is None:
+            self.turn_logs.append(CognitiveMapTurnLog(extraction_success=False))
             return None
-        pred_room, pred_agent = extracted
-        # Compare with ground truth using provided agent if any
-        metrics = self._compare_rooms((pred_room, pred_agent), (gt_room.copy(), gt_agent))
-        
-        # Log successful evaluation
-        turn_log = CognitiveMapTurnLog(**metrics, extraction_success=True, pred_room_state=pred_room, pred_agent_state=pred_agent)
+
+        # Parse sections
+        pred_global_br, pred_local_br, pred_rooms_map, pred_gates = self._parse_predicted_maps(json_data)
+
+        # Build GT BaseRooms
+        gt_global_br = self._build_gt_global_baseroom(gt_room, gt_agent)
+        gt_local_br = self._build_gt_local_baseroom(gt_room, gt_agent)
+        gt_rooms_map = self._build_gt_room_baserooms(gt_room, gt_agent)
+
+        # Evaluate global (used for overall summary)
+        global_m = CogMapMetrics()
+        if pred_global_br is not None:
+            d, f, p, o = self._compare_baserooms(pred_global_br, gt_global_br)
+            global_m = CogMapMetrics(d, f, p, o)
+
+        # Evaluate local
+        local_m = CogMapMetrics()
+        if pred_local_br is not None:
+            d, f, p, o = self._compare_baserooms(pred_local_br, gt_local_br)
+            local_m = CogMapMetrics(d, f, p, o)
+
+        # Evaluate rooms (average across rooms that exist in both)
+        rooms_metrics: List[Tuple[float, float, float, float]] = []
+        for rid_str, pred_br in pred_rooms_map.items():
+            rid = int(rid_str)
+            gt_br = gt_rooms_map.get(rid)
+            if gt_br is None:
+                continue
+            rooms_metrics.append(self._compare_baserooms(pred_br, gt_br))
+        rooms_m = CogMapMetrics.average([CogMapMetrics(*m) for m in rooms_metrics])
+
+        # Evaluate gates connectivity
+        gate_acc = self._evaluate_gate_connections(pred_gates, gt_room)
+
+        metrics = {
+            "global": global_m.to_dict(),
+            "local": local_m.to_dict(),
+            "rooms": rooms_m.to_dict(),
+            "gates": {"conn_acc": gate_acc},
+        }
+
+        # Log all results (global fields kept for summary compatibility)
+        turn_log = CognitiveMapTurnLog(
+            global_metrics=global_m,
+            local_metrics=local_m,
+            rooms_metrics=rooms_m,
+            gates={"conn_acc": gate_acc},
+            extraction_success=True,
+            pred_room_state=pred_global_br,
+            # flat copies
+            dir_sim=global_m.dir,
+            facing_sim=global_m.facing,
+            pos_sim=global_m.pos,
+            overall_sim=global_m.overall,
+        )
         self.turn_logs.append(turn_log)
-        
         return metrics
             
     
     def get_cogmap_summary(self) -> Dict[str, Any]:
-        """Get cognitive map summary statistics."""
+        """Get cognitive map summary statistics (hierarchical)."""
         if not self.turn_logs:
-            return {**self.DEFAULT_COGMAP_SUMMARY, "n_evaluations": 0}
+            out = copy.deepcopy(self.DEFAULT_COGMAP_SUMMARY)
+            out["n_evaluations"] = 0
+            return out
         
-        # Calculate averages from turn logs
         successful_logs = [log for log in self.turn_logs if log.extraction_success]
         n_evaluations = len(self.turn_logs)
         n_successful = len(successful_logs)
+        success_rate = n_successful / n_evaluations if n_evaluations else 0.0
         
         if n_successful == 0:
-            return {
-                **self.DEFAULT_COGMAP_SUMMARY,
-                "n_evaluations": n_evaluations,
-                "extraction_success_rate": 0.0
-            }
-        
-        avg_directional = sum(log.dir_sim for log in successful_logs) / n_successful
-        avg_facing = sum(log.facing_sim for log in successful_logs) / n_successful  
-        avg_position = sum(log.pos_sim for log in successful_logs) / n_successful
-        avg_overall = sum(log.overall_sim for log in successful_logs) / n_successful
-        success_rate = n_successful / n_evaluations
+            out = copy.deepcopy(self.DEFAULT_COGMAP_SUMMARY)
+            out.update({"n_evaluations": n_evaluations, "extraction_success_rate": success_rate})
+            return out
+
+        g_avg = CogMapMetrics.average([l.global_metrics for l in successful_logs]).to_dict()
+        l_avg = CogMapMetrics.average([l.local_metrics for l in successful_logs]).to_dict()
+        r_avg = CogMapMetrics.average([l.rooms_metrics for l in successful_logs]).to_dict()
+        gate_avg = float(np.mean([l.gates.get("conn_acc", 0.0) for l in successful_logs]))
         
         return {
-            "avg_dir_sim": avg_directional,
-            "avg_facing_sim": avg_facing,
-            "avg_pos_sim": avg_position,
-            "avg_overall_sim": avg_overall,
+            "global": g_avg,
+            "local": l_avg,
+            "rooms": r_avg,
+            "gates": {"conn_acc": gate_avg},
             "extraction_success_rate": success_rate,
             "n_successful": n_successful,
-            "n_evaluations": n_evaluations
+            "n_evaluations": n_evaluations,
         }
     
     @staticmethod
     def aggregate_group_performance(cogmap_summaries: List[Dict]) -> Dict[str, float]:
-        """Calculate cognitive map performance for a group."""
+        """Average hierarchical metrics across summaries."""
         if not cogmap_summaries:
             return {
-                "overall_avg_dir_sim": 0.0,
-                "overall_avg_facing_sim": 0.0, 
-                "overall_avg_pos_sim": 0.0,
-                "overall_avg_overall_sim": 0.0,
+                "global": {"dir": 0.0, "facing": 0.0, "pos": 0.0, "overall": 0.0},
+                "local": {"dir": 0.0, "facing": 0.0, "pos": 0.0, "overall": 0.0},
+                "rooms": {"dir": 0.0, "facing": 0.0, "pos": 0.0, "overall": 0.0},
+                "gates": {"conn_acc": 0.0},
                 "overall_avg_extraction_success_rate": 0.0,
                 "overall_avg_evaluations": 0.0,
-                "overall_n_successful": 0
+                "overall_n_successful": 0,
             }
-        
-        return {
-            "overall_avg_dir_sim": sum(s.get('avg_dir_sim', 0) for s in cogmap_summaries) / len(cogmap_summaries),
-            "overall_avg_facing_sim": sum(s.get('avg_facing_sim', 0) for s in cogmap_summaries) / len(cogmap_summaries),
-            "overall_avg_pos_sim": sum(s.get('avg_pos_sim', 0) for s in cogmap_summaries) / len(cogmap_summaries),
-            "overall_avg_overall_sim": sum(s.get('avg_overall_sim', 0) for s in cogmap_summaries) / len(cogmap_summaries),
-            "overall_avg_extraction_success_rate": sum(s.get('extraction_success_rate', 0) for s in cogmap_summaries) / len(cogmap_summaries),
-            "overall_avg_evaluations": sum(s.get('n_evaluations', 0) for s in cogmap_summaries) / len(cogmap_summaries),
-            "overall_n_successful": sum(s.get('n_successful', 0) for s in cogmap_summaries)
+
+        def avg_key(path: List[str], default: float = 0.0) -> float:
+            vals = []
+            for s in cogmap_summaries:
+                cur = s
+                ok = True
+                for k in path:
+                    if isinstance(cur, dict) and k in cur:
+                        cur = cur[k]
+                    else:
+                        ok = False
+                        break
+                if ok and isinstance(cur, (int, float)):
+                    vals.append(float(cur))
+            return float(np.mean(vals)) if vals else default
+
+        out = {
+            "global": {m: avg_key(["global", m]) for m in ("dir", "facing", "pos", "overall")},
+            "local": {m: avg_key(["local", m]) for m in ("dir", "facing", "pos", "overall")},
+            "rooms": {m: avg_key(["rooms", m]) for m in ("dir", "facing", "pos", "overall")},
+            "gates": {"conn_acc": avg_key(["gates", "conn_acc"])},
+            "overall_avg_extraction_success_rate": avg_key(["extraction_success_rate"]),
+            "overall_avg_evaluations": avg_key(["n_evaluations"]),
+            "overall_n_successful": sum(int(s.get("n_successful", 0)) for s in cogmap_summaries),
         }
+        return out
     
 
-
-
-    # =============================== Helper Functions =============================== 
-
-    def _extract_json_and_create_room(self, model_response: str, room_name: str = "extracted_room") -> Optional[tuple[BaseRoom, Agent]]:
-        """Extract JSON from model response and create (Room, Agent)."""
-        json_data = self._extract_json_from_text(model_response)
-        if json_data is None:
-            return None
-        return self._create_room_from_json(json_data, room_name)
+    # =============================== Parsing helpers =============================== 
     
     def _extract_json_from_text(self, text: str) -> Optional[Dict[str, Any]]:
         """Extract JSON content from text."""
@@ -286,153 +398,222 @@ class CognitiveMapManager:
                     continue
         return None
     
-    def _create_room_from_json(self, json_data: Dict[str, Any], room_name: str = "extracted_room") -> Optional[tuple[BaseRoom, Agent]]:
-        """Create (Room, Agent) from JSON data."""
+    def _parse_section_to_baseroom(self, mapping: Dict[str, Any], room_name: str) -> Optional[BaseRoom]:
+        """Parse a single section (object_name -> attrs) to BaseRoom.
+        Keeps 'agent' as a regular object for evaluation symmetry.
+        """
         try:
-            objects = []
             direction_mapping = {
                 "north": np.array([0, 1]),
                 "south": np.array([0, -1]),
                 "east": np.array([1, 0]),
                 "west": np.array([-1, 0])
             }
-            agent = Agent(name="agent")
-            
-            for obj_name, obj_info in json_data.items():
-                if 'position' not in obj_info:
+            objects: List[Object] = []
+            for obj_name, obj_info in mapping.items():
+                if not isinstance(obj_info, dict):
                     continue
-                position = obj_info['position']
+                position = obj_info.get('position')
                 if not isinstance(position, list) or len(position) != 2:
                     continue
                 pos = np.array([float(position[0]), float(position[1])])
                 facing = obj_info.get('facing', 'north')
-                has_orientation = True
                 if isinstance(facing, str):
-                    facing = facing.lower()
-                    ori = direction_mapping.get(facing, direction_mapping['north'])
+                    ori = direction_mapping.get(facing.lower(), direction_mapping['north'])
+                    has_orientation = True
                 else:
-                    has_orientation = False
                     ori = np.array([0, 0])
-                if obj_name.lower() in ['agent', 'you', 'player']:
-                    agent = Agent(name='agent', pos=pos, ori=ori, has_orientation=has_orientation)
-                else:
-                    obj = Object(name=obj_name, pos=pos, ori=ori, has_orientation=has_orientation)
-                    objects.append(obj)
-            if not objects:
+                    has_orientation = False
+                objects.append(Object(name=str(obj_name), pos=pos, ori=ori, has_orientation=has_orientation))
+            if len(objects) == 0:
                 return None
-
-            room = BaseRoom(objects=objects, name=room_name)
-            return room, agent
-            
-        except Exception as e:
-            print(f"Error creating Room object: {e}")
+            return BaseRoom(objects=objects, name=room_name)
+        except Exception:
             return None
 
-    @staticmethod
-    def _transform_object_using_anchor(anchor: Object, target: Object) -> Object:
-        """Set origin to anchor.pos and +Y to anchor.ori; return transformed copy of target."""
-        target = target.copy()
-        ori_to_R = {
-            (0, 1): np.array([[1, 0], [0, 1]]),
-            (1, 0): np.array([[0, 1], [-1, 0]]),
-            (0, -1): np.array([[-1, 0], [0, -1]]),
-            (-1, 0): np.array([[0, -1], [1, 0]]),
-        }
-        R = ori_to_R.get(tuple(anchor.ori.tolist()), ori_to_R[(0, 1)])
-        p = (R @ (target.pos.astype(float) - anchor.pos.astype(float))).astype(float)
-        o = target.ori
-        if target.has_orientation:
-            o = (R @ target.ori.astype(float)).astype(int)
-        target.pos, target.ori = p, o
-        return target
-    
-    def _compare_rooms(self, pred: tuple[BaseRoom, Agent], gt: tuple[BaseRoom, Agent]) -> Dict[str, float]:
-        """Compare predicted and ground truth (room, agent)."""
-        anchor = Object(name="anchor", pos=gt[1].init_pos, ori=gt[1].init_ori)
-        pred_object_lists = [self._transform_object_using_anchor(anchor, obj) for obj in (pred[0].objects + [pred[1]])]
-        gt_object_lists = [self._transform_object_using_anchor(anchor, obj) for obj in (gt[0].objects + [gt[1]])]
+    def _parse_predicted_maps(self, json_data: Dict[str, Any]) -> Tuple[Optional[BaseRoom], Optional[BaseRoom], Dict[str, BaseRoom], Dict[str, Any]]:
+        """Return (global_br, local_br, rooms_map, gates_dict)."""
+        # If no explicit 'global', assume flat map is the global section
+        if any(k in json_data for k in ("global", "local", "rooms", "gates")):
+            global_sec = json_data.get('global')
+        else:
+            global_sec = json_data
+        pred_global_br = self._parse_section_to_baseroom(global_sec, "pred_global") if isinstance(global_sec, dict) else None
 
-        dir_sim = self._calculate_dir_sim(pred_object_lists, gt_object_lists)
-        facing_sim = self._calculate_facing_sim(pred_object_lists, gt_object_lists)
-        pos_sim = self._calculate_pos_sim(pred_object_lists, gt_object_lists)
-        
+        local_sec = json_data.get('local') if isinstance(json_data, dict) else None
+        pred_local_br = self._parse_section_to_baseroom(local_sec, "pred_local") if isinstance(local_sec, dict) else None
+
+        rooms_map: Dict[str, BaseRoom] = {}
+        rooms_sec = json_data.get('rooms') if isinstance(json_data, dict) else None
+        if isinstance(rooms_sec, dict):
+            for rid, sec in rooms_sec.items():
+                if isinstance(sec, dict):
+                    br = self._parse_section_to_baseroom(sec, f"pred_room_{rid}")
+                    if br is not None:
+                        rooms_map[str(rid)] = br
+
+        gates_sec = json_data.get('gates') if isinstance(json_data, dict) else None
+        gates_dict = gates_sec if isinstance(gates_sec, dict) else {}
+        return pred_global_br, pred_local_br, rooms_map, gates_dict
+
+    # =============================== GT constructors =============================== 
+
+    def _baseroom_from_gt(self, gt_room: Room, gt_agent: Agent) -> BaseRoom:
+        objs: List[Object] = []
+        # include all non-gate objects
+        for o in getattr(gt_room, 'objects', []):
+            objs.append(Object(name=o.name, pos=o.pos.copy(), ori=o.ori.copy(), has_orientation=getattr(o, 'has_orientation', True)))
+        # include agent
+        objs.append(Object(name='agent', pos=gt_agent.pos.copy(), ori=gt_agent.ori.copy(), has_orientation=True))
+        return BaseRoom(objects=objs, name='gt')
+
+    def _build_gt_global_baseroom(self, gt_room: Room, gt_agent: Agent) -> BaseRoom:
+        raw = self._baseroom_from_gt(gt_room, gt_agent)
+        return _transform_baseroom(raw, gt_agent.init_pos, gt_agent.init_ori)
+
+    def _build_gt_local_baseroom(self, gt_room: Room, gt_agent: Agent) -> BaseRoom:
+        half_fov = float(getattr(DegreeRel, 'FIELD_OF_VIEW', 90.0)) / 2.0
+        objs: List[Object] = [Object(name='agent', pos=np.array([0.0, 0.0]), ori=np.array([0, 1]), has_orientation=True)]
+        for o in getattr(gt_room, 'objects', []):
+            deg = DegreeRel.from_positions(o.pos, gt_agent.pos, gt_agent.ori).degree
+            if abs(deg) <= half_fov + 1e-3:
+                p = transform_point(o.pos, gt_agent.pos, gt_agent.ori)
+                o_rel = transform_ori(o.ori, gt_agent.ori) if getattr(o, 'has_orientation', True) else o.ori
+                objs.append(Object(name=o.name, pos=p, ori=o_rel, has_orientation=getattr(o, 'has_orientation', True)))
+        return BaseRoom(objects=objs, name='gt_local')
+
+    def _build_gt_room_baserooms(self, gt_room: Room, gt_agent: Agent) -> Dict[int, BaseRoom]:
+        out: Dict[int, BaseRoom] = {}
+        if not isinstance(gt_room, Room):
+            return out
+        for rid in sorted(getattr(gt_room, 'objects_by_room', {}).keys()):
+            gate_name = self.entry_gate_by_room.get(int(rid))
+            if gate_name is None:
+                for g in getattr(gt_room, 'gates', []):
+                    if isinstance(g.room_id, (list, tuple)) and int(rid) in [int(x) for x in g.room_id]:
+                        gate_name = g.name
+                        break
+            if gate_name is None:
+                continue
+            gate = next((g for g in getattr(gt_room, 'gates', []) if g.name == gate_name), None)
+            if gate is None:
+                continue
+            anchor_pos = gate.pos
+            anchor_ori = gate.get_ori_for_room(int(rid))
+            objs: List[Object] = []
+            # agent in this room?
+            if int(getattr(gt_agent, 'room_id', -999)) == int(rid):
+                a_p = transform_point(gt_agent.pos, anchor_pos, anchor_ori)
+                a_o = transform_ori(gt_agent.ori, anchor_ori)
+                objs.append(Object(name='agent', pos=a_p, ori=a_o, has_orientation=True))
+            # objects in this room
+            for name in gt_room.objects_by_room.get(int(rid), []):
+                o = gt_room.get_object_by_name(name)
+                p = transform_point(o.pos, anchor_pos, anchor_ori)
+                o_rel = transform_ori(o.ori, anchor_ori) if getattr(o, 'has_orientation', True) else o.ori
+                objs.append(Object(name=o.name, pos=p, ori=o_rel, has_orientation=getattr(o, 'has_orientation', True)))
+            out[int(rid)] = BaseRoom(objects=objs, name=f'gt_room_{rid}')
+        return out
+
+    # =============================== Room comparisons =============================== 
+
+    def _compare_baserooms(self, pred_room: BaseRoom, gt_room: BaseRoom) -> Tuple[float, float, float, float]:
+        dir_sim = self._calculate_dir_sim(pred_room, gt_room)
+        facing_sim = self._calculate_facing_sim(pred_room, gt_room)
+        pos_sim = self._calculate_pos_sim(pred_room, gt_room, allow_scale=bool(self.config.get('pos_allow_scale', True)))
         overall_sim = 0.5 * dir_sim + 0.2 * facing_sim + 0.3 * pos_sim
-        
-        return {
-            "dir_sim": dir_sim,
-            "facing_sim": facing_sim,
-            "pos_sim": pos_sim,
-            "overall_sim": overall_sim
-        }
-    
-    def _calculate_dir_sim(self, pred_object_lists: List[Object], gt_object_lists: List[Object]) -> float:
-        """
-        Compute similarity between predicted and ground truth room based on directional relationships.
-        """
-        pred = {o.name: o for o in pred_object_lists}
+        return dir_sim, facing_sim, pos_sim, overall_sim
+
+    def _calculate_dir_sim(self, pred_room: BaseRoom, gt_room: BaseRoom) -> float:
+        """Pairwise allocentric bin agreement over shared object names."""
+        pred = {o.name: o for o in pred_room.objects}
+        gt = {o.name: o for o in gt_room.objects}
+        names = sorted(set(pred.keys()).intersection(set(gt.keys())))
+        if len(names) < 2:
+            return 0.0
+        bin_system = CardinalBinsAllo()
         tot = cor = 0.0
-        for i in range(len(gt_object_lists)):
-            for j in range(i + 1, len(gt_object_lists)):
-                a, b = gt_object_lists[i], gt_object_lists[j]
-                gt_rel = PairwiseRelationship.get_direction(a.pos, b.pos)
-                p1, p2 = pred.get(a.name), pred.get(b.name)
-                if p1 and p2:
-                    pr = PairwiseRelationship.get_direction(p1.pos, p2.pos)
-                    if (pr.horiz, pr.vert) == (gt_rel.horiz, gt_rel.vert): cor += 1.0
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                a, b = gt[names[i]], gt[names[j]]
+                gt_rel = PairwiseRelationshipDiscrete.relationship(a.pos, b.pos, None, bin_system)
+                p1, p2 = pred[names[i]], pred[names[j]]
+                    pr = PairwiseRelationshipDiscrete.relationship(p1.pos, p2.pos, None, bin_system)
+                    if pr.direction.bin_id == gt_rel.direction.bin_id:
+                        cor += 1.0
                 tot += 1.0
         return cor / tot if tot else 0.0
 
-    def _calculate_facing_sim(self, pred_object_lists: List[Object], gt_object_lists: List[Object]) -> float:
-        pred = {o.name: o for o in pred_object_lists}
+    def _calculate_facing_sim(self, pred_room: BaseRoom, gt_room: BaseRoom) -> float:
+        pred = {o.name: o for o in pred_room.objects}
+        gt = {o.name: o for o in gt_room.objects}
+        names = sorted(set(pred.keys()).intersection(set(gt.keys())))
         tot = cor = 0.0
-        for g in gt_object_lists:
-            if not getattr(g, "has_orientation", False): 
+        for name in names:
+            g = gt[name]
+            if not getattr(g, 'has_orientation', False):
                 continue
-            p = pred.get(g.name)
+            p = pred.get(name)
             if p is None: 
-                return 0.0
+                continue
             tot += 1.0
             if np.array_equal(p.ori, g.ori): 
                 cor += 1.0
         return cor / tot if tot else 0.0
 
+    def _calculate_pos_sim(self, pred_room: BaseRoom, gt_room: BaseRoom, allow_scale: bool = True) -> float:
+        """Position similarity with optional scale alignment.
 
-    
-    def _calculate_pos_sim(self, pred_object_lists: List[Object], gt_object_lists: List[Object]) -> float:
+        Given matched points P_pred and P_gt (same name ordering):
+        - If allow_scale: find s* that minimizes ||s*·P_pred − P_gt|| in least squares
+          s* = (Σ r_i·e_i) / (Σ e_i·e_i), where e_i from pred, r_i from gt
+        - RMSE = sqrt(mean(||s*·e_i − r_i||^2))
+        - Normalize by L = sqrt(mean(||r_i||^2)) and convert to similarity via exp(−RMSE/L)
         """
-        Compute similarity between predicted and ground truth room.
-
-        Formulas:
-        s*  = (∑_i r_i·e_i) / (∑_i e_i·e_i)
-        RMSE = (1/N) ∑_i ‖(s*)·e_i – r_i‖²
-        L_r  = (1/N) ∑_i ‖r_i‖²
-        ERR  = RMSE / L_r
-        similarity = exp(−rmse/L)
-
-        Args:
-            pred_object_lists (List[Object]): predicted object lists
-            gt_object_lists (List[Object]): ground truth object lists
-
-        Returns:
-            similarity (float): similarity between predicted and ground truth room.
-        """
-        pred = {o.name: o for o in pred_object_lists}
-        gt_names = [o.name for o in gt_object_lists]
-        if any(n not in pred for n in gt_names):  # TODO deal with incomplete objects
+        pred = {o.name: o for o in pred_room.objects}
+        gt = {o.name: o for o in gt_room.objects}
+        names = sorted(set(pred.keys()).intersection(set(gt.keys())))
+        if len(names) == 0:
             return 0.0
-
-        P1 = np.array([pred[n].pos for n in gt_names])
-        P2 = np.array([o.pos for o in gt_object_lists])
-
-        # scale-only alignment s = argmin ||s·P1 − P2||
+        P1 = np.array([pred[n].pos for n in names], dtype=float)
+        P2 = np.array([gt[n].pos for n in names], dtype=float)
+        if allow_scale:
         den = float((P1 * P1).sum())
         if den == 0.0: 
             return 0.0
         scale = float((P2 * P1).sum()) / den
+        else:
+            scale = 1.0
         rmse = np.sqrt(((P1 * scale - P2) ** 2).sum(axis=1).mean())
         L = np.sqrt((P2 ** 2).sum(axis=1).mean())
         return float(np.exp(-rmse / L)) if L > 0 else 0.0
-    
+
+    # =============================== Room entry tracking =============================== 
+    def register_room_entry(self, room_id: int, gate_name: str) -> None:
+        """Record the first gate used to enter a room."""
+        rid = int(room_id)
+        if rid not in self.entry_gate_by_room:
+            self.entry_gate_by_room[rid] = gate_name
+
+    # =============================== Gates evaluation =============================== 
+    def _evaluate_gate_connections(self, pred_gates: Dict[str, Any], gt_room: Room) -> float:
+        if not isinstance(gt_room, Room):
+            return 0.0
+        gt_map: Dict[str, List[int]] = {k: [int(x) for x in v] for k, v in getattr(gt_room, 'rooms_by_gate', {}).items()}
+        if not gt_map:
+            return 0.0
+        correct = tot = 0
+        for gate_name, gt_conn in gt_map.items():
+            tot += 1
+            pred = pred_gates.get(gate_name, {}) if isinstance(pred_gates, dict) else {}
+            pred_conn = pred.get('connects', []) if isinstance(pred, dict) else []
+            try:
+                pred_conn_int = sorted([int(x) for x in pred_conn])
+            except Exception:
+                pred_conn_int = []
+            if sorted([int(x) for x in gt_conn]) == pred_conn_int:
+                correct += 1
+        return float(correct) / float(tot) if tot > 0 else 0.0
 
 
 if __name__ == "__main__":
