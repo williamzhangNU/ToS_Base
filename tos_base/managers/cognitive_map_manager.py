@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 import copy
 
 from ..core.room import Room, BaseRoom
-from ..core.object import Object, Agent
+from ..core.object import Object, Agent, Gate
 from ..core.relationship import (
     PairwiseRelationshipDiscrete,
     CardinalBinsAllo,
@@ -35,14 +35,12 @@ Keep a concise multi-map JSON of the scene on a {grid_size}×{grid_size} grid.
 - Global: origin [0,0] and +Y is your initial facing direction
 - Local: origin at your current pose; +Y is forward
 - Rooms: each room uses its entry gate as origin; +Y points into that room
-- Gates: list connections as room id pairs
+- Gates: list connections as room id pairs (gate_name: { connects: [room_id_a, room_id_b] })
 
 Fields:
 - position: [x, y] in the map’s coordinate system (integers or integer-like)
 - facing: one of "north|south|east|west" (omit or set unknown if not applicable)
 - confidence: "high" (certain), "medium" (estimated), "low" (unknown)
-- rooms: map of room_id to its objects in that room’s coordinates
-- gates: { gate_name: { connects: [room_id_a, room_id_b] } }
 
 Always output the cognitive map JSON first in your thinking. Include at least `global`; `local`, `rooms`, and `gates` are optional.
 
@@ -61,7 +59,7 @@ Example:
     "1": {"sofa": {"position": [1, 0], "facing": "south", "confidence": "high"}}
   },
   "gates": {
-    "gate_a": {"connects": [1, 2]}
+    "door_0": {"connects": [1, 2]}
   }
 }
 ```
@@ -78,9 +76,7 @@ Example:
 {
   "global": {
     "agent": {"position": [0, 0], "facing": "north", "confidence": "high"},
-    "table": {"position": [2, 1], "facing": "east", "confidence": "medium"}
   },
-  "gates": {"gate_a": {"connects": [1, 2]}}
 }
 ```
 """
@@ -96,9 +92,7 @@ Example:
 {
   "global": {
     "agent": {"position": [0, 0], "facing": "north", "confidence": "high"},
-    "lamp": {"position": [-1, 3], "facing": "west", "confidence": "medium"}
   },
-  "gates": {"gate_a": {"connects": [1, 2]}}
 }
 ```
 """
@@ -538,9 +532,9 @@ class CognitiveMapManager:
                 a, b = gt[names[i]], gt[names[j]]
                 gt_rel = PairwiseRelationshipDiscrete.relationship(a.pos, b.pos, None, bin_system)
                 p1, p2 = pred[names[i]], pred[names[j]]
-                    pr = PairwiseRelationshipDiscrete.relationship(p1.pos, p2.pos, None, bin_system)
-                    if pr.direction.bin_id == gt_rel.direction.bin_id:
-                        cor += 1.0
+                pr = PairwiseRelationshipDiscrete.relationship(p1.pos, p2.pos, None, bin_system)
+                if pr.direction.bin_id == gt_rel.direction.bin_id:
+                    cor += 1.0
                 tot += 1.0
         return cor / tot if tot else 0.0
 
@@ -578,10 +572,10 @@ class CognitiveMapManager:
         P1 = np.array([pred[n].pos for n in names], dtype=float)
         P2 = np.array([gt[n].pos for n in names], dtype=float)
         if allow_scale:
-        den = float((P1 * P1).sum())
-        if den == 0.0: 
-            return 0.0
-        scale = float((P2 * P1).sum()) / den
+            den = float((P1 * P1).sum())
+            if den == 0.0: 
+                return 0.0
+            scale = float((P2 * P1).sum()) / den
         else:
             scale = 1.0
         rmse = np.sqrt(((P1 * scale - P2) ** 2).sum(axis=1).mean())
@@ -617,4 +611,66 @@ class CognitiveMapManager:
 
 
 if __name__ == "__main__":
-    pass
+    # Minimal, explicit test using the provided layout
+    # Build objects (non-gates)
+    objs = [
+        Object('refrigerator', np.array([12, 7]), np.array([1, 0])),
+        Object('chair', np.array([8, 2]), np.array([1, 0])),
+        Object('bookshelf', np.array([10, 8]), np.array([0, 1])),
+        Object('whiteboard', np.array([6, 6]), np.array([0, -1])),
+        Object('scanner', np.array([11, 4]), np.array([1, 0])),
+        Object('microwave', np.array([10, 7]), np.array([0, -1])),
+        Object('monitor', np.array([13, 10]), np.array([-1, 0])),
+        Object('printer', np.array([10, 2]), np.array([0, 1])),
+    ]
+    # Gates
+    gates = [
+        Gate(
+            name='door_0', pos=np.array([7, 5]), ori=np.array([1, 0]),
+            room_id=[2, 3], ori_by_room={2: np.array([-1, 0]), 3: np.array([1, 0])}
+        ),
+        Gate(
+            name='door_1', pos=np.array([11, 6]), ori=np.array([0, 1]),
+            room_id=[3, 1], ori_by_room={3: np.array([0, -1]), 1: np.array([0, 1])}
+        ),
+    ]
+    # Mask (only mark required cells)
+    mask = np.zeros((15, 15), dtype=np.int8)
+    for (x, y) in [(12, 7), (10, 8), (10, 7), (13, 10)]:
+        mask[x, y] = 1
+    for (x, y) in [(6, 6)]:
+        mask[x, y] = 2
+    for (x, y) in [(8, 2), (11, 4), (10, 2)]:
+        mask[x, y] = 3
+    room = Room(objects=objs, mask=mask, name='room', gates=gates)
+
+    agent = Agent(
+        name='agent', pos=np.array([13, 9]), ori=np.array([0, 1]),
+        room_id=1, init_pos=np.array([13, 9]), init_ori=np.array([0, 1]), init_room_id=1
+    )
+
+    print(room)
+    print(room.gates)
+    print(agent)
+
+    # Assistant response with correct global positions (agent origin, +Y forward)
+    assistant_response = (
+        """```json
+{
+  "global": {
+    "agent": {"position": [0, 0], "facing": "north", "confidence": "high"},
+    "monitor": {"position": [0, 1], "facing": "west", "confidence": "high"},
+    "refrigerator": {"position": [-1, -2], "facing": "east", "confidence": "high"}
+  },
+  "gates": {
+    "door_0": {"connects": [2, 3]},
+    "door_1": {"connects": [3, 1]}
+  }
+}
+```"""
+    )
+
+    mgr = CognitiveMapManager()
+    metrics = mgr.evaluate_cognitive_map(assistant_response, room, agent)
+    print("metrics:", metrics)
+    print("summary:", mgr.get_cogmap_summary())

@@ -394,13 +394,15 @@ class AnalystAgentProxy(AgentProxy):
     """Analyst Agent: observe, then greedily query to reduce discrete (cardinal-bin) relationships."""
 
     def __init__(self, room: Room, agent: Agent, grid_size: int | None = None,
-                 max_queries: int = 16, rel_threshold: int = 0, eval_samples: int = 30):
+                 max_queries: int = 16, rel_threshold: int = 0, eval_samples: int = 30,
+                 delegate: str = 'oracle'):
         super().__init__(room, agent)
         g = (max(self.room.mask.shape) if getattr(self.room, 'mask', None) is not None else 10)
         self.solver = SpatialSolver([o.name for o in self.room.all_objects] + ['initial_pos'], grid_size=(g if grid_size is None else grid_size))
         self.max_queries = int(max_queries)
         self.rel_threshold = int(rel_threshold)
         self.eval_samples = int(eval_samples)
+        self.delegate = (delegate or 'oracle').lower()
 
     def _ingest_observations(self) -> None:
         for i, t in enumerate(self.turns):
@@ -469,8 +471,16 @@ class AnalystAgentProxy(AgentProxy):
 
     def run(self) -> List[Turn]:
         """Run analyst: observe with oracle, then query."""
-        # Overview observe
-        delegate = OracleAgentProxy(self.room, self.agent)
+        # Overview observe via selected delegate
+        mapping = {
+            'oracle': OracleAgentProxy,
+            'strategist': StrategistAgentProxy,
+            'inquisitor': InquisitorAgentProxy,
+            'greedy_inquisitor': GreedyInquisitorAgentProxy,
+            'greedy': GreedyInquisitorAgentProxy,
+        }
+        DelegateCls = mapping.get(self.delegate, OracleAgentProxy)
+        delegate = DelegateCls(self.room, self.agent)
         d_turns = delegate.run()
         self.mgr, self.room, self.agent = delegate.mgr, delegate.mgr.exploration_room, delegate.mgr.agent
         self.turns = list(d_turns[:-1]) if d_turns else [] # drop final Term()
@@ -486,7 +496,7 @@ class AnalystAgentProxy(AgentProxy):
         self._add_turn([self.mgr.execute_success_action(TermAction())])
         return self.turns
 
-def get_agent_proxy(name: str, room: Room, agent: Agent) -> AgentProxy:
+def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = None) -> AgentProxy:
     name = (name or 'oracle').lower()
     mapping = {
         'oracle': OracleAgentProxy,
@@ -495,13 +505,15 @@ def get_agent_proxy(name: str, room: Room, agent: Agent) -> AgentProxy:
         'greedy_inquisitor': GreedyInquisitorAgentProxy,
         'analyst': AnalystAgentProxy,
     }
+    if name == 'analyst':
+        return mapping['analyst'](room, agent, delegate=(delegate or 'oracle'))
     return mapping.get(name, OracleAgentProxy)(room, agent)
 
 
 if __name__ == "__main__":
     from ..utils.room_utils import RoomGenerator, RoomPlotter
     from tqdm import tqdm
-    for seed in tqdm(range(2, 3)):
+    for seed in tqdm(range(9, 10)):
         room, agent = RoomGenerator.generate_room(
             room_size=[15, 15],
             n_objects=8,
@@ -519,8 +531,8 @@ if __name__ == "__main__":
         # proxy = OracleAgentProxy(room, agent)        # node_seeker (complete nodes)
         # proxy = StrategistAgentProxy(room, agent)    # node_sweeper
         # proxy = InquisitorAgentProxy(room, agent)    # edge_seeker (complete edges)
-        proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
-        # proxy = AnalystAgentProxy(room, agent)
+        # proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
+        proxy = AnalystAgentProxy(room, agent, delegate='greedy_inquisitor')
         proxy.run()
         print(proxy.to_text())
         print(proxy.mgr.get_exp_summary())
