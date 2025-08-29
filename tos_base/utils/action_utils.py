@@ -18,7 +18,7 @@ def action_results_to_text(action_results: List[ActionResult], placeholder: str 
     messages = []
     for result in action_results:
         # Check if this is an observe action result
-        if placeholder and result.action_type == 'observe':
+        if placeholder and 'observe' in result.action_type:
             # Replace observe result with image placeholder
             messages.append(f"You observe: {placeholder}.")
         else:

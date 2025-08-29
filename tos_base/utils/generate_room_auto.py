@@ -1015,7 +1015,7 @@ def _verify_connectivity(grid: np.ndarray, num_rooms: int) -> bool:
     queue = [start_pos]
     visited_positions = set([start_pos])
 
-    directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]  # up, down, left, right
+    directions = [(0, 1), (0, -1), (-1, 0), (1, 0)]  # up, down, left, right
 
     while queue:
         y, x = queue.pop(0)

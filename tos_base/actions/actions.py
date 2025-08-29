@@ -24,8 +24,7 @@ Actions: [<movement_1>, <movement_2>, ... (movement) , <movement_n>, <final_acti
 
 Rules:
 - You may perform zero, one or more movement actions.
-- Either:
-  - Provide **exactly one** final action (and it **must be last**)
+- Provide **exactly one** final action (and it **must be last**)
 - Observe action only reports from your current position. If you move multiple times, the final Observe action gives the view only from your last position.
 - Actions execute in order. Field of view: {field_of_view}°.
 
