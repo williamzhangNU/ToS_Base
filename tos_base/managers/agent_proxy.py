@@ -271,13 +271,12 @@ class AgentProxy:
         self._add_turn([self.mgr.execute_success_action(TermAction())])
         return self.turns
 
-    def to_text(self) -> str:
+    def to_text(self, image_placeholder = None) -> str:
         lines: List[str] = []
         for i, t in enumerate(self.turns, 1):
-            lines.append(f"{i}. {action_results_to_text(t.actions)}")
+            lines.append(f"{i}. {action_results_to_text(t.actions, image_placeholder)}")
         return "\n".join(lines)
-
-
+    
 class OracleAgentProxy(AgentProxy):
     """Oracle Agent: greedy rotations to reveal all nodes (knows everything about nodes)."""
 

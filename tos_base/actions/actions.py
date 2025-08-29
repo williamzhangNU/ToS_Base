@@ -20,13 +20,11 @@ Available Actions:
 {actions}
 
 Answer format:
-Actions: [<movement_1>, <movement_2>, ... (movement) , <movement_n>, <final_action>] or [<query_1>, <query_2>, ... (query) , <query_n>]
+Actions: [<movement_1>, <movement_2>, ... (movement) , <movement_n>, <final_action>]
 
 Rules:
 - You may perform zero, one or more movement actions.
-- Either:
-  - Provide **exactly one** final action (and it **must be last**), OR
-  - Provide one or more **query actions only** (no movement/final actions).
+- Provide **exactly one** final action (and it **must be last**)
 - Observe action only reports from your current position. If you move multiple times, the final Observe action gives the view only from your last position.
 - Actions execute in order. Field of view: {field_of_view}°.
 
@@ -413,9 +411,7 @@ class QueryAction(BaseAction):
         })
 
     @staticmethod
-    def is_final() -> bool: return False
-    @staticmethod
-    def is_query() -> bool: return True
+    def is_final() -> bool: return True
     def __repr__(self): return f"Query({self.obj})"
 
 
@@ -434,15 +430,13 @@ ACTION_CLASSES = [
 class ActionSequence:
     """Sequence of actions for spatial exploration"""
     
-    def __init__(self, motion_actions: List[BaseAction] = None, final_action: BaseAction = None, query_actions: List[BaseAction] = None):
+    def __init__(self, motion_actions: List[BaseAction] = None, final_action: BaseAction = None):
         self.motion_actions = motion_actions or []
         self.final_action = final_action
-        self.query_actions = query_actions or []
     
     def __repr__(self):
         motions = ", ".join(str(action) for action in self.motion_actions)
-        queries = ", ".join(str(action) for action in self.query_actions)
-        return f"ActionSequence(motions=[{motions}], queries=[{queries}], final={self.final_action})"
+        return f"ActionSequence(motions=[{motions}], final={self.final_action})"
 
     @classmethod
     def parse(cls, action_str: str) -> Optional['ActionSequence']:
@@ -461,12 +455,6 @@ class ActionSequence:
             if not act:
                 return None
             parsed_actions.append(act)
-
-        # If any query action present, enforce query-only sequence
-        if any(a.is_query() for a in parsed_actions):
-            if not all(a.is_query() for a in parsed_actions):
-                return None
-            return cls([], None, parsed_actions)
 
         # Otherwise, standard: zero or more motions then exactly one final
         motions, final_action = [], None
@@ -495,28 +483,24 @@ class ActionSequence:
     @staticmethod
     def get_usage_instructions() -> str:
         """Get usage instructions for action sequences"""
-        motion_actions = [cls for cls in ACTION_CLASSES if not cls.is_final() and not cls.is_query()]
+        motion_actions = [cls for cls in ACTION_CLASSES if not cls.is_final()]
         final_actions = [cls for cls in ACTION_CLASSES if cls.is_final()]
-        query_actions = [cls for cls in ACTION_CLASSES if cls.is_query()]
         
         action_desc = (
             "Movement Actions:\n" +
             "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in motion_actions) +
             "\n\n" +
             "Final Actions:\n" +
-            "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in final_actions) +
-            "\n\n" +
-            "Query Actions (use alone, can list multiple):\n" +
-            "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in query_actions)
+            "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in final_actions)
         )
         examples = (
             f"Valid Example:\nActions: [Move(table), Rotate(90), Observe()]\n\n" +
             f"Valid Example:\nActions: [Observe()]\n\n" +
-            f"Valid Example (queries only):\nActions: [Query(table), Query(lamp)]\n\n" +
+            f"Valid Example:\nActions: [Move(table), Rotate(90), Query(a)]\n\n" +
+            f"Valid Example:\nActions: [Query(a)]\n\n" +
             f"Invalid Example (no final action):\nActions: [Move(table)]\n\n"+
             f"Invalid Example (more than one final action):\nActions: [Observe(), Rotate(90), Observe()]\n\n" +
-            f"Invalid Example (termination with other actions):\nActions: [Move(table), Term()]\n\n" +
-            f"Invalid Example (mixing queries with others):\nActions: [Move(table), Query(a)]\n\n"
+            f"Invalid Example (termination with other actions):\nActions: [Move(table), Term()]\n\n"
         )
         
         return ACTION_INSTRUCTION.format(

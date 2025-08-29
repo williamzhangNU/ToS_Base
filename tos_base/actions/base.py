@@ -131,11 +131,6 @@ class BaseAction(ABC):
         """Check if this is a termination action"""
         return False
     
-    @staticmethod
-    def is_query() -> bool:
-        """Check if this is a query action (can form a query-only sequence)"""
-        return False
-    
     @classmethod
     def parse(cls, action_str: str):
         """Parse action string and return instance if matches"""
