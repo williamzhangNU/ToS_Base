@@ -515,11 +515,11 @@ if __name__ == "__main__":
     from tqdm import tqdm
     for seed in tqdm(range(9, 10)):
         room, agent = RoomGenerator.generate_room(
-            room_size=[15, 15],
-            n_objects=8,
+            room_size=[10, 10],
+            n_objects=3,
             np_random=np.random.default_rng(seed),
-            level=2,
-            main=5
+            level=0,
+            main=6
         )
         print(room)
         print(room.mask)

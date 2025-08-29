@@ -58,8 +58,8 @@ class RotEvaluationTask(BaseEvaluationTask):
         assert len(pts) >= 3, "Need at least 3 objects"
         start = int(self.np_random.integers(0, len(pts)))
         names, angs = self._greedy_from(pts, start, eps)
-        assert len(names) >= 2, "Increase object count or decrease angle_eps"
-        return names[:self.np_random.integers(2, min(len(names), 7) + 1)]
+        assert len(names) >= 3, "Increase object count or decrease angle_eps"
+        return names[:self.np_random.integers(3, min(len(names), 7) + 1)]
 
     def _corrupt_seq(self, seq: List[str]) -> List[str]:
         """Make a wrong sequence from an independently valid one (do NOT touch correct)."""
@@ -91,7 +91,7 @@ class RotEvaluationTask(BaseEvaluationTask):
     # ---------- main ----------
     def generate_question(self) -> str:
         self.turn_direction = self.np_random.choice(["clockwise", "counterclockwise"])
-        self.angle_eps = float(self.config.get("angle_eps", 30.0))
+        self.angle_eps = float(self.config.get("angle_eps", 15.0))
 
         correct_seq = self._gen_valid_sequence(self.turn_direction, self.angle_eps)
         choices, idx = self.generate_choices(correct_seq)

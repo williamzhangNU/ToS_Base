@@ -11,7 +11,7 @@ from ..utils.action_utils import action_results_to_text
 from ..actions import ObserveApproxAction
 
 class LocalizationEvaluationTask(BaseEvaluationTask):
-    """Localize your own coordinate (x, y)."""
+    """Localize your own coordinate (x, y). TODO treat ... as origin, including orientation?"""
 
     QUESTION_TEMPLATE = (
         "You observe the room from a new location and orientation.\n"

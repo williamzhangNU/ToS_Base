@@ -75,14 +75,14 @@ class ExplorationManager:
         self.action_counts: Dict[str, int] = {}
         self.action_cost: int = 0
         # Observed names (objects and gates) to gate Move() eligibility
-        self.observed_names: Set[str] = set()
+        self.observed_items: Set[str] = set()
         
     def _execute_and_update(self, action: BaseAction) -> ActionResult:
         """Execute action and update exploration state."""
         kwargs = {}
         # Enforce "observed-before-move"
         if isinstance(action, MoveAction):
-            kwargs['observed_names'] = list(self.observed_names)
+            kwargs['observed_items'] = list(self.observed_items)
         result = action.execute(self.exploration_room, self.agent, **kwargs)
         if not result.success:
             return result
@@ -202,7 +202,7 @@ class ExplorationManager:
         visible = observe_result.data.get('visible_objects', []) or []
         # node coverage
         for name in visible:
-            self.observed_names.add(name)
+            self.observed_items.add(name)
             if name in self.node_names:
                 self.observed_nodes.add(name)
         # edge coverage: observe A from B (B is anchor)

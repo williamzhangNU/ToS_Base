@@ -75,8 +75,8 @@ class MoveAction(BaseAction):
             return ActionResult(False, self.get_feedback(False, "not_found"), str(self), 'move', {'target_name': self.target})
         
         target_obj = room.get_object_by_name(self.target)
-        observed_names = set(kwargs.get('observed_names', [])) # if None, all objects are observed
-        if self.target not in observed_names:
+        observed_items = set(kwargs.get('observed_items', [])) # if None, all objects are observed
+        if self.target not in observed_items:
             return ActionResult(False, self.get_feedback(False, "not_observed"), str(self), 'move', {'target_name': self.target})
         if not kwargs.get('move_anyway', False) and not self._is_visible(agent, target_obj):
             return ActionResult(False, self.get_feedback(False, "not_visible"), str(self), 'move', {'target_name': self.target})        
@@ -201,7 +201,6 @@ class ObserveAction(BaseAction):
                     rid = list(set(agent.room_id) & set(obj.room_id))
                     assert len(rid) == 1, f"intersection of room ids is not unique: {rid}"
                     rid = rid[0]
-                    print(f'[DEBUG] intersects between agent: {agent} and gate: {obj} is {rid}')
                 gate_ori = obj.get_ori_for_room(int(rid)) if rid is not None else obj.ori
                 ori_pair = OrientationRel.get_relative_orientation(tuple(gate_ori), tuple(agent.ori))
                 ori_str = OrientationRel.to_string(ori_pair, 'ego', 'orientation', if_gate=True)
@@ -367,6 +366,19 @@ class TermAction(BaseAction):
     def __repr__(self):
         return "Term()"
 
+
+# Internal-only forced terminate (not exposed to parser/registry)
+class ForcedTermAction(TermAction):
+    format_desc = "ForcedTerm()"
+    description = "Forced termination when exploration steps are exhausted."
+    example = ""
+    format_pattern = r"^ForcedTerm\(\)$"
+    cost = 0
+    def success_message(self, **kwargs) -> str:
+        return "Exploration ended. No further exploration actions are allowed."
+    def execute(self, room, agent, **kwargs) -> ActionResult:
+        return ActionResult(True, self.get_feedback(True), str(self), 'forced_term', {'terminated': True, 'internal': True})
+    def __repr__(self): return "ForcedTerm()"
 
 
 class QueryAction(BaseAction):

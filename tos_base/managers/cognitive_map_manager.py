@@ -30,70 +30,103 @@ from ..core.relationship import (
 COGMAP_INSTRUCTION_SHORTER = """\
 ## Cognitive Map (multi-map)
 
-Keep a concise multi-map JSON of the scene on a {grid_size}×{grid_size} grid.
+Keep a concise multi-map JSON of the scene on a N by M grid.
 
 - Global: origin [0,0] and +Y is your initial facing direction
 - Local: origin at your current pose; +Y is forward
 - Rooms: each room uses its entry gate as origin; +Y points into that room
-- Gates: list connections as room id pairs (gate_name: { connects: [room_id_a, room_id_b] })
+- Gates: list connections as room id pairs (connects: [room_id_a, room_id_b])
 
 Fields:
 - position: [x, y] in the map’s coordinate system (integers or integer-like)
 - facing: one of "north|south|east|west" (omit or set unknown if not applicable)
 - confidence: "high" (certain), "medium" (estimated), "low" (unknown)
 
+Content rules:
+- Global: include observed objects and gates; include agent; exclude "initial_pos"
+- Local: include visible objects only; exclude agent
+- Rooms: include observed objects in that room only; exclude origin gate and agent
+
 Always output the cognitive map JSON first in your thinking. Include at least `global`; `local`, `rooms`, and `gates` are optional.
 
 Example:
 ```json
-{
-  "global": {
-    "agent": {"position": [0, 0], "facing": "north", "confidence": "high"},
-    "table": {"position": [2, 1], "facing": "east", "confidence": "medium"}
-  },
-  "local": {
-    "agent": {"position": [0, 0], "facing": "north", "confidence": "high"},
-    "chair": {"position": [-1, 2], "facing": "west", "confidence": "high"}
-  },
-  "rooms": {
-    "1": {"sofa": {"position": [1, 0], "facing": "south", "confidence": "high"}}
-  },
-  "gates": {
-    "door_0": {"connects": [1, 2]}
-  }
-}
+{{
+  "global": {{
+    "agent": {{"position": [0, 0], "facing": "north", "confidence": "high"}},
+    "table": {{"position": [2, 1], "facing": "east", "confidence": "medium"}}
+  }},
+  "local": {{
+    "agent": {{"position": [0, 0], "facing": "north", "confidence": "high"}},
+    "chair": {{"position": [-1, 2], "facing": "west", "confidence": "high"}}
+  }},
+  "rooms": {{
+    "1": {{"sofa": {{"position": [1, 0], "facing": "south", "confidence": "high"}}}}
+  }},
+  "gates": {{
+    "door_0": {{"connects": [1, 2]}}
+  }}
+}}
 ```
+"""
+
+COGMAP_INSTRUCTION_GLOBAL_ONLY = """\
+## Cognitive Map (global only)
+
+Keep a concise global map JSON of the scene on a N by M grid.
+
+- Global: origin [0,0] and +Y is your initial facing direction
+
+Fields:
+- position: [x, y] in the map’s coordinate system (integers or integer-like)
+- facing: one of "north|south|east|west" (omit or set unknown if not applicable)
+- confidence: "high" (certain), "medium" (estimated), "low" (unknown)
+
+Content rules:
+- Global: include observed objects and gates; include agent; exclude "initial_pos"
+
+Only include the `global` section (you may also include `gates`).
+Always output the cognitive map JSON first in your thinking.
+
+Example:
+```json
+{{
+  "global": {{
+    "agent": {{"position": [0, 0], "facing": "north", "confidence": "high"}},
+    "table": {{"position": [2, 1], "facing": "east", "confidence": "medium"}}
+  }}
+}}
 """
 
 COGMAP_EXP_REQUIRED_INSTRUCTION = """
 In your thinking (<think> ... </think>):
 1) Briefly reason about your cognitive map
-2) Output the cognitive map JSON (at least `global`; `local`, `rooms`, `gates` optional)
+2) Output the cognitive map JSON
 3) Then reason about exploration and provide only the <answer>...</answer>
 
 Example:
 ```json
-{
-  "global": {
-    "agent": {"position": [0, 0], "facing": "north", "confidence": "high"},
-  },
-}
+{{
+  "global": {{
+    "agent": {{"position": [0, 0], "facing": "north", "confidence": "high"}},
+  }},
+}}
 ```
 """
 
 COGMAP_EVAL_REQUIRED_INSTRUCTION = """
 In your thinking (<think> ... </think>):
 1) Briefly reason about your cognitive map
-2) Output the cognitive map JSON (at least `global`; `local`, `rooms`, `gates` optional)
+2) Output the cognitive map JSON
 3) Then reason about the question and provide only the <answer>...</answer>
 
 Example:
 ```json
-{
-  "global": {
-    "agent": {"position": [0, 0], "facing": "north", "confidence": "high"},
-  },
-}
+{{
+  "global": {{
+    "agent": {{"position": [0, 0], "facing": "north", "confidence": "high"}},
+  }},
+}}
 ```
 """
 
@@ -105,20 +138,27 @@ class CogMapMetrics:
     facing: float = 0.0
     pos: float = 0.0
     overall: float = 0.0
+    valid: bool = True
 
     def to_dict(self) -> Dict[str, float]:
         return {"dir": self.dir, "facing": self.facing, "pos": self.pos, "overall": self.overall}
 
     @staticmethod
     def average(items: List['CogMapMetrics']) -> 'CogMapMetrics':
-        if not items:
-            return CogMapMetrics()
+        valid_items = [i for i in items if isinstance(i, CogMapMetrics) and i.valid]
+        if not valid_items:
+            return CogMapMetrics.invalid()
         return CogMapMetrics(
-            dir=float(np.mean([i.dir for i in items])),
-            facing=float(np.mean([i.facing for i in items])),
-            pos=float(np.mean([i.pos for i in items])),
-            overall=float(np.mean([i.overall for i in items])),
+            dir=float(np.mean([i.dir for i in valid_items])),
+            facing=float(np.mean([i.facing for i in valid_items])),
+            pos=float(np.mean([i.pos for i in valid_items])),
+            overall=float(np.mean([i.overall for i in valid_items])),
+            valid=True,
         )
+
+    @classmethod
+    def invalid(cls) -> 'CogMapMetrics':
+        return cls(dir=0.0, facing=0.0, pos=0.0, overall=0.0, valid=False)
 
 
 @dataclass
@@ -128,7 +168,7 @@ class CognitiveMapTurnLog:
     global_metrics: CogMapMetrics = field(default_factory=CogMapMetrics)
     local_metrics: CogMapMetrics = field(default_factory=CogMapMetrics)
     rooms_metrics: CogMapMetrics = field(default_factory=CogMapMetrics)
-    gates: Dict[str, float] = field(default_factory=lambda: {"conn_acc": 0.0})
+    gates: Dict[str, float] = field(default_factory=dict)
     # Extraction status
     extraction_success: bool = False
     # Optional for debugging/inspection (predicted global map as BaseRoom)
@@ -142,10 +182,10 @@ class CognitiveMapTurnLog:
 
     def to_dict(self):
         return {
-            "global": self.global_metrics.to_dict(),
-            "local": self.local_metrics.to_dict(),
-            "rooms": self.rooms_metrics.to_dict(),
-            "gates": self.gates,
+            "global": (self.global_metrics.to_dict() if self.global_metrics.valid else {}),
+            "local": (self.local_metrics.to_dict() if self.local_metrics.valid else {}),
+            "rooms": (self.rooms_metrics.to_dict() if self.rooms_metrics.valid else {}),
+            "gates": (self.gates or {}),
             "extraction_success": self.extraction_success,
             "pred_room_state": self.pred_room_state.to_dict() if self.pred_room_state else {},
             # flat for backward-compatibility
@@ -156,9 +196,9 @@ class CognitiveMapTurnLog:
         }
 
 
-# =============================== Small transforms =============================== 
+# =============================== transforms =============================== 
 
-def rotation_matrix_from_ori(ori: np.ndarray) -> np.ndarray:
+def _rotation_matrix_from_ori(ori: np.ndarray) -> np.ndarray:
     """Rotate world into anchor frame so that +Y aligns with anchor forward.
     Mappings chosen so anchor_ori -> [0,1] (north).
     """
@@ -172,13 +212,13 @@ def rotation_matrix_from_ori(ori: np.ndarray) -> np.ndarray:
     return ori_to_R.get(key, ori_to_R[(0, 1)])
 
 
-def transform_point(pos_world: np.ndarray, anchor_pos: np.ndarray, anchor_ori: np.ndarray) -> np.ndarray:
-    R = rotation_matrix_from_ori(anchor_ori)
+def _transform_point(pos_world: np.ndarray, anchor_pos: np.ndarray, anchor_ori: np.ndarray) -> np.ndarray:
+    R = _rotation_matrix_from_ori(anchor_ori)
     return (R @ (pos_world.astype(float) - anchor_pos.astype(float))).astype(float)
 
 
-def transform_ori(ori_world: np.ndarray, anchor_ori: np.ndarray) -> np.ndarray:
-    R = rotation_matrix_from_ori(anchor_ori)
+def _transform_ori(ori_world: np.ndarray, anchor_ori: np.ndarray) -> np.ndarray:
+    R = _rotation_matrix_from_ori(anchor_ori)
     v = (R @ ori_world.astype(float)).astype(int)
     vx, vy = int(np.sign(v[0])), int(np.sign(v[1]))
     return np.array([vx, vy], dtype=int)
@@ -187,10 +227,10 @@ def transform_ori(ori_world: np.ndarray, anchor_ori: np.ndarray) -> np.ndarray:
 def _transform_baseroom(room: BaseRoom, anchor_pos: np.ndarray, anchor_ori: np.ndarray) -> BaseRoom:
     objects: List[Object] = []
     for obj in room.objects:
-        p = transform_point(obj.pos, anchor_pos, anchor_ori)
+        p = _transform_point(obj.pos, anchor_pos, anchor_ori)
         o = obj.ori
         if getattr(obj, 'has_orientation', True):
-            o = transform_ori(obj.ori, anchor_ori)
+            o = _transform_ori(obj.ori, anchor_ori)
         objects.append(Object(name=obj.name, pos=p, ori=o, has_orientation=getattr(obj, 'has_orientation', True)))
     return BaseRoom(objects=objects, name=getattr(room, 'name', 'room'))
 
@@ -208,24 +248,28 @@ class CognitiveMapManager:
         "n_evaluations": 0,
     }
     
-    def __init__(self, cogmap_type: str = "standard", grid_size: int = 5, pos_allow_scale: bool = True):
+    def __init__(self, cogmap_type: str = "standard", pos_allow_scale: bool = True, scope: str = "all"):
         """Initialize cognitive map manager."""
         self.turn_logs: List[CognitiveMapTurnLog] = []
         self.cogmap_summary = copy.deepcopy(self.DEFAULT_COGMAP_SUMMARY)
 
         self.config = {
             "cogmap_type": cogmap_type,
-            "grid_size": grid_size,
             "pos_allow_scale": bool(pos_allow_scale),
+            "scope": (scope if scope in ("global", "all") else "all"),
         }
         # room_id -> first-entry gate name
         self.entry_gate_by_room: dict[int, str] = {}
+        # position normalization scale (computed once in global frame)
+        self._pos_norm_L: float | None = None
 
     def get_cognitive_map_instruction(self) -> str:
         assert self.config['cogmap_type'] == "standard", "Only standard format is supported"
-        return COGMAP_INSTRUCTION_SHORTER.format(grid_size=self.config["grid_size"])
+        if self.config.get("scope") == "global":
+            return COGMAP_INSTRUCTION_GLOBAL_ONLY
+        return COGMAP_INSTRUCTION_SHORTER
         
-    def evaluate_cognitive_map(self, assistant_response: str, gt_room: Room, gt_agent: Agent) -> Optional[Dict[str, Any]]:
+    def evaluate_cognitive_map(self, assistant_response: str, gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
         """Extract JSON and evaluate global/local/rooms/gates.
 
         All comparisons are between BaseRooms in the same coordinate system.
@@ -239,44 +283,60 @@ class CognitiveMapManager:
             self.turn_logs.append(CognitiveMapTurnLog(extraction_success=False))
             return None
 
-        # Parse sections
+        # Observed/visible sets
+        all_item_names = {o.name for o in getattr(gt_room, 'all_objects', [])}
+        observed_set: set[str] = set(all_item_names if observed_items is None else [str(x) for x in observed_items])
+        visible_names = self._visible_object_names(gt_room, gt_agent)
+
+        # Preprocess predicted JSON then parse
+        json_data = self._preprocess_predicted(json_data, observed_set, visible_names, gt_room)
         pred_global_br, pred_local_br, pred_rooms_map, pred_gates = self._parse_predicted_maps(json_data)
 
-        # Build GT BaseRooms
-        gt_global_br = self._build_gt_global_baseroom(gt_room, gt_agent)
+        # Ensure predicted sections exist (empty) where needed
+        pred_global_br = pred_global_br or BaseRoom(objects=[], name="pred_global")
+        pred_local_br = pred_local_br or BaseRoom(objects=[], name="pred_local")
+        pred_rooms_map = pred_rooms_map or {}
+        pred_gates = pred_gates or {}
+
+        # Build GT BaseRooms (already filtered)
+        gt_global_br = self._build_gt_global_baseroom(gt_room, gt_agent, observed_set)
         gt_local_br = self._build_gt_local_baseroom(gt_room, gt_agent)
-        gt_rooms_map = self._build_gt_room_baserooms(gt_room, gt_agent)
+        gt_rooms_map = self._build_gt_room_baserooms(gt_room, gt_agent, observed_set)
+
+
+        # Ensure global position normalization is set
+        self._ensure_pos_norm_L(gt_room, gt_agent)
 
         # Evaluate global (used for overall summary)
-        global_m = CogMapMetrics()
-        if pred_global_br is not None:
-            d, f, p, o = self._compare_baserooms(pred_global_br, gt_global_br)
-            global_m = CogMapMetrics(d, f, p, o)
+        global_m = self._compare_baserooms(pred_global_br, gt_global_br)
 
         # Evaluate local
-        local_m = CogMapMetrics()
-        if pred_local_br is not None:
-            d, f, p, o = self._compare_baserooms(pred_local_br, gt_local_br)
-            local_m = CogMapMetrics(d, f, p, o)
+        local_m = CogMapMetrics.invalid()
+        if self.config.get("scope") == "all" and len(getattr(gt_local_br, 'objects', [])) > 0:
+            local_m = self._compare_baserooms(pred_local_br, gt_local_br)
 
-        # Evaluate rooms (average across rooms that exist in both)
-        rooms_metrics: List[Tuple[float, float, float, float]] = []
-        for rid_str, pred_br in pred_rooms_map.items():
-            rid = int(rid_str)
-            gt_br = gt_rooms_map.get(rid)
-            if gt_br is None:
-                continue
-            rooms_metrics.append(self._compare_baserooms(pred_br, gt_br))
-        rooms_m = CogMapMetrics.average([CogMapMetrics(*m) for m in rooms_metrics])
+        # Evaluate rooms (average across GT rooms; missing pred treated empty)
+        rooms_m = CogMapMetrics.invalid()
+        if self.config.get("scope") == "all":
+            per_room: List[CogMapMetrics] = []
+            for rid in sorted(gt_rooms_map.keys()):
+                gt_br = gt_rooms_map[rid]
+                if len(getattr(gt_br, 'objects', [])) == 0:
+                    continue
+                pred_br = pred_rooms_map.get(str(rid)) or pred_rooms_map.get(rid) or BaseRoom(objects=[], name=f"pred_room_{rid}")
+                per_room.append(self._compare_baserooms(pred_br, gt_br))
+            rooms_m = CogMapMetrics.average(per_room)
 
         # Evaluate gates connectivity
-        gate_acc = self._evaluate_gate_connections(pred_gates, gt_room)
+        gate_acc: Optional[float] = None
+        if self.config.get("scope") == "all":
+            gate_acc = self._evaluate_gate_connections(pred_gates, gt_room)
 
         metrics = {
-            "global": global_m.to_dict(),
-            "local": local_m.to_dict(),
-            "rooms": rooms_m.to_dict(),
-            "gates": {"conn_acc": gate_acc},
+            "global": (global_m.to_dict() if global_m.valid else {}),
+            "local": (local_m.to_dict() if local_m.valid else {}),
+            "rooms": (rooms_m.to_dict() if rooms_m.valid else {}),
+            "gates": ({"conn_acc": float(gate_acc)} if isinstance(gate_acc, (int, float)) else {}),
         }
 
         # Log all results (global fields kept for summary compatibility)
@@ -284,10 +344,9 @@ class CognitiveMapManager:
             global_metrics=global_m,
             local_metrics=local_m,
             rooms_metrics=rooms_m,
-            gates={"conn_acc": gate_acc},
+            gates=({"conn_acc": float(gate_acc)} if isinstance(gate_acc, (int, float)) else {}),
             extraction_success=True,
             pred_room_state=pred_global_br,
-            # flat copies
             dir_sim=global_m.dir,
             facing_sim=global_m.facing,
             pos_sim=global_m.pos,
@@ -314,10 +373,14 @@ class CognitiveMapManager:
             out.update({"n_evaluations": n_evaluations, "extraction_success_rate": success_rate})
             return out
 
-        g_avg = CogMapMetrics.average([l.global_metrics for l in successful_logs]).to_dict()
-        l_avg = CogMapMetrics.average([l.local_metrics for l in successful_logs]).to_dict()
-        r_avg = CogMapMetrics.average([l.rooms_metrics for l in successful_logs]).to_dict()
-        gate_avg = float(np.mean([l.gates.get("conn_acc", 0.0) for l in successful_logs]))
+        g_vals = [l.global_metrics for l in successful_logs if l.global_metrics.valid]
+        l_vals = [l.local_metrics for l in successful_logs if l.local_metrics.valid]
+        r_vals = [l.rooms_metrics for l in successful_logs if l.rooms_metrics.valid]
+        g_avg = CogMapMetrics.average(g_vals).to_dict() if g_vals else self.DEFAULT_COGMAP_SUMMARY["global"]
+        l_avg = CogMapMetrics.average(l_vals).to_dict() if l_vals else self.DEFAULT_COGMAP_SUMMARY["local"]
+        r_avg = CogMapMetrics.average(r_vals).to_dict() if r_vals else self.DEFAULT_COGMAP_SUMMARY["rooms"]
+        gate_list = [float((l.gates or {}).get("conn_acc", 0.0)) for l in successful_logs]
+        gate_avg = float(np.mean(gate_list)) if gate_list else 0.0
         
         return {
             "global": g_avg,
@@ -411,7 +474,7 @@ class CognitiveMapManager:
                 if not isinstance(position, list) or len(position) != 2:
                     continue
                 pos = np.array([float(position[0]), float(position[1])])
-                facing = obj_info.get('facing', 'north')
+                facing = obj_info.get('facing', None)
                 if isinstance(facing, str):
                     ori = direction_mapping.get(facing.lower(), direction_mapping['north'])
                     has_orientation = True
@@ -461,68 +524,58 @@ class CognitiveMapManager:
         objs.append(Object(name='agent', pos=gt_agent.pos.copy(), ori=gt_agent.ori.copy(), has_orientation=True))
         return BaseRoom(objects=objs, name='gt')
 
-    def _build_gt_global_baseroom(self, gt_room: Room, gt_agent: Agent) -> BaseRoom:
+    def _build_gt_global_baseroom(self, gt_room: Room, gt_agent: Agent, observed_set: set[str]) -> BaseRoom:
         raw = self._baseroom_from_gt(gt_room, gt_agent)
-        return _transform_baseroom(raw, gt_agent.init_pos, gt_agent.init_ori)
+        br = _transform_baseroom(raw, gt_agent.init_pos, gt_agent.init_ori)
+        keep = set(observed_set) | {"agent"}
+        return self._filter_br_by_names(br, keep)
 
     def _build_gt_local_baseroom(self, gt_room: Room, gt_agent: Agent) -> BaseRoom:
-        half_fov = float(getattr(DegreeRel, 'FIELD_OF_VIEW', 90.0)) / 2.0
-        objs: List[Object] = [Object(name='agent', pos=np.array([0.0, 0.0]), ori=np.array([0, 1]), has_orientation=True)]
-        for o in getattr(gt_room, 'objects', []):
-            deg = DegreeRel.from_positions(o.pos, gt_agent.pos, gt_agent.ori).degree
-            if abs(deg) <= half_fov + 1e-3:
-                p = transform_point(o.pos, gt_agent.pos, gt_agent.ori)
-                o_rel = transform_ori(o.ori, gt_agent.ori) if getattr(o, 'has_orientation', True) else o.ori
-                objs.append(Object(name=o.name, pos=p, ori=o_rel, has_orientation=getattr(o, 'has_orientation', True)))
-        return BaseRoom(objects=objs, name='gt_local')
+        visible = self._visible_object_names(gt_room, gt_agent)
+        objs: List[Object] = []
+        for name in visible:
+            o = gt_room.get_object_by_name(name)
+            objs.append(Object(name=o.name, pos=o.pos.copy(), ori=o.ori.copy(), has_orientation=getattr(o, 'has_orientation', True)))
+        raw = BaseRoom(objects=objs, name='gt_local_raw')
+        return _transform_baseroom(raw, gt_agent.pos, gt_agent.ori)
 
-    def _build_gt_room_baserooms(self, gt_room: Room, gt_agent: Agent) -> Dict[int, BaseRoom]:
+    def _build_gt_room_baserooms(self, gt_room: Room, gt_agent: Agent, observed_set: set[str]) -> Dict[int, BaseRoom]:
         out: Dict[int, BaseRoom] = {}
         if not isinstance(gt_room, Room):
             return out
         for rid in sorted(getattr(gt_room, 'objects_by_room', {}).keys()):
             gate_name = self.entry_gate_by_room.get(int(rid))
-            if gate_name is None:
-                for g in getattr(gt_room, 'gates', []):
-                    if isinstance(g.room_id, (list, tuple)) and int(rid) in [int(x) for x in g.room_id]:
-                        gate_name = g.name
-                        break
-            if gate_name is None:
+            if gate_name is None: # no entry gate for this room
                 continue
             gate = next((g for g in getattr(gt_room, 'gates', []) if g.name == gate_name), None)
-            if gate is None:
-                continue
-            anchor_pos = gate.pos
-            anchor_ori = gate.get_ori_for_room(int(rid))
+            anchor_pos, anchor_ori = gate.pos, gate.get_ori_for_room(int(rid))
+            # exclude origin gate and agent; include room objects only
             objs: List[Object] = []
-            # agent in this room?
-            if int(getattr(gt_agent, 'room_id', -999)) == int(rid):
-                a_p = transform_point(gt_agent.pos, anchor_pos, anchor_ori)
-                a_o = transform_ori(gt_agent.ori, anchor_ori)
-                objs.append(Object(name='agent', pos=a_p, ori=a_o, has_orientation=True))
-            # objects in this room
             for name in gt_room.objects_by_room.get(int(rid), []):
+                if name == gate.name or name not in observed_set:
+                    continue
                 o = gt_room.get_object_by_name(name)
-                p = transform_point(o.pos, anchor_pos, anchor_ori)
-                o_rel = transform_ori(o.ori, anchor_ori) if getattr(o, 'has_orientation', True) else o.ori
-                objs.append(Object(name=o.name, pos=p, ori=o_rel, has_orientation=getattr(o, 'has_orientation', True)))
-            out[int(rid)] = BaseRoom(objects=objs, name=f'gt_room_{rid}')
+                objs.append(Object(name=o.name, pos=o.pos.copy(), ori=o.ori.copy(), has_orientation=getattr(o, 'has_orientation', True)))
+            out[int(rid)] = _transform_baseroom(BaseRoom(objects=objs, name=f'gt_room_{rid}'), anchor_pos, anchor_ori)
         return out
 
     # =============================== Room comparisons =============================== 
 
-    def _compare_baserooms(self, pred_room: BaseRoom, gt_room: BaseRoom) -> Tuple[float, float, float, float]:
+    def _compare_baserooms(self, pred_room: BaseRoom, gt_room: BaseRoom) -> CogMapMetrics:
         dir_sim = self._calculate_dir_sim(pred_room, gt_room)
         facing_sim = self._calculate_facing_sim(pred_room, gt_room)
         pos_sim = self._calculate_pos_sim(pred_room, gt_room, allow_scale=bool(self.config.get('pos_allow_scale', True)))
         overall_sim = 0.5 * dir_sim + 0.2 * facing_sim + 0.3 * pos_sim
-        return dir_sim, facing_sim, pos_sim, overall_sim
+        return CogMapMetrics(dir=dir_sim, facing=facing_sim, pos=pos_sim, overall=overall_sim)
 
     def _calculate_dir_sim(self, pred_room: BaseRoom, gt_room: BaseRoom) -> float:
-        """Pairwise allocentric bin agreement over shared object names."""
+        """Pairwise allocentric bin agreement over GT object pairs.
+
+        Missing predicted objects are counted as incorrect pairs.
+        """
         pred = {o.name: o for o in pred_room.objects}
         gt = {o.name: o for o in gt_room.objects}
-        names = sorted(set(pred.keys()).intersection(set(gt.keys())))
+        names = sorted(gt.keys())
         if len(names) < 2:
             return 0.0
         bin_system = CardinalBinsAllo()
@@ -531,56 +584,60 @@ class CognitiveMapManager:
             for j in range(i + 1, len(names)):
                 a, b = gt[names[i]], gt[names[j]]
                 gt_rel = PairwiseRelationshipDiscrete.relationship(a.pos, b.pos, None, bin_system)
-                p1, p2 = pred[names[i]], pred[names[j]]
-                pr = PairwiseRelationshipDiscrete.relationship(p1.pos, p2.pos, None, bin_system)
-                if pr.direction.bin_id == gt_rel.direction.bin_id:
-                    cor += 1.0
+                p1, p2 = pred.get(names[i]), pred.get(names[j])
+                if p1 is not None and p2 is not None:
+                    pr = PairwiseRelationshipDiscrete.relationship(p1.pos, p2.pos, None, bin_system)
+                    if pr.direction.bin_id == gt_rel.direction.bin_id:
+                        cor += 1.0
                 tot += 1.0
         return cor / tot if tot else 0.0
 
     def _calculate_facing_sim(self, pred_room: BaseRoom, gt_room: BaseRoom) -> float:
         pred = {o.name: o for o in pred_room.objects}
         gt = {o.name: o for o in gt_room.objects}
-        names = sorted(set(pred.keys()).intersection(set(gt.keys())))
+        names = sorted(gt.keys())
         tot = cor = 0.0
         for name in names:
             g = gt[name]
             if not getattr(g, 'has_orientation', False):
                 continue
             p = pred.get(name)
-            if p is None: 
-                continue
             tot += 1.0
-            if np.array_equal(p.ori, g.ori): 
+            if p is not None and np.array_equal(p.ori, g.ori):
                 cor += 1.0
         return cor / tot if tot else 0.0
 
     def _calculate_pos_sim(self, pred_room: BaseRoom, gt_room: BaseRoom, allow_scale: bool = True) -> float:
-        """Position similarity with optional scale alignment.
+        """Position similarity with optional scale alignment and coverage penalty.
 
         Given matched points P_pred and P_gt (same name ordering):
         - If allow_scale: find s* that minimizes ||s*·P_pred − P_gt|| in least squares
           s* = (Σ r_i·e_i) / (Σ e_i·e_i), where e_i from pred, r_i from gt
         - RMSE = sqrt(mean(||s*·e_i − r_i||^2))
-        - Normalize by L = sqrt(mean(||r_i||^2)) and convert to similarity via exp(−RMSE/L)
+        - Normalize by a global L computed once and convert to similarity via exp(−RMSE/L)
+
+        Similarity is exp(-RMSE/L) scaled by coverage = (#matched GT objects)/(#GT objects).
         """
         pred = {o.name: o for o in pred_room.objects}
         gt = {o.name: o for o in gt_room.objects}
-        names = sorted(set(pred.keys()).intersection(set(gt.keys())))
-        if len(names) == 0:
+        gt_names = sorted(gt.keys())
+        matched = [n for n in gt_names if n in pred]
+        if len(matched) == 0 or len(gt_names) == 0:
             return 0.0
-        P1 = np.array([pred[n].pos for n in names], dtype=float)
-        P2 = np.array([gt[n].pos for n in names], dtype=float)
+        P1 = np.array([pred[n].pos for n in matched], dtype=float)
+        P2 = np.array([gt[n].pos for n in matched], dtype=float)
         if allow_scale:
             den = float((P1 * P1).sum())
-            if den == 0.0: 
+            if den == 0.0:
                 return 0.0
             scale = float((P2 * P1).sum()) / den
         else:
             scale = 1.0
         rmse = np.sqrt(((P1 * scale - P2) ** 2).sum(axis=1).mean())
-        L = np.sqrt((P2 ** 2).sum(axis=1).mean())
-        return float(np.exp(-rmse / L)) if L > 0 else 0.0
+        L = float(self._pos_norm_L or 0.0)
+        base = float(np.exp(-rmse / L)) if L > 0 else 0.0
+        coverage = float(len(matched)) / float(len(gt_names))
+        return base * coverage
 
     # =============================== Room entry tracking =============================== 
     def register_room_entry(self, room_id: int, gate_name: str) -> None:
@@ -588,6 +645,62 @@ class CognitiveMapManager:
         rid = int(room_id)
         if rid not in self.entry_gate_by_room:
             self.entry_gate_by_room[rid] = gate_name
+
+    # =============================== Filters and preprocessing =============================== 
+    def _filter_br_by_names(self, br: Optional[BaseRoom], keep: set[str]) -> BaseRoom:
+        if br is None:
+            return BaseRoom(objects=[], name='empty')
+        objs = [o for o in br.objects if o.name in keep]
+        return BaseRoom(objects=objs, name=br.name)
+
+    def _visible_object_names(self, gt_room: Room, gt_agent: Agent) -> set[str]:
+        from ..actions.base import BaseAction
+        names = set()
+        for o in getattr(gt_room, 'objects', []):
+            if BaseAction._is_visible(gt_agent, o):
+                names.add(o.name)
+        return names
+
+    def _preprocess_predicted(self, json_data: Dict[str, Any], observed: set[str], visible: set[str], gt_room: Room) -> Dict[str, Any]:
+        jd = copy.deepcopy(json_data) if isinstance(json_data, dict) else {}
+        gate_names = {g.name for g in getattr(gt_room, 'gates', [])}
+
+        # Global: keep observed objects and gates; include agent; drop initial_pos
+        if isinstance(jd.get('global'), dict):
+            g = jd['global']
+            keep = set(observed) | gate_names | {"agent"}
+            jd['global'] = {k: v for k, v in g.items() if k in keep and k != 'initial_pos'}
+
+        # Local: keep visible objects only; exclude agent and gates implicitly
+        if isinstance(jd.get('local'), dict):
+            loc = jd['local']
+            jd['local'] = {k: v for k, v in loc.items() if k in visible}
+
+        # Rooms: per-room observed, non-gate objects only
+        rooms = jd.get('rooms') if isinstance(jd, dict) else None
+        if isinstance(rooms, dict):
+            out_rooms = {}
+            for rid, sec in rooms.items():
+                if not isinstance(sec, dict):
+                    continue
+                keep = {n for n in observed if n in gt_room.room_by_object and gt_room.room_by_object[n] == int(rid)}
+                out_rooms[str(rid)] = {k: v for k, v in sec.items() if k in keep}
+            jd['rooms'] = out_rooms
+        return jd
+
+    def _ensure_pos_norm_L(self, gt_room: Room, gt_agent: Agent) -> None:
+        if self._pos_norm_L is not None:
+            return
+        raw = self._baseroom_from_gt(gt_room, gt_agent)
+        br = _transform_baseroom(raw, gt_agent.init_pos, gt_agent.init_ori)
+        keep = {o.name for o in getattr(gt_room, 'objects', [])}
+        br = self._filter_br_by_names(br, keep)
+        if not br.objects:
+            self._pos_norm_L = 1.0
+            return
+        P = np.array([o.pos for o in br.objects], dtype=float)
+        L = float(np.sqrt((P ** 2).sum(axis=1).mean()))
+        self._pos_norm_L = (L if L > 0 else 1.0)
 
     # =============================== Gates evaluation =============================== 
     def _evaluate_gate_connections(self, pred_gates: Dict[str, Any], gt_room: Room) -> float:
@@ -611,8 +724,7 @@ class CognitiveMapManager:
 
 
 if __name__ == "__main__":
-    # Minimal, explicit test using the provided layout
-    # Build objects (non-gates)
+    # Build env
     objs = [
         Object('refrigerator', np.array([12, 7]), np.array([1, 0])),
         Object('chair', np.array([8, 2]), np.array([1, 0])),
@@ -623,7 +735,6 @@ if __name__ == "__main__":
         Object('monitor', np.array([13, 10]), np.array([-1, 0])),
         Object('printer', np.array([10, 2]), np.array([0, 1])),
     ]
-    # Gates
     gates = [
         Gate(
             name='door_0', pos=np.array([7, 5]), ori=np.array([1, 0]),
@@ -634,7 +745,6 @@ if __name__ == "__main__":
             room_id=[3, 1], ori_by_room={3: np.array([0, -1]), 1: np.array([0, 1])}
         ),
     ]
-    # Mask (only mark required cells)
     mask = np.zeros((15, 15), dtype=np.int8)
     for (x, y) in [(12, 7), (10, 8), (10, 7), (13, 10)]:
         mask[x, y] = 1
@@ -671,6 +781,6 @@ if __name__ == "__main__":
     )
 
     mgr = CognitiveMapManager()
-    metrics = mgr.evaluate_cognitive_map(assistant_response, room, agent)
+    metrics = mgr.evaluate_cognitive_map(assistant_response, room, agent, observed_items=["monitor", "refrigerator"])
     print("metrics:", metrics)
     print("summary:", mgr.get_cogmap_summary())
