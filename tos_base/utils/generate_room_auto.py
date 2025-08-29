@@ -84,52 +84,52 @@ def generate_rooms(n: int, level: int, main: int = None, seed: int = None, debug
 def generate_rooms_auto(level: int, main: int = None, seed: int = None, debug: bool = False,
                          topology: str = "tree", canvas_n: int = None) -> np.ndarray:
     """
-    自动生成房间布局：不需显式传入 n，返回尽量小的 m×n 掩码(mask)。
+    Automatically generate room layout: no need to explicitly pass n, returns minimal m×n mask.
 
-    约束：
-    - 最外层四条边都不应全部为 -1（裁剪到包含非 -1 的最小包围矩形即可满足）
-    - 墙为单层（沿用现有围墙逻辑，裁剪不会增厚墙）
+    Constraints:
+    - The outermost four edges should not all be -1 (cropping to minimal bounding rectangle containing non-(-1) satisfies this)
+    - Walls are single-layer (using existing wall logic, cropping won't thicken walls)
 
     Args:
-        level: 复杂度（房间数为 level+1）
-        main: 主房间边长（可选）
-        seed: 随机种子（可选）
-        debug: 调试标志（可选）
-        topology: 拓扑（tree/line/star）
-        canvas_n: 内部初始画布尺寸（可选）；若不传，根据 level/main 估算
+        level: Complexity (number of rooms is level+1)
+        main: Main room side length (optional)
+        seed: Random seed (optional)
+        debug: Debug flag (optional)
+        topology: Topology (tree/line/star)
+        canvas_n: Internal initial canvas size (optional); if not provided, estimated based on level/main
 
     Returns:
-        最小化裁剪后的 m×n numpy 数组
+        Minimally cropped m×n numpy array
     """
-    # 估算一个安全的初始画布大小，用于调用现有 generate_rooms；随后裁剪为最小尺寸
+    # Estimate a safe initial canvas size for calling existing generate_rooms; then crop to minimal size
     num_rooms = level + 1
 
     def _suggest_canvas_size() -> int:
-        # 基于主房间和房间数量的粗略估计，宁宽勿窄，后续会裁剪
+        # Rough estimation based on main room and room count, prefer larger rather than smaller, will crop later
         base_room = max(6, (main or 6))
 
         if topology == "line":
-            # 线性布局：房间排成一行，需要的空间相对可预测
-            est = base_room + (num_rooms - 1) * 7 + 6  # 每个房间+墙+门
+            # Linear layout: rooms arranged in a line, space requirement is relatively predictable
+            est = base_room + (num_rooms - 1) * 7 + 6  # Each room + wall + door
         elif topology == "star":
-            # 星形布局：主房间居中，其他房间围绕，空间需求适中
-            est = base_room * 3 + 8  # 主房间+四周房间+墙
+            # Star layout: main room in center, other rooms around it, moderate space requirement
+            est = base_room * 3 + 8  # Main room + surrounding rooms + walls
         else:  # tree topology
-            # 树形布局：房间随机分布，需要更大空间确保能找到合适位置和连接
-            # 增加更多空间以提高成功率
+            # Tree layout: rooms randomly distributed, need more space to ensure finding suitable positions and connections
+            # Add more space to improve success rate
             est = max(30, base_room * 2 + num_rooms * 8 + 10)
 
-        return max(15, min(100, est))  # 提高最小值和上限
+        return max(15, min(100, est))  # Increase minimum value and upper limit
 
     n = canvas_n or _suggest_canvas_size()
 
-    # 先用固定画布生成
+    # First generate with fixed canvas
     full_grid = generate_rooms(n, level, main=main, seed=seed, debug=debug, topology=topology)
 
-    # 再裁剪至包含所有非 -1 的最小包围矩形
+    # Then crop to minimal bounding rectangle containing all non-(-1)
     cropped = _crop_to_minimal_mask(full_grid)
 
-    # 兜底：若异常导致全为 -1，则直接返回 full_grid
+    # Fallback: if exception causes all to be -1, return full_grid directly
     if cropped is None:
         return full_grid
 
@@ -138,16 +138,16 @@ def generate_rooms_auto(level: int, main: int = None, seed: int = None, debug: b
 
 def _crop_to_minimal_mask(grid: np.ndarray) -> np.ndarray:
     """
-    将网格裁剪到最小包围矩形：该矩形包含所有非 -1 的单元（房间/墙/门）。
-    - 裁剪后四条边一定至少含有一个非 -1 值（满足“边不全为 -1”）。
-    - 不改变内部墙厚度（保持单层）。
+    Crop grid to minimal bounding rectangle: the rectangle contains all non-(-1) cells (rooms/walls/doors).
+    - Crop after four edges must contain at least one non-(-1) value (satisfies "not all -1" on edges).
+    - Does not change internal wall thickness (maintains single layer).
 
     Returns:
-        裁剪后的网格；若网格全为 -1，返回 None
+        Cropped grid; if grid is all -1, returns None
     """
     h, w = grid.shape
 
-    # 找到所有非 -1 的行与列
+    # Find all rows and columns with non-(-1) content
     rows_with_content = [i for i in range(h) if np.any(grid[i, :] != -1)]
     cols_with_content = [j for j in range(w) if np.any(grid[:, j] != -1)]
 
@@ -206,10 +206,10 @@ def _generate_single_room(grid: np.ndarray, n: int, main: int = None) -> np.ndar
 
 def _generate_line_room_layout(n: int, num_rooms: int, main: int = None) -> List[Tuple[int, int, int, int]]:
     """
-    为 line 拓扑生成房间布局：
-    - 连接关系为链式：1→2→3→4→5
-    - 房间物理位置不必排成直线，可以更灵活（如L形、Z形等）
-    - 采用增量式放置：每个新房间只需与前一个房间相邻即可
+    Generate room layout for line topology:
+    - Connection relationship is chain-like: 1→2→3→4→5
+    - Room physical positions don't need to be in a straight line, can be more flexible (like L-shape, Z-shape, etc.)
+    - Uses incremental placement: each new room only needs to be adjacent to the previous room
     """
     if num_rooms <= 0:
         return []
@@ -220,21 +220,21 @@ def _generate_line_room_layout(n: int, num_rooms: int, main: int = None) -> List
 
     rooms: List[Tuple[int, int, int, int]] = []
 
-    # 主房间尺寸 - 固定尺寸，不随seed变化
+    # Main room size - fixed size, doesn't change with seed
     if main is not None:
         main_size = max(4, min(main, n - 4))
     else:
         main_size = max(6, min(8, n // 4))
 
-    # 其他房间尺寸 - 增加随机变化，但要小于主房间
+    # Other room sizes - add random variation, but must be smaller than main room
     base_other_size = max(4, min(main_size - 1, n // 6))
     other_size_variation = np.random.randint(-2, 4)
     other_size = max(4, min(base_other_size + other_size_variation, main_size - 1, n // 6))
 
-    # 第一个房间（主房间）放在中心附近 - 主房间始终是正方形
+    # First room (main room) placed near center - main room is always square
     mw = mh = main_size
 
-    # 主房间位置增加随机偏移
+    # Add random offset to main room position
     center_offset_x = np.random.randint(-2, 3)
     center_offset_y = np.random.randint(-2, 3)
     cx = max(mw//2 + 2, min(n - mw//2 - 2, n // 2 + center_offset_x))
@@ -244,72 +244,72 @@ def _generate_line_room_layout(n: int, num_rooms: int, main: int = None) -> List
     y1 = max(1, cy - mh // 2)
     x2 = min(n - 2, x1 + mw - 1)
     y2 = min(n - 2, y1 + mh - 1)
-    # 调整位置确保尺寸正确
+    # Adjust position to ensure correct size
     x1 = x2 - mw + 1
     y1 = y2 - mh + 1
 
     main_room = (x1, y1, x2, y2)
     rooms.append(main_room)
 
-    # 链式放置其他房间：每个新房间只与前一个房间相邻
+    # Chain placement of other rooms: each new room only adjacent to the previous room
     for room_idx in range(1, num_rooms):
         placed = False
         attempts = 0
         max_attempts = 50
 
-        # 新房间只与前一个房间（rooms[room_idx-1]）相邻
+        # New room only adjacent to previous room (rooms[room_idx-1])
         prev_room = rooms[room_idx-1]
         px1, py1, px2, py2 = prev_room
 
         while not placed and attempts < max_attempts:
-            # 尝试在前一个房间的四个方向放置新房间
+            # Try placing new room in four directions around previous room
             directions = ["left", "right", "top", "bottom"]
             np.random.shuffle(directions)
 
             for direction in directions:
-                # 新房间尺寸（增加更大的变化和矩形可能性），但要小于主房间
+                # New room size (add larger variation and rectangle possibility), but must be smaller than main room
                 size_variation = np.random.randint(-1, 4)
                 base_w = max(4, min(other_size + size_variation, main_size - 1))
                 base_h = max(4, min(other_size + size_variation, main_size - 1))
 
-                # 70% 概率生成矩形房间（line topology 更倾向于矩形）
+                # 70% probability to generate rectangular room (line topology prefers rectangles)
                 if np.random.random() < 0.7:
                     if np.random.random() < 0.5:
-                        # 宽房间
+                        # Wide room
                         rw = min(base_w + np.random.randint(1, 4), main_size - 1)
                         rh = max(4, base_h - np.random.randint(0, 2))
                     else:
-                        # 高房间
+                        # Tall room
                         rw = max(4, base_w - np.random.randint(0, 2))
                         rh = min(base_h + np.random.randint(1, 4), main_size - 1)
                 else:
-                    # 方形房间
+                    # Square room
                     rw = rh = base_w
 
                 if direction == "left":
-                    # 新房间在前一个房间左侧
-                    rx2 = px1 - 2  # 留1格放墙/门
+                    # New room on the left side of previous room
+                    rx2 = px1 - 2  # Leave 1 cell for wall/door
                     rx1 = rx2 - rw + 1
-                    # y位置：与前一个房间有重叠以便放门
+                    # y position: overlap with previous room to place door
                     ry1 = py1 + np.random.randint(0, max(1, (py2 - py1 + 1) - rh + 1))
                     ry2 = ry1 + rh - 1
 
                 elif direction == "right":
-                    # 新房间在前一个房间右侧
+                    # New room on the right side of previous room
                     rx1 = px2 + 2
                     rx2 = rx1 + rw - 1
                     ry1 = py1 + np.random.randint(0, max(1, (py2 - py1 + 1) - rh + 1))
                     ry2 = ry1 + rh - 1
 
                 elif direction == "top":
-                    # 新房间在前一个房间上方
+                    # New room above previous room
                     ry2 = py1 - 2
                     ry1 = ry2 - rh + 1
                     rx1 = px1 + np.random.randint(0, max(1, (px2 - px1 + 1) - rw + 1))
                     rx2 = rx1 + rw - 1
 
                 else:  # bottom
-                    # 新房间在前一个房间下方
+                    # New room below previous room
                     ry1 = py2 + 2
                     ry2 = ry1 + rh - 1
                     rx1 = px1 + np.random.randint(0, max(1, (px2 - px1 + 1) - rw + 1))
@@ -317,7 +317,7 @@ def _generate_line_room_layout(n: int, num_rooms: int, main: int = None) -> List
 
                 new_room = (rx1, ry1, rx2, ry2)
 
-                # 检查新房间是否在边界内且不与现有房间重叠
+                # Check if new room is within boundaries and doesn't overlap with existing rooms
                 if (rx1 >= 1 and ry1 >= 1 and rx2 <= n - 2 and ry2 <= n - 2 and
                     not _rooms_overlap_with_walls(new_room, rooms)):
                     rooms.append(new_room)
@@ -327,7 +327,7 @@ def _generate_line_room_layout(n: int, num_rooms: int, main: int = None) -> List
             attempts += 1
 
         if not placed:
-            # 如果无法放置，返回已放置的房间（可能少于要求数量）
+            # If unable to place, return already placed rooms (may be fewer than required)
             break
 
     return rooms
@@ -335,27 +335,27 @@ def _generate_line_room_layout(n: int, num_rooms: int, main: int = None) -> List
 
 def _generate_star_room_layout(n: int, num_rooms: int, main: int = None) -> List[Tuple[int, int, int, int]]:
     """
-    为 star 拓扑生成布局：
-    - 第 1 个房间为主房间，放在中心；
-    - 其余房间分别贴近主房间的四侧（左/右/上/下），与主房间之间保留 1 格（用于墙/门）。
-    - 确保与主房间在相邻方向存在重叠区间，以便放置门（_find_door_between_rooms 需要 overlap）。
-    若放置失败则返回空列表让上层重试。
+    Generate layout for star topology:
+    - The 1st room is the main room, placed in center;
+    - Other rooms are placed close to the four sides of main room (left/right/top/bottom), with 1 cell reserved between them and main room (for wall/door).
+    - Ensure overlap interval exists with main room in adjacent direction, to place doors (_find_door_between_rooms needs overlap).
+    If placement fails, return empty list for upper layer to retry.
     """
     if num_rooms <= 0:
         return []
 
     rooms: List[Tuple[int, int, int, int]] = []
 
-    # 主房间尺寸 - 固定尺寸，不随seed变化
+    # Main room size - fixed size, doesn't change with seed
     if main is not None:
         main_size = max(4, min(main, n - 4))
     else:
         main_size = max(6, min(10, n // 3))
 
-    # 主房间放在中心，留边界 1 供外墙 - 主房间始终是正方形
+    # Main room placed in center, leave boundary 1 for outer walls - main room is always square
     mw = mh = main_size
 
-    # 主房间位置增加小幅随机偏移
+    # Add small random offset to main room position
     center_offset_x = np.random.randint(-2, 3)
     center_offset_y = np.random.randint(-2, 3)
     cx = max(mw//2 + 2, min(n - mw//2 - 2, n // 2 + center_offset_x))
@@ -365,19 +365,19 @@ def _generate_star_room_layout(n: int, num_rooms: int, main: int = None) -> List
     y1 = max(1, cy - mh // 2)
     x2 = min(n - 2, x1 + mw - 1)
     y2 = min(n - 2, y1 + mh - 1)
-    # 若被边界截断导致尺寸变化，修正左上
+    # If truncated by boundary causing size change, correct top-left
     x1 = x2 - mw + 1
     y1 = y2 - mh + 1
 
     main_room = (x1, y1, x2, y2)
     rooms.append(main_room)
 
-    # 其他房间尺寸基准 - 增加随机变化，但要小于主房间
+    # Other room size baseline - add random variation, but must be smaller than main room
     base_other = max(4, min(main_size - 1, max(4, n // (num_rooms + 2))))
     other_size_variation = np.random.randint(-2, 4)
     base_other = max(4, min(base_other + other_size_variation, main_size - 1, n // (num_rooms + 2)))
 
-    # 侧向按顺序循环：左、右、上、下
+    # Sides in sequential cycle: left, right, top, bottom
     sides = ["left", "right", "top", "bottom"]
 
     def fits(room: Tuple[int,int,int,int]) -> bool:
@@ -386,16 +386,16 @@ def _generate_star_room_layout(n: int, num_rooms: int, main: int = None) -> List
             return False
         return not _rooms_overlap_with_walls(room, rooms)
 
-    # 尝试为其余 num_rooms-1 个房间在主房间四周找位置
+    # Try to find positions for remaining num_rooms-1 rooms around main room
     idx = 0
     attempts_per_room = 20
     for i in range(1, num_rooms):
         side = sides[idx % len(sides)]
         idx += 1
 
-        # 为竖直侧（left/right）优先让高度不超过主房间高度，以保证 overlap；
-        # 为水平侧（top/bottom）优先让宽度不超过主房间宽度。
-        # 增加房间尺寸的随机变化和矩形可能性
+        # For vertical sides (left/right) prioritize height not exceeding main room height, to ensure overlap;
+        # For horizontal sides (top/bottom) prioritize width not exceeding main room width.
+        # Add random variation and rectangle possibility to room sizes
         if side in ("left", "right"):
             base_h = min(base_other, (y2 - y1 + 1))
             base_w = base_other
@@ -403,32 +403,32 @@ def _generate_star_room_layout(n: int, num_rooms: int, main: int = None) -> List
             base_w = min(base_other, (x2 - x1 + 1))
             base_h = base_other
 
-        # 增加矩形变化，但要小于主房间
-        if np.random.random() < 0.6:  # 60% 概率生成矩形
+        # Add rectangle variation, but must be smaller than main room
+        if np.random.random() < 0.6:  # 60% probability to generate rectangle
             if side in ("left", "right"):
-                # 竖直侧：可以调整宽度
+                # Vertical sides: can adjust width
                 w = max(4, min(base_w + np.random.randint(-1, 3), main_size - 1))
                 h = base_h
             else:
-                # 水平侧：可以调整高度
+                # Horizontal sides: can adjust height
                 w = base_w
                 h = max(4, min(base_h + np.random.randint(-1, 3), main_size - 1))
         else:
             w, h = base_w, base_h
 
         placed = False
-        # 如果默认尺寸放不下，逐步缩小
+        # If default size doesn't fit, gradually shrink
         for size_shrink in range(0, 4):
             ww = max(4, min(w - size_shrink, main_size - 1))
             hh = max(4, min(h - size_shrink, main_size - 1))
 
-            # 计算初始位置（与主房间中心对齐）并允许沿着接触边滑动
+            # Calculate initial position (aligned with main room center) and allow sliding along contact edge
             if side == "left":
-                rx2 = x1 - 2  # 与主房间左侧相距 1 格
+                rx2 = x1 - 2  # 1 cell distance from main room's left side
                 rx1 = rx2 - ww + 1
-                # y 居中对齐
+                # y center alignment
                 ry1_init = y1 + ((y2 - y1 + 1) - hh) // 2
-                # 滑动范围：让其与主房间垂直方向保持 overlap
+                # Sliding range: maintain overlap with main room in vertical direction
                 y_min = y1
                 y_max = y2 - hh + 1
                 candidates = list(range(ry1_init, ry1_init + 1)) + list(range(y_min, y_max + 1))
@@ -489,7 +489,7 @@ def _generate_star_room_layout(n: int, num_rooms: int, main: int = None) -> List
                 break
 
         if not placed:
-            # 放置失败，返回空列表让上层重试
+            # Placement failed, return empty list for upper layer to retry
             return []
 
     return rooms
@@ -497,30 +497,30 @@ def _generate_star_room_layout(n: int, num_rooms: int, main: int = None) -> List
 
 def _generate_tree_room_layout(n: int, num_rooms: int, main: int = None) -> List[Tuple[int, int, int, int]]:
     """
-    为 tree 拓扑生成房间布局：
-    - 采用增量式放置：先放主房间，然后逐个放置其他房间，确保每个新房间与已有房间相邻
-    - 这样生成的布局天然适合树状连接，因为每个房间都能与至少一个已有房间相邻
+    Generate room layout for tree topology:
+    - Uses incremental placement: first place main room, then place other rooms one by one, ensuring each new room is adjacent to existing rooms
+    - This generated layout is naturally suitable for tree connections, because each room can be adjacent to at least one existing room
     """
     if num_rooms <= 0:
         return []
 
     rooms: List[Tuple[int, int, int, int]] = []
 
-    # 主房间尺寸 - 固定尺寸，不随seed变化
+    # Main room size - fixed size, doesn't change with seed
     if main is not None:
         main_size = max(4, min(main, n - 4))
     else:
         main_size = max(6, min(8, n // 4))
 
-    # 其他房间尺寸 - 增加更大的随机变化范围，但要小于主房间
+    # Other room sizes - add larger random variation range, but must be smaller than main room
     base_other_size = max(4, min(main_size - 1, n // 6))
     other_size_variation = np.random.randint(-2, 4)
     other_size = max(4, min(base_other_size + other_size_variation, main_size - 1, n // 6))
 
-    # 第一个房间（主房间）放在中心附近 - 主房间始终是正方形
+    # First room (main room) placed near center - main room is always square
     mw = mh = main_size
 
-    # 主房间位置增加随机偏移
+    # Add random offset to main room position
     center_offset_x = np.random.randint(-3, 4)
     center_offset_y = np.random.randint(-3, 4)
     cx = max(mw//2 + 2, min(n - mw//2 - 2, n // 2 + center_offset_x))
@@ -530,73 +530,73 @@ def _generate_tree_room_layout(n: int, num_rooms: int, main: int = None) -> List
     y1 = max(1, cy - mh // 2)
     x2 = min(n - 2, x1 + mw - 1)
     y2 = min(n - 2, y1 + mh - 1)
-    # 调整位置确保尺寸正确
+    # Adjust position to ensure correct size
     x1 = x2 - mw + 1
     y1 = y2 - mh + 1
 
     main_room = (x1, y1, x2, y2)
     rooms.append(main_room)
 
-    # 增量式放置其他房间
+    # Incremental placement of other rooms
     for room_idx in range(1, num_rooms):
         placed = False
         attempts = 0
         max_attempts = 50
 
         while not placed and attempts < max_attempts:
-            # 随机选择一个已有房间作为"邻居"
+            # Randomly select an existing room as "neighbor"
             neighbor_idx = np.random.randint(0, len(rooms))
             neighbor = rooms[neighbor_idx]
             nx1, ny1, nx2, ny2 = neighbor
 
-            # 尝试在邻居房间的四个方向放置新房间
+            # Try placing new room in four directions around neighbor room
             directions = ["left", "right", "top", "bottom"]
             np.random.shuffle(directions)
 
             for direction in directions:
-                # 新房间尺寸（增加更大的变化和矩形可能性），但要小于主房间
-                size_variation = np.random.randint(-1, 4)  # 扩大变化范围
+                # New room size (add larger variation and rectangle possibility), but must be smaller than main room
+                size_variation = np.random.randint(-1, 4)  # Expand variation range
                 base_w = max(4, min(other_size + size_variation, main_size - 1))
                 base_h = max(4, min(other_size + size_variation, main_size - 1))
 
-                # 60% 概率生成矩形房间
+                # 60% probability to generate rectangular room
                 if np.random.random() < 0.6:
                     if np.random.random() < 0.5:
-                        # 宽房间
+                        # Wide room
                         rw = min(base_w + np.random.randint(1, 4), main_size - 1)
                         rh = max(4, base_h - np.random.randint(0, 2))
                     else:
-                        # 高房间
+                        # Tall room
                         rw = max(4, base_w - np.random.randint(0, 2))
                         rh = min(base_h + np.random.randint(1, 4), main_size - 1)
                 else:
-                    # 方形房间
+                    # Square room
                     rw = rh = base_w
 
                 if direction == "left":
-                    # 新房间在邻居左侧
-                    rx2 = nx1 - 2  # 留1格放墙/门
+                    # New room on the left side of neighbor
+                    rx2 = nx1 - 2  # Leave 1 cell for wall/door
                     rx1 = rx2 - rw + 1
-                    # y位置：与邻居有重叠以便放门
+                    # y position: overlap with neighbor to place door
                     ry1 = ny1 + np.random.randint(0, max(1, (ny2 - ny1 + 1) - rh + 1))
                     ry2 = ry1 + rh - 1
 
                 elif direction == "right":
-                    # 新房间在邻居右侧
+                    # New room on the right side of neighbor
                     rx1 = nx2 + 2
                     rx2 = rx1 + rw - 1
                     ry1 = ny1 + np.random.randint(0, max(1, (ny2 - ny1 + 1) - rh + 1))
                     ry2 = ry1 + rh - 1
 
                 elif direction == "top":
-                    # 新房间在邻居上方
+                    # New room above neighbor
                     ry2 = ny1 - 2
                     ry1 = ry2 - rh + 1
                     rx1 = nx1 + np.random.randint(0, max(1, (nx2 - nx1 + 1) - rw + 1))
                     rx2 = rx1 + rw - 1
 
                 else:  # bottom
-                    # 新房间在邻居下方
+                    # New room below neighbor
                     ry1 = ny2 + 2
                     ry2 = ry1 + rh - 1
                     rx1 = nx1 + np.random.randint(0, max(1, (nx2 - nx1 + 1) - rw + 1))
@@ -604,7 +604,7 @@ def _generate_tree_room_layout(n: int, num_rooms: int, main: int = None) -> List
 
                 new_room = (rx1, ry1, rx2, ry2)
 
-                # 检查新房间是否在边界内且不与现有房间重叠
+                # Check if new room is within boundaries and doesn't overlap with existing rooms
                 if (rx1 >= 1 and ry1 >= 1 and rx2 <= n - 2 and ry2 <= n - 2 and
                     not _rooms_overlap_with_walls(new_room, rooms)):
                     rooms.append(new_room)
@@ -614,7 +614,7 @@ def _generate_tree_room_layout(n: int, num_rooms: int, main: int = None) -> List
             attempts += 1
 
         if not placed:
-            # 如果无法放置，返回已放置的房间（可能少于要求数量）
+            # If unable to place, return already placed rooms (may be fewer than required)
             break
 
     return rooms
