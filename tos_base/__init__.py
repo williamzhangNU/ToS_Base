@@ -37,6 +37,7 @@ from .managers.exploration_manager import ExplorationManager, ExplorationTurnLog
 from .managers.agent_proxy import AgentProxy
 from .managers.evaluation_manager import EvaluationManager, EvaluationTurnLog
 from .managers.cognitive_map_manager import CognitiveMapManager, CognitiveMapTurnLog
+from .managers.history_manager import HistoryManager
 
 # Evaluation tasks
 from .evaluation.tasks import BaseEvaluationTask
@@ -57,7 +58,7 @@ __all__ = [
     'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'TermAction',
     
     # Managers
-    'ExplorationManager', 'ExplorationTurnLog', 'EvaluationManager', 'EvaluationTurnLog', 'CognitiveMapManager', 'CognitiveMapTurnLog', 'AgentProxy',
+    'ExplorationManager', 'ExplorationTurnLog', 'EvaluationManager', 'EvaluationTurnLog', 'CognitiveMapManager', 'CognitiveMapTurnLog', 'AgentProxy', 'HistoryManager',
     
     # Evaluation
     'BaseEvaluationTask', 'EvalTaskType',
