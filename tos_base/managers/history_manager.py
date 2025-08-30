@@ -17,9 +17,13 @@ class HistoryManager:
         self.responses = []
         self.initial_observation = None
         self.dir = dir
-        # print(f"Directory absolute path: {os.path.abspath(self.dir)}")
         os.makedirs(self.dir, exist_ok=True)
+        override = config.kwargs.get('override', False)
         self.path = os.path.join(self.dir, f"{self.generate_unique_name(seed, config)}.json")
+        if override:
+            if os.path.exists(self.path):
+                os.remove(self.path) 
+
         if self.is_history_exist():
             self.load()
     
