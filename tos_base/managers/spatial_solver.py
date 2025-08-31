@@ -232,7 +232,6 @@ class SpatialSolver:
         self.grid_size = int(grid_size)
         variables = {name: Variable(name=name, domain=set()) for name in all_object_names}
         self.solver = AC3Solver(variables, [])
-        self.set_initial_position('initial_pos', (0, 0))
 
     def set_initial_position(self, name: str, position: Tuple[int, int]):
         if name not in self.solver.variables:
