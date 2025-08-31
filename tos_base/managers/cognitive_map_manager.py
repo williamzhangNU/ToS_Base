@@ -47,21 +47,21 @@ Content rules:
 - Local: include visible objects only; exclude agent
 - Rooms: include observed objects in that room only; exclude origin gate and agent
 
-Always output the cognitive map JSON first in your thinking. Include at least `global`; `local`, `rooms`, and `gates` are optional.
+Always output the cognitive map JSON first in your thinking. Include `local`, `rooms`, `global`, and `gates`.
 
 Example:
 ```json
 {{
-  "global": {{
-    "agent": {{"position": [0, 0], "facing": "north", "confidence": "high"}},
-    "table": {{"position": [2, 1], "facing": "east", "confidence": "medium"}}
-  }},
   "local": {{
     "agent": {{"position": [0, 0], "facing": "north", "confidence": "high"}},
     "chair": {{"position": [-1, 2], "facing": "west", "confidence": "high"}}
   }},
   "rooms": {{
     "1": {{"sofa": {{"position": [1, 0], "facing": "south", "confidence": "high"}}}}
+  }},
+  "global": {{
+    "agent": {{"position": [0, 0], "facing": "north", "confidence": "high"}},
+    "table": {{"position": [2, 1], "facing": "east", "confidence": "medium"}}
   }},
   "gates": {{
     "door_0": {{"connects": [1, 2]}}

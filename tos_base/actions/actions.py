@@ -74,7 +74,7 @@ class MoveAction(BaseAction):
         
         target_obj = room.get_object_by_name(self.target)
         observed_items = set(kwargs.get('observed_items', [])) # if None, all objects are observed
-        if self.target not in observed_items:
+        if observed_items is not None and self.target not in observed_items:
             return ActionResult(False, self.get_feedback(False, "not_observed"), str(self), 'move', {'target_name': self.target})
         if not kwargs.get('move_anyway', False) and not self._is_visible(agent, target_obj):
             return ActionResult(False, self.get_feedback(False, "not_visible"), str(self), 'move', {'target_name': self.target})        

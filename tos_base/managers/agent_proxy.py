@@ -7,8 +7,8 @@ import numpy as np
 from ..core.room import Room
 from ..actions.base import BaseAction
 from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, ObserveApproxAction, QueryAction, ReturnAction
-from .spatial_solver import SpatialSolver, Variable, Constraint, AC3Solver
-from ..core.relationship import PairwiseRelationship, RelationTriple, CardinalBinsAllo
+from .spatial_solver import SpatialSolver
+from ..core.relationship import CardinalBinsAllo
 from .exploration_manager import ExplorationManager
 from ..core.object import Agent
 from ..utils.action_utils import action_results_to_text

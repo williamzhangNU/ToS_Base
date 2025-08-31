@@ -18,6 +18,8 @@ class EvalTaskType(Enum):
     E2A = ("e2a", "E2AEvaluationTask")
     LOCALIZATION = ("loc", "LocalizationEvaluationTask")
     FALSE_BELIEF = ("false_belief", "FalseBeliefEvaluationTask")
+    FWD_FOV = ("fwd_fov", "ForwardFOVEvaluationTask")
+    BWD_NAV = ("bwd_nav", "BackwardNavEvaluationTask")
     
     def __init__(self, short_name: str, class_name: str):
         self.short_name = short_name
@@ -42,6 +44,7 @@ class EvalTaskType(Enum):
         from .e2a import E2AEvaluationTask
         from .localization import LocalizationEvaluationTask
         from .false_belief import FalseBeliefEvaluationTask
+        from .navigation_tasks import ForwardFOVEvaluationTask, BackwardNavEvaluationTask
         
         task_map = {
             cls.DIR.short_name: DirectionEvaluationTask,
@@ -51,6 +54,8 @@ class EvalTaskType(Enum):
             cls.E2A.short_name: E2AEvaluationTask,
             cls.LOCALIZATION.short_name: LocalizationEvaluationTask,
             cls.FALSE_BELIEF.short_name: FalseBeliefEvaluationTask,
+            cls.FWD_FOV.short_name: ForwardFOVEvaluationTask,
+            cls.BWD_NAV.short_name: BackwardNavEvaluationTask,
         }
         return task_map
     
@@ -93,8 +98,8 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
 
-    task_name = 'false_belief'
-    for seed in tqdm(range(0, 1)):
+    task_name = 'fwd_fov'
+    for seed in tqdm(range(0, 100)):
         np_random = np.random.default_rng(seed)
         room, agent = RoomGenerator.generate_room(
             room_size=(10, 10),
@@ -107,5 +112,5 @@ if __name__ == "__main__":
         task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
         # print(f'room: {room}')
         # print(f'agent: {agent}')
-        print(task.generate_question(), task.answer)
-        RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
+        # print(task.generate_question(), task.answer)
+        # RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
