@@ -62,7 +62,7 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
     def _rotate_to_face(self, mgr: ExplorationManager, target: Object):
         vec = target.pos - mgr.agent.pos
         if np.allclose(vec, 0):
-            return None
+            raise ValueError("Target is at the same position as the agent")
         desired = _closest_cardinal(vec)
         cur, des = _ori_to_deg(tuple(int(x) for x in mgr.agent.ori)), _ori_to_deg(tuple(int(x) for x in desired))
         delta = (des - cur + 540) % 360 - 180
@@ -199,8 +199,8 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
         a = end_agent.copy()
         vis_names = self._visible_names(self._new_mgr(a.copy()))
         if vis_names:
-            pick = str(self.np_random.choice(vis_names))
-            a.pos = self.room.get_object_by_name(pick).pos.copy()
+            pick = self.room.get_object_by_name(str(self.np_random.choice(vis_names)))
+            a.pos, a.room_id = pick.pos.copy(), pick.room_id
         a.ori = np.array([(0, 1), (1, 0), (0, -1), (-1, 0)][int(self.np_random.integers(0, 4))])
         return self._pairs_text(a, max_items=3)
 
@@ -214,7 +214,8 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
     """Predict final observation from an action sequence."""
 
     QUESTION_TEMPLATE = (
-        "You will execute a short action sequence. Always rotate to bring the next target into view before moving.\n"
+        "You return to your starting position and face north.\n"
+        "You will execute a short action sequence.\n"
         "Actions:\n{actions}\n\n"
         "What will you observe at the end?\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
@@ -239,8 +240,9 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
         final_pos = end_agent.pos.copy()
         others = [o for o in self.room.all_objects if not np.allclose(o.pos, final_pos)]
         others.sort(key=lambda o: float(np.linalg.norm(o.pos - final_pos)))
-        for o in others:
-            b = end_agent.copy(); b.pos = o.pos.copy()
+        for o in others: # teleport to a random other object sorted by distance
+            b = end_agent.copy()
+            b.pos, b.room_id = o.pos.copy(), o.room_id
             if int(self.np_random.integers(0, 2)) == 1:
                 b.ori = np.array([(0, 1), (1, 0), (0, -1), (-1, 0)][int(self.np_random.integers(0, 4))])
             wrong_pos.append(self._pairs_text(b, max_items=3))
@@ -279,9 +281,10 @@ class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
     """Infer action sequence from final observation."""
 
     QUESTION_TEMPLATE = (
-        "You see the final observation below (after some actions from the start).\n"
+        "You have executed an action sequence and changed to a new location and facing direction.\n"
+        "You see the final observation below:\n"
         "{final_obs}\n\n"
-        "Which action sequence led to this final view? Always rotate before moving.\n\n"
+        "Which action sequence led to this final view?\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
@@ -295,7 +298,15 @@ class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
 
     def _wrong_by_final_object(self, seq: List[str], final_ori: Tuple[int, int]) -> Optional[Tuple[str, List[str], Tuple[int, int]]]:
         if not seq: return None
-        pool = [o.name for o in self.room.all_objects if o.name != seq[-1]]
+        to_set = lambda v: set(v) if isinstance(v, list) else {v}
+        pool = [o.name for o in self.room.all_objects
+                if (
+                    o.name != seq[-1]
+                    and not np.allclose(o.pos, self.room.get_object_by_name(seq[-2]).pos)
+                    and not np.allclose(o.pos, self.room.get_object_by_name(seq[-1]).pos)
+                    and to_set(o.room_id).intersection(to_set(self.room.get_object_by_name(seq[-2]).room_id))
+                )
+            ]
         self.np_random.shuffle(pool)
         for n in pool:
             alt = list(seq[:-1] + [n])

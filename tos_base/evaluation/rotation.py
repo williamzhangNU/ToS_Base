@@ -13,7 +13,7 @@ class RotEvaluationTask(BaseEvaluationTask):
     """Ask the sequence of objects appearing when rotating in place."""
 
     QUESTION_TEMPLATE = (
-        "You return to your starting position facing north.\n"
+        "You return to your starting position and face north.\n"
         "You will perform a full 360-degree rotation by continuously turning {turn_direction} in place.\n"
         "Your task is to answer the sequence of objects that will appear in front of you during the rotation.\n"
         "If two objects have the exact same bearing, list the nearer first.\n\n"
@@ -56,8 +56,17 @@ class RotEvaluationTask(BaseEvaluationTask):
     def _gen_valid_sequence(self, turn_dir: str, eps: float) -> List[str]:
         pts = self._sorted_pts(turn_dir)
         assert len(pts) >= 3, "Need at least 3 objects"
+        tries, cur_eps = 0, float(eps)
+        while tries < 5:
+            start = int(self.np_random.integers(0, len(pts)))
+            names, angs = self._greedy_from(pts, start, cur_eps)
+            if len(names) >= 3:
+                return names[:self.np_random.integers(3, min(len(names), 7) + 1)]
+            tries += 1
+        # fallback: tighten epsilon and try once more
+        cur_eps = min(cur_eps, 1.0)
         start = int(self.np_random.integers(0, len(pts)))
-        names, angs = self._greedy_from(pts, start, eps)
+        names, angs = self._greedy_from(pts, start, cur_eps)
         assert len(names) >= 3, "Increase object count or decrease angle_eps"
         return names[:self.np_random.integers(3, min(len(names), 7) + 1)]
 
@@ -111,10 +120,10 @@ class RotEvaluationTask(BaseEvaluationTask):
 
 
 class RotDualEvaluationTask(RotEvaluationTask):
-    """Given the appearing sequence, ask the rotation direction."""
+    """Given the appearing sequence, ask the rotation direction. TODO: different sequences in each option"""
 
     QUESTION_TEMPLATE = (
-        "You return to your starting position facing north.\n"
+        "You return to your starting position and face north.\n"
         "You performed a complete 360° rotation in place.\n"
         "During the rotation, these objects appeared directly in front of you in this order:\n"
         "{object_sequence}\n\n"

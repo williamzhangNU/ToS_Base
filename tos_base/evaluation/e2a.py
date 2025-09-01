@@ -12,7 +12,7 @@ class E2AEvaluationTask(BaseEvaluationTask):
     """Given object names, choose correct coordinates and orientations."""
 
     QUESTION_TEMPLATE = (
-        "Treat your starting position as the origin (0, 0), facing north.\n"
+        "Treat your starting position as the origin (0, 0), and facing north.\n"
         "Consider the global map coordinates (x right, y up).\n"
         "Choose the option that correctly lists some objects with their coordinates and orientations.\n\n"
         "Answer format: [obj at (x, y) facing orientation, ...] where orientation is north/east/south/west\n\n"

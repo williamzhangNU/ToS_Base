@@ -14,10 +14,10 @@ class LocalizationEvaluationTask(BaseEvaluationTask):
     """Localize your own coordinate (x, y). TODO treat ... as origin, including orientation?"""
 
     QUESTION_TEMPLATE = (
-        "You observe the room from a new location and orientation.\n"
+        "You change to a new location and facing direction, you observed:\n"
         "{observations}\n"
-        "Treat {origin_name} as the origin (0, 0).\n"
-        "What is your 2D coordinate (x, y)?\n\n"
+        "Treat {origin_name} as the origin (0, 0), and your starting facing direction is north.\n"
+        "What is your current 2D coordinate (x, y)?\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
