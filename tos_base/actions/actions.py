@@ -386,7 +386,7 @@ class QueryAction(BaseAction):
     description = "Return accurate spatial relationship between the object from agent's perspective."
     example = "Query(table)"
     format_pattern = r"^Query\(([A-Za-z0-9_ -]+)\)$"
-    cost = 5
+    cost = 3
     def __init__(self, obj: str):
         super().__init__(obj)
         self.obj = obj
