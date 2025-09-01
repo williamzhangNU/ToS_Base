@@ -43,11 +43,16 @@ Fields:
 - confidence: "high" (certain), "medium" (estimated), "low" (unknown)
 
 Content rules:
-- Global: include observed objects and gates; include agent; exclude "initial_pos"
-- Local: include visible objects only; exclude agent
-- Rooms: include observed objects in that room only; exclude origin gate and agent
+- global: include observed objects and gates; include agent; exclude "initial_pos"
+- local: include visible objects only; exclude agent
+- rooms: include observed objects in that room only; exclude origin gate and agent
+- gates: each entry contains **only** `"connects": [room_id_a, room_id_b]`.
 
-Always output the cognitive map JSON first in your thinking. Include at least `global`; `local`, `rooms`, and `gates` are optional.
+**Important**:
+- `facing` and `confidence` **must always be present** for all objects and agents, even in `local` and `rooms`.
+- You must always use one of "north|south|east|west" for facings in global, local, and rooms
+Always output the cognitive map JSON first in your thinking. Include at least `global`; `local`, `rooms`, and `gates` are optional, but if included, they must follow the schema strictly.
+
 
 Example:
 ```json
@@ -173,7 +178,11 @@ class CognitiveMapTurnLog:
     extraction_success: bool = False
     # Optional for debugging/inspection (predicted global map as BaseRoom)
     pred_room_state: Optional['BaseRoom'] = None
-
+    # Ground Truth 
+    gt_global_cog: Dict[str, Any] = field(default_factory=dict)
+    gt_local_cog: Dict[str, Any] = field(default_factory=dict)
+    gt_rooms_cog: Dict[str, Any] = field(default_factory=dict)
+    gt_gates: Dict[str, Any] = field(default_factory=dict)
     # Backward-compatible flat fields reflecting global metrics
     dir_sim: float = 0.0
     facing_sim: float = 0.0
@@ -188,6 +197,11 @@ class CognitiveMapTurnLog:
             "gates": (self.gates or {}),
             "extraction_success": self.extraction_success,
             "pred_room_state": self.pred_room_state.to_dict() if self.pred_room_state else {},
+            # GT
+            "gt_global_cog": (self.gt_global_cog or {}),
+            "gt_local_cog": (self.gt_local_cog or {}),
+            "gt_rooms_cog": (self.gt_rooms_cog or {}),
+            "gt_gates": (self.gt_gates or {}),
             # flat for backward-compatibility
             "dir_sim": self.dir_sim,
             "facing_sim": self.facing_sim,
@@ -303,7 +317,6 @@ class CognitiveMapManager:
         gt_local_br = self._build_gt_local_baseroom(gt_room, gt_agent)
         gt_rooms_map = self._build_gt_room_baserooms(gt_room, gt_agent, observed_set)
 
-
         # Ensure global position normalization is set
         self._ensure_pos_norm_L(gt_room, gt_agent)
 
@@ -319,6 +332,7 @@ class CognitiveMapManager:
         rooms_m = CogMapMetrics.invalid()
         if self.config.get("scope") == "all":
             per_room: List[CogMapMetrics] = []
+            print("Hiiii")
             for rid in sorted(gt_rooms_map.keys()):
                 gt_br = gt_rooms_map[rid]
                 if len(getattr(gt_br, 'objects', [])) == 0:
@@ -338,7 +352,8 @@ class CognitiveMapManager:
             "rooms": (rooms_m.to_dict() if rooms_m.valid else {}),
             "gates": ({"conn_acc": float(gate_acc)} if isinstance(gate_acc, (int, float)) else {}),
         }
-
+        # Gather GT gate connectivity for logging
+        gt_gates_dict = self._gt_gate_connections_dict(gt_room)
         # Log all results (global fields kept for summary compatibility)
         turn_log = CognitiveMapTurnLog(
             global_metrics=global_m,
@@ -347,6 +362,11 @@ class CognitiveMapManager:
             gates=({"conn_acc": float(gate_acc)} if isinstance(gate_acc, (int, float)) else {}),
             extraction_success=True,
             pred_room_state=pred_global_br,
+            # GT json
+            gt_global_cog = self.baseroom_to_json(gt_global_br, include_gates=True) if gt_global_br else {},
+            gt_local_cog = self.baseroom_to_json(gt_local_br, include_gates=False) if gt_local_br else {},      
+            gt_rooms_cog = {rid: self.baseroom_to_json(br, include_gates=False) for rid, br in (gt_rooms_map or {}).items()},
+            gt_gates=gt_gates_dict,
             dir_sim=global_m.dir,
             facing_sim=global_m.facing,
             pos_sim=global_m.pos,
@@ -437,22 +457,30 @@ class CognitiveMapManager:
     
     def _extract_json_from_text(self, text: str) -> Optional[Dict[str, Any]]:
         """Extract JSON content from text."""
-        patterns = [
-            r'```json\s*\n(.*?)\n\s*```',
-            r'```\s*\n(.*?)\n\s*```',
-            r'(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})',
-        ]
-        
-        for pattern in patterns:
-            matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
-            for match in matches:
-                try:
-                    json_text = match.strip()
-                    json_data = json.loads(json_text)
-                    if isinstance(json_data, dict) and json_data:
-                        return json_data
-                except (json.JSONDecodeError, ValueError):
-                    continue
+        # Try fenced blocks first
+        fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+        candidates = fenced if fenced else []
+
+        # Fallback: scan for outermost balanced braces
+        stack, start = [], None
+        for i, ch in enumerate(text):
+            if ch == '{':
+                if not stack:
+                    start = i
+                stack.append(ch)
+            elif ch == '}' and stack:
+                stack.pop()
+                if not stack and start is not None:
+                    candidates.append(text[start:i+1])
+                    start = None
+
+        # Try to load the largest candidate
+        candidates.sort(key=len, reverse=True)
+        for cand in candidates:
+            try:
+                return json.loads(cand)
+            except json.JSONDecodeError:
+                continue
         return None
     
     def _parse_section_to_baseroom(self, mapping: Dict[str, Any], room_name: str) -> Optional[BaseRoom]:
@@ -520,6 +548,9 @@ class CognitiveMapManager:
         # include all non-gate objects
         for o in getattr(gt_room, 'objects', []):
             objs.append(Object(name=o.name, pos=o.pos.copy(), ori=o.ori.copy(), has_orientation=getattr(o, 'has_orientation', True)))
+        # include gates
+        for g in getattr(gt_room, 'gates', []):
+            objs.append(Object(name=g.name, pos=g.pos.copy(), ori=g.ori.copy(), has_orientation=True))
         # include agent
         objs.append(Object(name='agent', pos=gt_agent.pos.copy(), ori=gt_agent.ori.copy(), has_orientation=True))
         return BaseRoom(objects=objs, name='gt')
@@ -527,7 +558,8 @@ class CognitiveMapManager:
     def _build_gt_global_baseroom(self, gt_room: Room, gt_agent: Agent, observed_set: set[str]) -> BaseRoom:
         raw = self._baseroom_from_gt(gt_room, gt_agent)
         br = _transform_baseroom(raw, gt_agent.init_pos, gt_agent.init_ori)
-        keep = set(observed_set) | {"agent"}
+        gate_names = {g.name for g in getattr(gt_room, 'gates', [])}
+        keep = set(observed_set) | gate_names | {"agent"}
         return self._filter_br_by_names(br, keep)
 
     def _build_gt_local_baseroom(self, gt_room: Room, gt_agent: Agent) -> BaseRoom:
@@ -543,7 +575,7 @@ class CognitiveMapManager:
         out: Dict[int, BaseRoom] = {}
         if not isinstance(gt_room, Room):
             return out
-        for rid in sorted(getattr(gt_room, 'objects_by_room', {}).keys()):
+        """for rid in sorted(getattr(gt_room, 'objects_by_room', {}).keys()):
             gate_name = self.entry_gate_by_room.get(int(rid))
             if gate_name is None: # no entry gate for this room
                 continue
@@ -556,7 +588,107 @@ class CognitiveMapManager:
                     continue
                 o = gt_room.get_object_by_name(name)
                 objs.append(Object(name=o.name, pos=o.pos.copy(), ori=o.ori.copy(), has_orientation=getattr(o, 'has_orientation', True)))
-            out[int(rid)] = _transform_baseroom(BaseRoom(objects=objs, name=f'gt_room_{rid}'), anchor_pos, anchor_ori)
+            out[int(rid)] = _transform_baseroom(BaseRoom(objects=objs, name=f'gt_room_{rid}'), anchor_pos, anchor_ori)"""
+            # Helper: get the entry gate for a room id (prefer manager-registered entry gate, else first gate in that room)
+        def _get_entry_gate_for_room(rid: int) -> Gate | None:
+            # 1) user-registered first-entry gate
+            name = self.entry_gate_by_room.get(int(rid))
+            if name:
+                g = next((g for g in getattr(gt_room, "gates", []) if g.name == name), None)
+                if g is not None:
+                    return g
+            # 2) fallback to first gate that connects to this room (from room’s structure)
+            gb = getattr(gt_room, "gates_by_room", {})
+            cand_names = gb.get(int(rid), []) or gb.get(str(rid), [])  # tolerate string/int keys
+            for nm in cand_names:
+                g = next((g for g in getattr(gt_room, "gates", []) if g.name == nm), None)
+                if g is not None:
+                    return g
+            return None
+
+        # Helper: get gate orientation that points INTO a given room id
+        def _gate_ori_into_room(g: Gate, rid: int) -> np.ndarray:
+            # Prefer the Gate method if available
+            if hasattr(g, "get_ori_for_room"):
+                try:
+                    return g.get_ori_for_room(int(rid))
+                except Exception:
+                    pass
+            # Else fallback to ori_by_room mapping (note: keys may be strings in to_dict output)
+            ob = getattr(g, "ori_by_room", None)
+            if isinstance(ob, dict):
+                v = ob.get(int(rid)) or ob.get(str(rid))
+                if isinstance(v, (list, tuple)) and len(v) == 2:
+                    return np.array([int(v[0]), int(v[1])], dtype=int)
+            # As a last resort, try the gate's own ori
+            return np.array(getattr(g, "ori", [0, 1]), dtype=int)
+
+        # Iterate rooms; tolerate int or str keys
+        rooms_map = getattr(gt_room, "objects_by_room", {})
+        for rid_key in sorted(rooms_map.keys(), key=lambda x: int(x)):
+            rid = int(rid_key)
+            entry_gate = _get_entry_gate_for_room(rid)
+            if entry_gate is None:
+                # No entry gate recorded and none available for this room → skip
+                continue
+
+            anchor_pos = np.array(entry_gate.pos, dtype=float)
+            anchor_ori = _gate_ori_into_room(entry_gate, rid)
+
+        # Collect observed objects that truly belong to this room id
+            objs: List[Object] = []
+            for o in getattr(gt_room, "objects", []):
+                try:
+                    if int(getattr(o, "room_id", -999)) != rid:
+                        continue
+                except Exception:
+                    continue
+                if o.name not in observed_set:
+                    continue
+                # Add object (not gate, not agent — objects list already excludes gates/agent)
+                objs.append(
+                    Object(
+                    name=o.name,
+                    pos=np.array(o.pos, dtype=float).copy(),
+                    ori=np.array(o.ori, dtype=int).copy(),
+                    has_orientation=getattr(o, "has_orientation", True),
+                    )
+                )
+
+            # Transform to the room's frame (origin at entry gate, +Y into room)
+            br = _transform_baseroom(BaseRoom(objects=objs, name=f"gt_room_{rid}"), anchor_pos, anchor_ori)
+            out[rid] = br
+        return out
+    def baseroom_to_json(self, room: BaseRoom, include_gates: bool = True) -> Dict[str, Any]:
+        """
+        Convert a BaseRoom into a cognitive map–style JSON.
+
+        Args:
+            room (BaseRoom): the BaseRoom instance to convert
+            include_gates (bool): whether to include gates in the output
+
+        Returns:
+            Dict[str, Any]: JSON-like dictionary following the cognitive map schema
+        """
+        ori_mapping = {(0, 1): "north", (0, -1): "south", (1, 0): "east", (-1, 0): "west"}
+        out: Dict[str, Any]={}
+        # Objects (includes agent if present)
+        for obj in room.objects:
+            facing = ori_mapping.get(tuple(obj.ori), "")
+            out[obj.name] = {
+                "position": [int(obj.pos[0]), int(obj.pos[1])],
+                "facing": facing
+            }
+
+        # Gates
+        if include_gates and room.gates:
+            for g in room.gates:
+                gate_facing = ori_mapping.get(tuple(g.ori), "")
+                out[g.name] = {
+                    "position": [int(g.pos[0]), int(g.pos[1])],
+                    "facing": gate_facing
+                }
+
         return out
 
     # =============================== Room comparisons =============================== 
@@ -703,84 +835,71 @@ class CognitiveMapManager:
         self._pos_norm_L = (L if L > 0 else 1.0)
 
     # =============================== Gates evaluation =============================== 
+    def _gt_gate_connections_dict(self, gt_room: Room) -> Dict[str, Any]:
+        """Return {gate_name: {'connects':[room_id_a, room_id_b]}} from GT room."""
+        out: Dict[str, Any] = {}
+        for g in getattr(gt_room, 'gates', []) or []:
+            try:
+            # expect Gate.room_id like [a,b]
+                if isinstance(g.room_id, (list, tuple)) and len(g.room_id) == 2:
+                    out[g.name] = {"connects": [int(g.room_id[0]), int(g.room_id[1])]}
+            except Exception:
+                continue
+        return out
+
     def _evaluate_gate_connections(self, pred_gates: Dict[str, Any], gt_room: Room) -> float:
         if not isinstance(gt_room, Room):
             return 0.0
-        gt_map: Dict[str, List[int]] = {k: [int(x) for x in v] for k, v in getattr(gt_room, 'rooms_by_gate', {}).items()}
-        if not gt_map:
+        gt_gates = self._gt_gate_connections_dict(gt_room)
+        if not gt_gates:
             return 0.0
         correct = tot = 0
-        for gate_name, gt_conn in gt_map.items():
-            tot += 1
+        for gate_name, gt_info in gt_gates.items():
+            gt_conn = sorted([int(x) for x in gt_info.get("connects", [])])
             pred = pred_gates.get(gate_name, {}) if isinstance(pred_gates, dict) else {}
-            pred_conn = pred.get('connects', []) if isinstance(pred, dict) else []
+            pred_conn = pred.get("connects", []) if isinstance(pred, dict) else []
             try:
                 pred_conn_int = sorted([int(x) for x in pred_conn])
             except Exception:
                 pred_conn_int = []
-            if sorted([int(x) for x in gt_conn]) == pred_conn_int:
+            if gt_conn == pred_conn_int:
                 correct += 1
+            tot += 1
+
         return float(correct) / float(tot) if tot > 0 else 0.0
 
 
 if __name__ == "__main__":
-    # Build env
+    # Build two rooms connected by door_0
     objs = [
-        Object('refrigerator', np.array([12, 7]), np.array([1, 0])),
-        Object('chair', np.array([8, 2]), np.array([1, 0])),
-        Object('bookshelf', np.array([10, 8]), np.array([0, 1])),
-        Object('whiteboard', np.array([6, 6]), np.array([0, -1])),
-        Object('scanner', np.array([11, 4]), np.array([1, 0])),
-        Object('microwave', np.array([10, 7]), np.array([0, -1])),
-        Object('monitor', np.array([13, 10]), np.array([-1, 0])),
-        Object('printer', np.array([10, 2]), np.array([0, 1])),
+        Object("chair", np.array([1, 1]), np.array([0, 1])),
+        Object("table", np.array([3, 3]), np.array([1, 0]))
     ]
     gates = [
         Gate(
-            name='door_0', pos=np.array([7, 5]), ori=np.array([1, 0]),
-            room_id=[2, 3], ori_by_room={2: np.array([-1, 0]), 3: np.array([1, 0])}
-        ),
-        Gate(
-            name='door_1', pos=np.array([11, 6]), ori=np.array([0, 1]),
-            room_id=[3, 1], ori_by_room={3: np.array([0, -1]), 1: np.array([0, 1])}
-        ),
+        name="door_0", pos=np.array([2, 0]), ori=np.array([0, 1]),
+        room_id=[1, 2], ori_by_room={1: np.array([0, 1]), 2: np.array([0, -1])}
+        )
     ]
-    mask = np.zeros((15, 15), dtype=np.int8)
-    for (x, y) in [(12, 7), (10, 8), (10, 7), (13, 10)]:
-        mask[x, y] = 1
-    for (x, y) in [(6, 6)]:
-        mask[x, y] = 2
-    for (x, y) in [(8, 2), (11, 4), (10, 2)]:
-        mask[x, y] = 3
-    room = Room(objects=objs, mask=mask, name='room', gates=gates)
+    mask = np.ones((5, 5), dtype=int)
+    room = Room(objects=objs, mask=mask, gates=gates)
 
     agent = Agent(
-        name='agent', pos=np.array([13, 9]), ori=np.array([0, 1]),
-        room_id=1, init_pos=np.array([13, 9]), init_ori=np.array([0, 1]), init_room_id=1
+        name="agent", pos=np.array([0, 0]), ori=np.array([0, 1]),
+        room_id=1, init_pos=np.array([0, 0]), init_ori=np.array([0, 1]), init_room_id=1
     )
 
-    print(room)
-    print(room.gates)
-    print(agent)
-
-    # Assistant response with correct global positions (agent origin, +Y forward)
-    assistant_response = (
-        """```json
-{
-  "global": {
-    "agent": {"position": [0, 0], "facing": "north", "confidence": "high"},
-    "monitor": {"position": [0, 1], "facing": "west", "confidence": "high"},
-    "refrigerator": {"position": [-1, -2], "facing": "east", "confidence": "high"}
-  },
-  "gates": {
-    "door_0": {"connects": [2, 3]},
-    "door_1": {"connects": [3, 1]}
-  }
-}
-```"""
-    )
-
+    # Register entry gate for room 1 and 2
     mgr = CognitiveMapManager()
-    metrics = mgr.evaluate_cognitive_map(assistant_response, room, agent, observed_items=["monitor", "refrigerator"])
-    print("metrics:", metrics)
-    print("summary:", mgr.get_cogmap_summary())
+    mgr.register_room_entry(1, "door_0")
+    mgr.register_room_entry(2, "door_0")
+
+    # Observed set includes everything
+    observed = {"chair", "table"}
+
+    # Call your function
+    gt_rooms = mgr._build_gt_room_baserooms(room, agent, observed)
+
+    # Inspect
+    for rid, br in gt_rooms.items():
+        print(rid, br)
