@@ -575,21 +575,7 @@ class CognitiveMapManager:
         out: Dict[int, BaseRoom] = {}
         if not isinstance(gt_room, Room):
             return out
-        """for rid in sorted(getattr(gt_room, 'objects_by_room', {}).keys()):
-            gate_name = self.entry_gate_by_room.get(int(rid))
-            if gate_name is None: # no entry gate for this room
-                continue
-            gate = next((g for g in getattr(gt_room, 'gates', []) if g.name == gate_name), None)
-            anchor_pos, anchor_ori = gate.pos, gate.get_ori_for_room(int(rid))
-            # exclude origin gate and agent; include room objects only
-            objs: List[Object] = []
-            for name in gt_room.objects_by_room.get(int(rid), []):
-                if name == gate.name or name not in observed_set:
-                    continue
-                o = gt_room.get_object_by_name(name)
-                objs.append(Object(name=o.name, pos=o.pos.copy(), ori=o.ori.copy(), has_orientation=getattr(o, 'has_orientation', True)))
-            out[int(rid)] = _transform_baseroom(BaseRoom(objects=objs, name=f'gt_room_{rid}'), anchor_pos, anchor_ori)"""
-            # Helper: get the entry gate for a room id (prefer manager-registered entry gate, else first gate in that room)
+        # Helper: get the entry gate for a room id (prefer manager-registered entry gate, else first gate in that room)
         def _get_entry_gate_for_room(rid: int) -> Gate | None:
             # 1) user-registered first-entry gate
             name = self.entry_gate_by_room.get(int(rid))
