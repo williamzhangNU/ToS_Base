@@ -472,17 +472,13 @@ def get_room_description(room: Room, agent: Agent, with_topdown: bool = False) -
 
 
 if __name__ == '__main__':
-    room, agent = RoomGenerator.generate_room(
-        room_size=[20, 20],
-        main=5,
-        n_objects=3,
-        level=3,
-        np_random=np.random.default_rng(42),
-    )
-    print(room)
-    print(agent)
-
-    RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
-    RoomPlotter.plot(room, agent, mode='text')
-
-    # print(get_room_description(room, agent, with_topdown=True))
+    np_random = np.random.default_rng(42)
+    
+    # Test 3 object placement strategies
+    room1, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, np_random=np_random)
+    room2, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, proportional_to_area=True, np_random=np_random)
+    room3, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, fix_object_n=[4, 3, 2], np_random=np_random)
+    
+    print(f"Random: {len(room1.objects)} total")
+    print(f"Proportional: {[len([o for o in room2.objects if o.room_id == r]) for r in range(1, 4)]}")
+    print(f"Fixed: {[len([o for o in room3.objects if o.room_id == r]) for r in range(1, 4)]}")
