@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Tuple, List, Optional
 
-def generate_room_layout(n: int, level: int, main: int = None, np_random: np.random.Generator = None, debug: bool = False, fix_room_size: Optional[List[List[int]]] = None) -> np.ndarray:
+def generate_room_layout(n: int, level: int, main: int = None, np_random: np.random.Generator = None, debug: bool = False, fix_room_size: Optional[List[List[int]]] = None, same_room_size: bool = False) -> np.ndarray:
     """
     Function to generate room layout
 
@@ -11,6 +11,7 @@ def generate_room_layout(n: int, level: int, main: int = None, np_random: np.ran
         main: Main room size, if specified the first room will be main×main size (ignored if fix_room_size is provided)
         np_random: numpy random Generator
         fix_room_size: Optional list of [width, height] for each room (length must be level+1)
+        same_room_size: When True, all rooms use the same size as main room (ignored if fix_room_size is provided)
 
     Returns:
         n x n numpy array where:
@@ -37,7 +38,7 @@ def generate_room_layout(n: int, level: int, main: int = None, np_random: np.ran
         grid = np.full((n, n), -1, dtype=int)
 
         # Generate room layout
-        rooms = _generate_room_layout(n, num_rooms, main, np_random, fix_room_size)
+        rooms = _generate_room_layout(n, num_rooms, main, np_random, fix_room_size, same_room_size)
         if not rooms or len(rooms) != num_rooms:
             continue
 
@@ -112,7 +113,7 @@ def _generate_single_room(grid: np.ndarray, n: int, main: Optional[int] = None) 
 
     return grid
 
-def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np_random: np.random.Generator = None, fix_room_size: Optional[List[List[int]]] = None) -> List[Tuple[int, int, int, int]]:
+def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np_random: np.random.Generator = None, fix_room_size: Optional[List[List[int]]] = None, same_room_size: bool = False) -> List[Tuple[int, int, int, int]]:
     """Generate room layout, return list of room coordinates (x1, y1, x2, y2)"""
     rooms = []
 
@@ -152,8 +153,23 @@ def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np
                     width = min_size
                 if height < min_size:
                     height = min_size
+            elif same_room_size and main is not None:
+                # All rooms use the same size as main room
+                width = main
+                height = main
+                # Ensure room is not too large (based on grid size, not max_size)
+                max_possible_size = n - 4  # Leave space for walls
+                if width > max_possible_size:
+                    width = max_possible_size
+                if height > max_possible_size:
+                    height = max_possible_size
+                # Ensure room is not too small
+                if width < min_size:
+                    width = min_size
+                if height < min_size:
+                    height = min_size
             elif i == 0 and main is not None:
-                # First room uses specified main×main size
+                # First room uses specified main×main size (when same_room_size is False)
                 width = main
                 height = main
                 # Ensure main room is not too large (based on grid size, not max_size)
