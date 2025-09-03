@@ -6,6 +6,7 @@ from ..core.room import Room, BaseRoom
 from ..core.constant import CANDIDATE_OBJECTS, ObjectInfo
 from ..core.object import Object, Agent, Gate
 from .generate_room_layout import generate_room_layout
+from ..core.relationship import PairwiseRelationship
 
 
 class RoomGenerator:
@@ -19,6 +20,57 @@ class RoomGenerator:
         - Room id is an integer in [1, 99].
         - 0 for wall, 1 for main room, 100 for north-south door, 101 for east-west door.
     """
+    
+    @staticmethod
+    def _validate_rotation_tasks(room: 'Room', agent: 'Agent', eval_tasks: list, min_angle_eps: float = 30.0) -> bool:
+        """
+        Validate if the room layout is suitable for rotation tasks.
+        
+        Args:
+            room: The generated room
+            agent: The agent in the room
+            eval_tasks: List of evaluation tasks
+            min_angle_eps: Minimum angle separation required (degrees)
+            
+        Returns:
+            True if layout is valid for rotation tasks, False otherwise
+        """
+        # Check if there are rotation tasks
+        has_rotation_tasks = any(
+            task.get('task_type') in ['rot', 'rot_dual'] 
+            for task in eval_tasks
+        )
+        
+        if not has_rotation_tasks:
+            return True
+        
+        # Get all objects (excluding agent)
+        objects = [obj for obj in room.objects if not np.array_equal(obj.pos, agent.pos)]
+        
+        if len(objects) < 3:
+            return False
+        
+        # Calculate angles from agent position
+        angles = []
+        for obj in objects:
+            bearing = float(PairwiseRelationship.get_bearing_degree(
+                tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori)
+            ))
+            angles.append(bearing % 360.0)
+        
+        # Sort angles
+        angles.sort()
+        
+        # Check minimum separation between consecutive angles
+        valid_count = 0
+        for i in range(len(angles)):
+            next_i = (i + 1) % len(angles)
+            angle_diff = (angles[next_i] - angles[i]) % 360.0
+            if angle_diff >= min_angle_eps:
+                valid_count += 1
+        
+        # Need at least 3 objects with sufficient separation
+        return valid_count >= 3
     @staticmethod
     def _default_mask(room_size: tuple[int, int]) -> np.ndarray:
         x_size, y_size = int(room_size[0]), int(room_size[1])
@@ -35,7 +87,7 @@ class RoomGenerator:
             valid = np.argwhere(mask == int(room_id))
         else:
             valid = np.argwhere((mask >= 1) & (mask < 100))
-        return valid
+        return [(int(pos[0]), int(pos[1])) for pos in valid]
     
     @staticmethod
     def _gen_gates_from_mask(msk: np.ndarray) -> List[Gate]:
@@ -79,38 +131,79 @@ class RoomGenerator:
         candidate_objects: List[ObjectInfo] = CANDIDATE_OBJECTS,
         level: int = 0,
         main: Optional[int] = None,
+        **kwargs
     ) -> Tuple[Room, Agent]:
         """Generate a multi-room layout, gates, objects, and agent.
         - Mask is generated via generate_room_layout; gates derived from mask.
         - Agent is sampled from main room (room id = 1).
+        - Validates layout for rotation tasks and retries if needed.
         """
-        n = int(max(room_size[0], room_size[1]))
-        # generate layout in conventional [row(y), col(x)] then transpose to our [x, y] convention
-        mask = generate_room_layout(n=n, level=int(level), main=main, np_random=np_random)
+        eval_tasks = kwargs.get('eval_tasks', [])
+        min_angle_eps = kwargs.get('min_angle_eps', 30.0)
+        max_retries = kwargs.get('max_retries', 10)
+        
+        # Store original random state for reproducibility
+        original_state = np_random.bit_generator.state
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # Use deterministic sub-seed based on original seed and attempt
+                sub_seed = np_random.integers(0, 2**32 - 1)
+                attempt_random = np.random.default_rng(sub_seed)
+                
+                n = int(max(room_size[0], room_size[1]))
+                
+                # Generate layout
+                fix_room_size = kwargs.get('fix_room_size', None)
+                mask = generate_room_layout(
+                    n=n, level=int(level), main=main, 
+                    np_random=attempt_random, fix_room_size=fix_room_size
+                )
 
-        gates = RoomGenerator._gen_gates_from_mask(mask)
+                gates = RoomGenerator._gen_gates_from_mask(mask)
 
-        # sample objects and agent; ensure agent in main room (id=1)
-        objects = RoomGenerator._gen_objects(
-            n=n_objects,
-            random_generator=np_random,
-            room_size=list(room_size),
-            perspective_taking=True,
-            candidate_list=candidate_objects,
-            mask=mask,
-        )
+                # Generate objects
+                fix_object_n = kwargs.get('fix_object_n', None)
+                total_objects = sum(fix_object_n) if fix_object_n else n_objects
+                objects = RoomGenerator._gen_objects(
+                    n=total_objects,
+                    random_generator=attempt_random,
+                    room_size=list(room_size),
+                    perspective_taking=True,
+                    candidate_list=candidate_objects,
+                    mask=mask,
+                    fix_object_n=fix_object_n,
+                )
 
-        # build room
-        room = Room(objects=objects, name=room_name, mask=mask.copy(), gates=gates)
+                # Build room
+                room = Room(objects=objects, name=room_name, mask=mask.copy(), gates=gates)
 
-        # assign agent room id
-        agent_pos = room.get_random_point(np_random, room_id=1)
-        while any(np.allclose(agent_pos, obj.pos) for obj in objects):
-            agent_pos = room.get_random_point(np_random, room_id=1)
-        agent = Agent(name='agent', pos=agent_pos)
-        agent.room_id = 1
-        agent.init_room_id = agent.room_id
-        return room, agent
+                # Place agent
+                agent_pos = room.get_random_point(attempt_random, room_id=1)
+                while any(np.allclose(agent_pos, obj.pos) for obj in objects):
+                    agent_pos = room.get_random_point(attempt_random, room_id=1)
+                agent = Agent(name='agent', pos=agent_pos)
+                agent.room_id = 1
+                agent.init_room_id = agent.room_id
+
+                # Validate layout for rotation tasks
+                if RoomGenerator._validate_rotation_tasks(room, agent, eval_tasks, min_angle_eps):
+                    # Success! Restore random state for next call consistency
+                    return room, agent
+                else:
+                    if attempt == max_retries:
+                        print(f"Warning: Failed to generate valid layout after {max_retries + 1} attempts. "
+                              f"Using layout that may have insufficient angular separation for rotation tasks.")
+                        return room, agent
+                    # Continue to next attempt
+                    
+            except Exception as e:
+                if attempt == max_retries:
+                    raise e
+                # Continue to next attempt
+                
+        # This should not be reached, but just in case
+        raise RuntimeError(f"Failed to generate room after {max_retries + 1} attempts")
 
     @staticmethod
     def generate_base_room(
@@ -157,24 +250,66 @@ class RoomGenerator:
         perspective_taking: bool = False,
         candidate_list: list[ObjectInfo] = CANDIDATE_OBJECTS,
         mask: Optional[np.ndarray] = None,
+        fix_object_n: Optional[List[int]] = None,
     ) -> List[Object]:
         """Sample objects (names, orientations) and positions from mask."""
         if mask is None:
             mask = RoomGenerator._default_mask((room_size[0], room_size[1]))
-        valid_positions = RoomGenerator._get_valid_positions(mask)
-        assert len(valid_positions) >= n
-        random_generator.shuffle(valid_positions)
-        obj_positions = valid_positions[:n]
-
-        indices = random_generator.choice(len(candidate_list), n, replace=False)
-        selected_object_info = [candidate_list[i] for i in indices]
-        orientations = random_generator.integers(0, 4, n)
-        ori_vectors = {0: [0, 1], 1: [1, 0], 2: [0, -1], 3: [-1, 0]}
-
+        
         objects = []
-        for obj_info, pos, ori_idx in zip(selected_object_info, obj_positions, orientations):
-            ori = np.array(ori_vectors[int(ori_idx)]) if obj_info.has_orientation and perspective_taking else np.array([0, 1])
-            objects.append(Object(name=obj_info.name, pos=np.array(pos, dtype=int), ori=ori, has_orientation=obj_info.has_orientation))
+        ori_vectors = {0: [0, 1], 1: [1, 0], 2: [0, -1], 3: [-1, 0]}
+        
+        if fix_object_n is not None:
+            # Fixed object distribution per room
+            used_candidate_indices = set()
+            
+            for room_id, num_objects in enumerate(fix_object_n, start=1):
+                if num_objects == 0:
+                    continue
+                    
+                # Get valid positions for this room
+                room_positions = RoomGenerator._get_valid_positions(mask, room_id=room_id)
+                if len(room_positions) < num_objects:
+                    raise ValueError(f"Room {room_id} has only {len(room_positions)} valid positions but needs {num_objects} objects")
+                
+                # Shuffle and select positions for this room
+                random_generator.shuffle(room_positions)
+                selected_positions = room_positions[:num_objects]
+                
+                # Select object types (ensuring no duplicates across all rooms)
+                available_indices = [i for i in range(len(candidate_list)) if i not in used_candidate_indices]
+                if len(available_indices) < num_objects:
+                    # If we run out of unique objects, allow reuse but avoid immediate duplicates
+                    available_indices = list(range(len(candidate_list)))
+                
+                selected_indices = random_generator.choice(available_indices, num_objects, replace=False)
+                used_candidate_indices.update(selected_indices)
+                
+                # Generate orientations for this room's objects
+                orientations = random_generator.integers(0, 4, num_objects)
+                
+                # Create objects for this room
+                for idx, pos, ori_idx in zip(selected_indices, selected_positions, orientations):
+                    obj_info = candidate_list[idx]
+                    ori = np.array(ori_vectors[int(ori_idx)]) if obj_info.has_orientation and perspective_taking else np.array([0, 1])
+                    obj = Object(name=obj_info.name, pos=np.array(pos, dtype=int), ori=ori, has_orientation=obj_info.has_orientation)
+                    # Note: room_id will be set by Room._build_membership_from_mask() based on position in mask
+                    objects.append(obj)
+        else:
+            # Traditional random distribution
+            valid_positions = RoomGenerator._get_valid_positions(mask)
+            assert len(valid_positions) >= n
+            random_generator.shuffle(valid_positions)
+            obj_positions = valid_positions[:n]
+
+            indices = random_generator.choice(len(candidate_list), n, replace=False)
+            selected_object_info = [candidate_list[i] for i in indices]
+            orientations = random_generator.integers(0, 4, n)
+
+            for obj_info, pos, ori_idx in zip(selected_object_info, obj_positions, orientations):
+                ori = np.array(ori_vectors[int(ori_idx)]) if obj_info.has_orientation and perspective_taking else np.array([0, 1])
+                objects.append(Object(name=obj_info.name, pos=np.array(pos, dtype=int), ori=ori, has_orientation=obj_info.has_orientation))
+        
         return objects
 
 
