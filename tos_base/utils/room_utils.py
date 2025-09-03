@@ -145,10 +145,15 @@ class RoomGenerator:
         # Store original random state for reproducibility
         original_state = np_random.bit_generator.state
         
+        # Get the original seed to generate deterministic sub-seeds
+        temp_random = np.random.default_rng()
+        temp_random.bit_generator.state = original_state
+        base_seed = temp_random.integers(0, 2**32 - 1)
+        
         for attempt in range(max_retries + 1):
             try:
-                # Use deterministic sub-seed based on original seed and attempt
-                sub_seed = np_random.integers(0, 2**32 - 1)
+                # Use deterministic sub-seed based on base seed and attempt number
+                sub_seed = (base_seed + attempt * 1000007) % (2**32)  # Use prime number to avoid patterns
                 attempt_random = np.random.default_rng(sub_seed)
                 
                 n = int(max(room_size[0], room_size[1]))
