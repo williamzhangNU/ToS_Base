@@ -1,15 +1,17 @@
 import numpy as np
 from typing import Tuple, List, Optional
 
-def generate_room_layout(n: int, level: int, main: int = None, np_random: np.random.Generator = None, debug: bool = False) -> np.ndarray:
+def generate_room_layout(n: int, level: int, main: int = None, np_random: np.random.Generator = None, debug: bool = False, fix_room_size: Optional[List[List[int]]] = None, same_room_size: bool = False) -> np.ndarray:
     """
     Function to generate room layout
 
     Args:
         n: Grid size (n x n)
         level: Complexity level, level=0 means 1 room, level=1 means 2 rooms, and so on
-        main: Main room size, if specified the first room will be main×main size
+        main: Main room size, if specified the first room will be main×main size (ignored if fix_room_size is provided)
         np_random: numpy random Generator
+        fix_room_size: Optional list of [width, height] for each room (length must be level+1)
+        same_room_size: When True, all rooms use the same size as main room (ignored if fix_room_size is provided)
 
     Returns:
         n x n numpy array where:
@@ -36,7 +38,7 @@ def generate_room_layout(n: int, level: int, main: int = None, np_random: np.ran
         grid = np.full((n, n), -1, dtype=int)
 
         # Generate room layout
-        rooms = _generate_room_layout(n, num_rooms, main, np_random)
+        rooms = _generate_room_layout(n, num_rooms, main, np_random, fix_room_size, same_room_size)
         if not rooms or len(rooms) != num_rooms:
             continue
 
@@ -111,7 +113,14 @@ def _generate_single_room(grid: np.ndarray, n: int, main: Optional[int] = None) 
 
     return grid
 
-def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np_random: np.random.Generator = None) -> List[Tuple[int, int, int, int]]:
+def _clamp_room_size(width: int, height: int, n: int, min_size: int) -> Tuple[int, int]:
+    """Clamp room size to valid bounds."""
+    max_size = n - 4  # Leave space for walls
+    width = max(min_size, min(width, max_size))
+    height = max(min_size, min(height, max_size))
+    return width, height
+
+def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np_random: np.random.Generator = None, fix_room_size: Optional[List[List[int]]] = None, same_room_size: bool = False) -> List[Tuple[int, int, int, int]]:
     """Generate room layout, return list of room coordinates (x1, y1, x2, y2)"""
     rooms = []
 
@@ -136,74 +145,49 @@ def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np
         placed = False
 
         while attempts < max_attempts and not placed:
-            # Generate different sizes for each room, increase differentiation
-            if i == 0 and main is not None:
-                # First room uses specified main×main size
-                width = main
-                height = main
-                # Ensure main room is not too large (based on grid size, not max_size)
-                max_possible_size = n - 4  # Leave space for walls
-                if width > max_possible_size:
-                    width = max_possible_size
-                if height > max_possible_size:
-                    height = max_possible_size
-                # Ensure main room is not too small
-                if width < min_size:
-                    width = min_size
-                if height < min_size:
-                    height = min_size
+            # Determine room size based on parameters
+            if fix_room_size is not None:
+                width, height = fix_room_size[i]
+            elif same_room_size and main is not None:
+                width = height = main
+            elif i == 0 and main is not None:
+                width = height = main
             elif num_rooms > 1:
-                # Use different size preferences for different rooms, increase larger differences
+                # Use different size preferences for different rooms
                 if i == 0:
-                    # First room is larger (if main is not specified)
-                    room_min = min_size
-                    room_max = max_size
+                    room_min, room_max = min_size, max_size
                 elif i == 1:
-                    # Second room is medium size
-                    room_min = min_size
                     room_max = max(min_size, max_size - int(np_random.integers(1, 3)))
+                    room_min = min_size
                 elif i == 2:
-                    # Third room is smaller
-                    room_min = min_size
                     room_max = max(min_size, max_size - int(np_random.integers(2, 4)))
-                else:
-                    # Other rooms have random size variation
-                    size_variation = int(np_random.choice([0, 1, 2, 3]))
                     room_min = min_size
-                    room_max = max(min_size, max_size - size_variation)
+                else:
+                    size_variation = int(np_random.choice([0, 1, 2, 3]))
+                    room_min, room_max = min_size, max(min_size, max_size - size_variation)
 
-                # Generate room size, width and height can be different
                 width = int(np_random.integers(room_min, room_max + 1))
                 height = int(np_random.integers(room_min, room_max + 1))
 
-                # Increase probability of rectangular rooms with larger differences
-                if float(np_random.random()) < 0.6:  # 60% probability to generate rectangle
+                # 60% chance for rectangular rooms
+                if float(np_random.random()) < 0.6:
                     if float(np_random.random()) < 0.5:
-                        # Increase width
-                        width = min(max_size, width + int(np_random.integers(1, 3 + 1)))
+                        width = min(max_size, width + int(np_random.integers(1, 4)))
                     else:
-                        # Increase height
-                        height = min(max_size, height + int(np_random.integers(1, 3 + 1)))
+                        height = min(max_size, height + int(np_random.integers(1, 4)))
             else:
-                # Single room case
-                room_min = min_size
-                room_max = max_size
-                width = int(np_random.integers(room_min, room_max + 1))
-                height = int(np_random.integers(room_min, room_max + 1))
+                width = int(np_random.integers(min_size, max_size + 1))
+                height = int(np_random.integers(min_size, max_size + 1))
+            
+            # Clamp room size to valid bounds
+            width, height = _clamp_room_size(width, height, n, min_size)
 
-            # Ensure room doesn't reach boundary, must have space for surrounding walls
+            # Calculate available space for room placement
             max_x = n - width - 1  # Leave at least 1 cell for wall
             max_y = n - height - 1  # Leave at least 1 cell for wall
 
             if max_x < 1 or max_y < 1:
-                # Not enough space, shrink room
-                width = max(min_size, n - 2)  # Leave 1 cell on each side
-                height = max(min_size, n - 2)  # Leave 1 cell on each side
-                max_x = n - width - 1
-                max_y = n - height - 1
-
-                if max_x < 1 or max_y < 1:
-                    break
+                break  # Grid too small for this room
 
             # Randomly generate room position (starting from 1, ensure space for surrounding walls)
             x1 = int(np_random.integers(1, max_x + 1))
