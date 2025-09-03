@@ -25,22 +25,12 @@ class RoomGenerator:
     def _validate_rotation_tasks(room: 'Room', agent: 'Agent', eval_tasks: list) -> bool:
         """Validate by attempting to create rotation tasks."""
         from ..evaluation.task_types import EvalTaskType
-        
-        rotation_tasks = [task for task in eval_tasks if task.get('task_type') in ['rot', 'rot_dual']]
-        if not rotation_tasks:
-            return True
-            
         try:
-            for task_spec in rotation_tasks:
-                task = EvalTaskType.create_task(
-                    task_spec['task_type'], 
-                    np.random.default_rng(42), 
-                    room, agent, 
-                    task_spec.get('task_kwargs', {})
-                )
-                task.generate_question()
+            for task in eval_tasks:
+                if task.get('task_type') in ['rot', 'rot_dual']:
+                    EvalTaskType.create_task(task['task_type'], np.random.default_rng(42), room, agent, task.get('task_kwargs', {})).generate_question()
             return True
-        except Exception:
+        except:
             return False
 
     @staticmethod
