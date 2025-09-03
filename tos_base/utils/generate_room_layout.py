@@ -1,15 +1,16 @@
 import numpy as np
 from typing import Tuple, List, Optional
 
-def generate_room_layout(n: int, level: int, main: int = None, np_random: np.random.Generator = None, debug: bool = False) -> np.ndarray:
+def generate_room_layout(n: int, level: int, main: int = None, np_random: np.random.Generator = None, debug: bool = False, fix_room_size: Optional[List[List[int]]] = None) -> np.ndarray:
     """
     Function to generate room layout
 
     Args:
         n: Grid size (n x n)
         level: Complexity level, level=0 means 1 room, level=1 means 2 rooms, and so on
-        main: Main room size, if specified the first room will be main×main size
+        main: Main room size, if specified the first room will be main×main size (ignored if fix_room_size is provided)
         np_random: numpy random Generator
+        fix_room_size: Optional list of [width, height] for each room (length must be level+1)
 
     Returns:
         n x n numpy array where:
@@ -36,7 +37,7 @@ def generate_room_layout(n: int, level: int, main: int = None, np_random: np.ran
         grid = np.full((n, n), -1, dtype=int)
 
         # Generate room layout
-        rooms = _generate_room_layout(n, num_rooms, main, np_random)
+        rooms = _generate_room_layout(n, num_rooms, main, np_random, fix_room_size)
         if not rooms or len(rooms) != num_rooms:
             continue
 
@@ -111,7 +112,7 @@ def _generate_single_room(grid: np.ndarray, n: int, main: Optional[int] = None) 
 
     return grid
 
-def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np_random: np.random.Generator = None) -> List[Tuple[int, int, int, int]]:
+def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np_random: np.random.Generator = None, fix_room_size: Optional[List[List[int]]] = None) -> List[Tuple[int, int, int, int]]:
     """Generate room layout, return list of room coordinates (x1, y1, x2, y2)"""
     rooms = []
 
@@ -137,7 +138,21 @@ def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np
 
         while attempts < max_attempts and not placed:
             # Generate different sizes for each room, increase differentiation
-            if i == 0 and main is not None:
+            if fix_room_size is not None:
+                # Use fixed room sizes
+                width, height = fix_room_size[i]
+                # Ensure room is not too large for the grid
+                max_possible_size = n - 4  # Leave space for walls
+                if width > max_possible_size:
+                    width = max_possible_size
+                if height > max_possible_size:
+                    height = max_possible_size
+                # Ensure room is not too small
+                if width < min_size:
+                    width = min_size
+                if height < min_size:
+                    height = min_size
+            elif i == 0 and main is not None:
                 # First room uses specified main×main size
                 width = main
                 height = main
