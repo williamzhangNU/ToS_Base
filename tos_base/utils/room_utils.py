@@ -46,22 +46,11 @@ class RoomGenerator:
             fix_object_n=fix_object_n,
         )
         
-        agent_pos = None
-        max_attempts = 100
-        for _ in range(max_attempts):
-            try:
-                temp_pos = RoomGenerator._get_valid_positions(mask, room_id=1)
-                if temp_pos:
-                    pos = np_random.choice(len(temp_pos))
-                    candidate_pos = np.array(temp_pos[pos])
-                    if not any(np.allclose(candidate_pos, obj.pos) for obj in objects):
-                        agent_pos = candidate_pos
-                        break
-            except:
-                continue
-        
-        if agent_pos is None:
-            raise ValueError("Could not place agent")
+        # Find agent position
+        valid_positions = RoomGenerator._get_valid_positions(mask, room_id=1)
+        agent_pos = np_random.choice(valid_positions)
+        while any(np.allclose(agent_pos, obj.pos) for obj in objects):
+            agent_pos = np_random.choice(valid_positions)
             
         agent = Agent(name='agent', pos=agent_pos)
         agent.room_id = 1
@@ -168,19 +157,32 @@ class RoomGenerator:
 
                 gates = RoomGenerator._gen_gates_from_mask(mask)
                 
+                # Object distribution strategies
                 fix_object_n = kwargs.get('fix_object_n', None)
-                objects_per_area = kwargs.get('objects_per_area', None)
+                proportional_to_area = kwargs.get('proportional_to_area', False)
                 
-                if fix_object_n:
-                    total_objects = sum(fix_object_n)
-                elif objects_per_area:
+                if proportional_to_area and not fix_object_n:
+                    # Calculate proportional distribution
                     total_area = np.sum((mask >= 1) & (mask < 100))
-                    total_objects = max(1, int(total_area * objects_per_area))
-                else:
-                    total_objects = n_objects
+                    room_areas = []
+                    num_rooms = level + 1
+                    for room_id in range(1, num_rooms + 1):
+                        room_area = np.sum(mask == room_id)
+                        room_areas.append(room_area)
+                    
+                    # Distribute n_objects proportionally
+                    if sum(room_areas) > 0:
+                        proportions = [area / sum(room_areas) for area in room_areas]
+                        fix_object_n = [max(1, round(n_objects * prop)) for prop in proportions]
+                        # Adjust to ensure sum equals n_objects
+                        diff = n_objects - sum(fix_object_n)
+                        if diff != 0:
+                            # Add/subtract from largest room
+                            max_idx = room_areas.index(max(room_areas))
+                            fix_object_n[max_idx] += diff
                 
                 room, agent = RoomGenerator._generate_objects_and_agent(
-                    mask, total_objects, fix_object_n, attempt_random, candidate_objects, room_name
+                    mask, n_objects, fix_object_n, attempt_random, candidate_objects, room_name
                 )
                 room.gates = gates
 
