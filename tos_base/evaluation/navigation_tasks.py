@@ -8,8 +8,8 @@ from typing import List, Tuple, Dict, Any, Optional
 import numpy as np
 
 from .tasks import BaseEvaluationTask
-from ..core.object import Agent, Object
-from ..core.relationship import EgoFrontBins, StandardDistanceBins, PairwiseRelationshipDiscrete
+from ..core.object import Agent, Object, Gate
+from ..core.relationship import EgoFrontBins, StandardDistanceBins, PairwiseRelationshipDiscrete, OrientationRel
 from ..actions import BaseAction, ObserveApproxAction, RotateAction, MoveAction
 from ..managers.exploration_manager import ExplorationManager
 from ..utils.action_utils import action_results_to_text
@@ -53,11 +53,11 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
             info = self.room.get_cell_info(int(a.pos[0]), int(a.pos[1])); a.room_id = info.get('room_id', a.room_id)
         return a
 
-    def _new_mgr(self, agent: Agent | None = None) -> ExplorationManager:
-        return ExplorationManager(self.room.copy(), (agent or self._agent_from_init()))
 
-    def _visible_names(self, mgr: ExplorationManager) -> List[str]:
-        return mgr.execute_success_action(ObserveApproxAction()).data['visible_objects']
+    def _move_simple(self, agent: Agent, name: str) -> None:
+        obj = self.room.get_object_by_name(name)
+        agent.pos = obj.pos.copy()
+        agent.room_id = obj.room_id
 
     def _rotate_to_face(self, mgr: ExplorationManager, target: Object):
         vec = target.pos - mgr.agent.pos
@@ -71,12 +71,12 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
         return mgr.execute_success_action(RotateAction(int(delta)))
 
     def _describe_target(self, mgr: ExplorationManager, target: Object) -> str:
-        bin_sys, dist_sys = EgoFrontBins(), StandardDistanceBins()
+        bin_sys, dist_sys = EgoFrontBins(), StandardDistanceBins() # TODO whether use cardinal bins
         rel_t = PairwiseRelationshipDiscrete.relationship(tuple(target.pos), tuple(mgr.agent.pos), anchor_ori=tuple(mgr.agent.ori), bin_system=bin_sys, distance_bin_system=dist_sys)
         dir_label, dist_label = rel_t.direction.bin_label, rel_t.dist.bin_label
         # Build groups via current Observe; indices only when multiple
         dir_group, dist_group = [], []
-        for name in self._visible_names(mgr):
+        for name in mgr.execute_success_action(ObserveApproxAction()).data['visible_objects']:
             o = self.room.get_object_by_name(name)
             rel = PairwiseRelationshipDiscrete.relationship(tuple(o.pos), tuple(mgr.agent.pos), anchor_ori=tuple(mgr.agent.ori), bin_system=bin_sys, distance_bin_system=dist_sys)
             deg = float(rel.direction.degree)
@@ -85,21 +85,25 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
             if int(rel.dist.bin_id) == int(rel_t.dist.bin_id):
                 dval = float(np.linalg.norm(np.array(o.pos) - np.array(mgr.agent.pos)))
                 dist_group.append((o, dval))
-        extras: List[str] = []
-        if len(dir_group) > 1:
-            dir_group.sort(key=lambda x: x[1])
-            idx = 1 + next(i for i, (o, _) in enumerate(dir_group) if o.name == target.name)
-            extras.append(f"at {dir_label} it's {_ordinal(idx)} from left")
-        if len(dist_group) > 1:
-            dist_group.sort(key=lambda x: x[1])
-            i = 1 + next(i for i, (o, _) in enumerate(dist_group) if o.name == target.name)
-            extras.append(f"at {dist_label} it's {_nearfar_phrase(i, len(dist_group))}")
-        base = f"move to the object at {dir_label}, {dist_label}"
-        return base + ("; " + "; ".join(extras) if extras else "") + "."
+        # Clear, compact prompt for indices within groups
+        dir_phrase, dist_phrase = None, None
+        if len(dir_group) > 1 and len(dist_group) > 1:
+            if len(dir_group) > 1:
+                dir_group.sort(key=lambda x: x[1])
+                idx = 1 + next(i for i, (o, _) in enumerate(dir_group) if o.name == target.name)
+                dir_phrase = f"{_ordinal(idx)} from left"
+            if len(dist_group) > 1:
+                dist_group.sort(key=lambda x: x[1])
+                i = 1 + next(i for i, (o, _) in enumerate(dist_group) if o.name == target.name)
+                dist_phrase = f"{_nearfar_phrase(i, len(dist_group))} one"
+        if dir_phrase or dist_phrase:
+            parts = [p for p in [dir_phrase, dist_phrase] if p]
+            return f"Among objects which are {dir_label}, {dist_label}, you move to the " + " also ".join(parts) + "."
+        return f"Move to the object at {dir_label}, {dist_label}."
 
     def build_action_sequence(self, sequence: List[str], final_ori: Tuple[int, int]) -> Tuple[List[List], Agent]:
         """Return per-step ActionResults groups and end agent. Each target yields [Rotate?, Move]. Final group is Rotate if needed."""
-        mgr = self._new_mgr()
+        mgr = ExplorationManager(self.room.copy(), self._agent_from_init())
         per_step: List[List] = []
         for name in sequence:
             target = mgr.exploration_room.get_object_by_name(name)
@@ -120,11 +124,9 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
             per_step.append([mgr.execute_success_action(RotateAction(int(delta)))])
         return per_step, mgr.agent.copy()
 
-    def action_sequence_to_string(self, per_step: List[List], include_final_face: bool) -> str:
-        """Render numbered lines; optionally drop the last rotate group."""
+    def action_sequence_to_string(self, per_step: List[List]) -> str:
+        """Render numbered lines; always include the final facing rotation."""
         groups = list(per_step)
-        if (not include_final_face) and groups and len(groups[-1]) == 1 and getattr(groups[-1][0], 'action_type', '') == 'rotate':
-            groups = groups[:-1]
         return "\n".join(f"{i+1}. {action_results_to_text(group)}" for i, group in enumerate(groups))
 
     def _current_rooms(self, agent: Agent) -> List[int]:
@@ -143,46 +145,59 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
         return list(dict.fromkeys(names))
 
     def _generate_plan(self, steps: int = 2) -> Tuple[List[str], Tuple[int, int]]:
-        """Sample next targets from current rooms (or gates), rotating then moving each step.
+        """Plan by moving agent directly. Bias crossing rooms via gates and prefer objects in the other room after stepping onto a gate.
         Final orientation guarantees ≥1 object in FOV.
         """
-        mgr = self._new_mgr()
+        a = self._agent_from_init()
         seq: List[str] = []
+        last_was_gate = False
+        other_rooms_after_gate: List[int] = []
         for _ in range(int(steps)):
-            rooms = self._current_rooms(mgr.agent)
-            cand = [n for n in self._candidates_in_rooms(rooms) if not np.allclose(self.room.get_object_by_name(n).pos, mgr.agent.pos)]
+            rooms = self._current_rooms(a)
+            cand = [n for n in self._candidates_in_rooms(rooms) if not np.allclose(self.room.get_object_by_name(n).pos, a.pos)]
             if not cand:
                 break
-            name = str(self.np_random.choice(cand))
-            target = mgr.exploration_room.get_object_by_name(name)
-            _ = self._rotate_to_face(mgr, target)
-            observed = set(mgr.execute_success_action(ObserveApproxAction()).data['visible_objects'])
-            _ = mgr.execute_success_action(MoveAction(name), observed_items=observed)
+            gate_cand = [n for n in cand if isinstance(self.room.get_object_by_name(n), Gate)]
+            non_gate = [n for n in cand if n not in gate_cand]
+            if last_was_gate:
+                # prefer objects in the other room(s) after gate
+                objects_in_other_rooms = [n for n in non_gate if self.room.get_object_by_name(n).room_id in other_rooms_after_gate]
+                pool = objects_in_other_rooms or non_gate or gate_cand
+                name = str(self.np_random.choice(pool))
+            else:
+                # bias toward gates to encourage crossing
+                if gate_cand and int(self.np_random.integers(0, 10)) < 6:  # ~60% pick gate when available
+                    name = str(self.np_random.choice(gate_cand))
+                else:
+                    name = str(self.np_random.choice(non_gate or cand))
+            self._move_simple(a, name)
+            # update gate context
+            if isinstance(self.room.get_object_by_name(name), Gate):
+                last_was_gate = True
+                gobj = self.room.get_object_by_name(name)
+                other_rooms_after_gate = [int(r) for r in list(gobj.room_id) if int(r) not in rooms]
+            else:
+                last_was_gate = False
+                other_rooms_after_gate = []
             seq.append(name)
         # choose final orientation with ≥1 visible object
         valid_oris = []
         for ori in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-            tmp_mgr = self._new_mgr(mgr.agent.copy()); tmp_mgr.agent.ori = np.array(ori)
-            if self._visible_names(tmp_mgr):
+            tmp = a.copy(); tmp.ori = np.array(ori)
+            if ObserveApproxAction().execute(self.room, tmp).data.get('visible_objects', []):
                 valid_oris.append(ori)
         final_ori = tuple(valid_oris[int(self.np_random.integers(0, len(valid_oris)))] if valid_oris else (0, 1))
         return seq, final_ori
 
-    def _final_obs_text(self, end_agent: Agent) -> str:
-        mgr = self._new_mgr(end_agent.copy())
-        res = mgr.execute_success_action(ObserveApproxAction())
-        return action_results_to_text([res])
+    def _observe_relationships(self, end_agent: Agent) -> List[str]:
+        """All pairwise relationship strings (exclude local) from end agent's perspective."""
+        return ObserveApproxAction().execute(self.room, end_agent.copy()).data.get('relationships', [])
 
-    def _pairs_all(self, end_agent: Agent) -> List[str]:
-        """Return all pairwise relationship strings (exclude local) from end agent's perspective."""
-        mgr = self._new_mgr(end_agent.copy())
-        return mgr.execute_success_action(ObserveApproxAction()).data['relationships']
-
-    def _pairs_text(self, end_agent: Agent, max_items: int = 3) -> str:
+    def _observe_text(self, end_agent: Agent, max_items: int = 3) -> str:
         """Shuffle and join up to max_items pairwise lines in one sentence."""
-        pairs = self._pairs_all(end_agent)
-        self.np_random.shuffle(pairs)
-        pick = pairs[:max(0, min(max_items, len(pairs)))]
+        rels = self._observe_relationships(end_agent)
+        self.np_random.shuffle(rels)
+        pick = rels[:max(0, min(max_items, len(rels)))]
         return "; ".join(pick)
 
     def _is_wrong_forward(self, candidate_text: str, correct_all: set[str]) -> bool:
@@ -192,30 +207,84 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
     def _is_wrong_backward(self, seq: List[str], final_ori: Tuple[int, int], correct_all: set[str]) -> bool:
         """True if executing (seq, final_ori) yields a DIFFERENT set of pairwise relationships."""
         _, end_agent = self.build_action_sequence(seq, final_ori)
-        return set(self._pairs_all(end_agent)) != set(correct_all)
+        return set(self._observe_relationships(end_agent)) != set(correct_all)
 
     def _random_forward_obs(self, end_agent: Agent) -> str:
-        """Make a random slight variant: move to a random visible object's pos or randomize orientation, then return pairwise text."""
+        """Random slight variant: move to a random visible object's pos or randomize orientation, then return pairwise text (no manager)."""
         a = end_agent.copy()
-        vis_names = self._visible_names(self._new_mgr(a.copy()))
+        vis_names = ObserveApproxAction().execute(self.room, a.copy()).data.get('visible_objects', [])
         if vis_names:
             pick = self.room.get_object_by_name(str(self.np_random.choice(vis_names)))
             a.pos, a.room_id = pick.pos.copy(), pick.room_id
         a.ori = np.array([(0, 1), (1, 0), (0, -1), (-1, 0)][int(self.np_random.integers(0, 4))])
-        return self._pairs_text(a, max_items=3)
+        return self._observe_text(a, max_items=3)
+
+    def _perturb_observation_text(self, end_agent: Agent, max_items: int = 3) -> Optional[str]:
+        """Perturb selected relationships: shift dir/dist bins and change orientation following direction task pattern."""
+        a = end_agent.copy()
+        res = ObserveApproxAction().execute(self.room, a)
+        triples = [tr for tr in res.data.get('relation_triples', []) if isinstance(tr.relation, PairwiseRelationshipDiscrete)]
+        assert triples, "No pairwise relationships found"
+
+        self.np_random.shuffle(triples)
+        selected = triples[:max(0, min(max_items, len(triples)))]
+        lines = []
+
+        for tr in selected:
+            obj = self.room.get_object_by_name(tr.subject)
+            dir_labels = tr.relation.direction.bin_system.LABELS
+            dist_labels = tr.relation.dist.bin_system.LABELS
+            d_idx, s_idx = int(tr.relation.direction.bin_id), int(tr.relation.dist.bin_id)
+
+            # Decide what to change (direction task style shifts)
+            change_dir = self.np_random.random() < 0.3   # 50% chance
+            change_dist = self.np_random.random() < 0.3  # 50% chance
+            change_ori = self.np_random.random() < 0.3   # 50% chance
+
+            if change_dir:
+                dk = self.np_random.choice([-2, -1, 1, 2])
+                new_d_idx = (d_idx + dk) % len(dir_labels)  # wrap for direction
+                # avoid index 0 or -1 (beyond-fov)
+                if new_d_idx not in (0, len(dir_labels) - 1):
+                    d_idx = new_d_idx
+
+            if change_dist:
+                sk = self.np_random.choice([-2, -1, 1, 2])
+                s_idx = max(0, min(len(dist_labels) - 1, s_idx + sk))  # clamp for distance
+
+            # Get orientation string
+            if isinstance(obj, Gate):
+                rid = a.room_id
+                if isinstance(rid, (list, tuple)):
+                    rid = list(set(a.room_id) & set(obj.room_id))
+                    rid = rid[0] if rid else None
+                gori = obj.get_ori_for_room(int(rid)) if rid is not None else obj.ori
+                opair = OrientationRel.get_relative_orientation(tuple(gori), tuple(a.ori))
+                ori_str = OrientationRel.to_string(opair, 'ego', 'orientation', if_gate=True)
+            else:
+                if change_ori:
+                    rand_ori = [(0, 1), (1, 0), (0, -1), (-1, 0)][self.np_random.integers(0, 4)]
+                    opair = OrientationRel.get_relative_orientation(tuple(obj.ori), rand_ori)
+                else:
+                    opair = OrientationRel.get_relative_orientation(tuple(obj.ori), tuple(a.ori))
+                ori_str = OrientationRel.to_string(opair, 'ego', 'orientation')
+
+            lines.append(f"{obj.name}: {dir_labels[d_idx]}, {dist_labels[s_idx]}, {ori_str}")
+
+        return "; ".join(lines)
 
     def _random_backward_action_string(self) -> Tuple[str, List[str], Tuple[int, int]]:
         """Generate a random short sequence and final orientation, then render action string with final face line."""
         seq, final_ori = self._generate_plan(self.steps)
         per_step, _ = self.build_action_sequence(seq, final_ori)
-        return self.action_sequence_to_string(per_step, include_final_face=True), seq, final_ori
+        return self.action_sequence_to_string(per_step), seq, final_ori
 
 class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
     """Predict final observation from an action sequence."""
 
     QUESTION_TEMPLATE = (
         "You return to your starting position and face north.\n"
-        "You will execute a short action sequence.\n"
+        "You will execute an action sequence.\n"
         "Actions:\n{actions}\n\n"
         "What will you observe at the end?\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
@@ -234,7 +303,7 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
             if tuple(ori) == tuple(final_ori):
                 continue
             a = end_agent.copy(); a.ori = np.array(ori)
-            wrong_ori.append(self._pairs_text(a, max_items=3))
+            wrong_ori.append(self._observe_text(a, max_items=3))
         # position variants near→far (pairwise only)
         wrong_pos: List[str] = []
         final_pos = end_agent.pos.copy()
@@ -245,15 +314,20 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
             b.pos, b.room_id = o.pos.copy(), o.room_id
             if int(self.np_random.integers(0, 2)) == 1:
                 b.ori = np.array([(0, 1), (1, 0), (0, -1), (-1, 0)][int(self.np_random.integers(0, 4))])
-            wrong_pos.append(self._pairs_text(b, max_items=3))
-        pool = wrong_ori + wrong_pos
+            wrong_pos.append(self._observe_text(b, max_items=3))
+        # combine strategies into a single pool
+        wrong_mut: List[str] = []
+        for _ in range(3):
+            s = self._perturb_observation_text(end_agent, max_items=3)
+            if s: wrong_mut.append(s)
+        correct_all = set(self._observe_relationships(end_agent))
+        pool = [s for s in (wrong_ori + wrong_pos + wrong_mut) if s and self._is_wrong_forward(s, correct_all)]
         self.np_random.shuffle(pool)
-        # ensure wrong not subset of correct full set; backfill if needed
-        correct_all = set(self._pairs_all(end_agent))
         for s in pool:
             if len(choices) == 4: break
-            if s and (s not in seen) and self._is_wrong_forward(s, correct_all):
+            if s not in seen:
                 choices.append(s); seen.add(s)
+        # fallback
         while len(choices) < 4:
             s = self._random_forward_obs(end_agent)
             if s and (s not in seen) and self._is_wrong_forward(s, correct_all):
@@ -266,8 +340,8 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
         self.steps = int(self.config.get('steps', 2))
         seq, final_ori = self._generate_plan(self.steps)
         per_step, end_agent = self.build_action_sequence(seq, final_ori)
-        actions_str = self.action_sequence_to_string(per_step, include_final_face=False)
-        correct_obs = self._pairs_text(end_agent, max_items=3)
+        actions_str = self.action_sequence_to_string(per_step)
+        correct_obs = self._observe_text(end_agent, max_items=3)
         self._ctx = {'end_agent': end_agent.copy(), 'final_ori': tuple(final_ori)}
         choices, correct_idx = self.generate_choices(correct_obs)
         choices_text, correct_label = self.format_choices(choices, correct_idx)
@@ -293,7 +367,7 @@ class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
         for ori in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
             if tuple(ori) == tuple(avoid): continue
             per_step, _ = self.build_action_sequence(seq, ori)
-            return self.action_sequence_to_string(per_step, include_final_face=True), list(seq), tuple(ori)
+            return self.action_sequence_to_string(per_step), list(seq), tuple(ori)
         return None
 
     def _wrong_by_final_object(self, seq: List[str], final_ori: Tuple[int, int]) -> Optional[Tuple[str, List[str], Tuple[int, int]]]:
@@ -311,14 +385,14 @@ class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
         for n in pool:
             alt = list(seq[:-1] + [n])
             per_step, _ = self.build_action_sequence(alt, final_ori)
-            return self.action_sequence_to_string(per_step, include_final_face=True), alt, tuple(final_ori)
+            return self.action_sequence_to_string(per_step), alt, tuple(final_ori)
         return None
 
     def generate_choices(self, correct_answer: Any) -> Tuple[List[str], int]:
         seq, final_ori = list(self._ctx['seq']), tuple(self._ctx['final_ori'])
         correct = str(correct_answer)
         # compute the correct set of pairwise relationships once
-        correct_all = set(self._pairs_all(self.build_action_sequence(seq, final_ori)[1]))
+        correct_all = set(self._observe_relationships(self.build_action_sequence(seq, final_ori)[1]))
 
         wrong: List[str] = []
         strategies = [
@@ -343,8 +417,8 @@ class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
         self.steps = int(self.config.get('max_steps', 2))
         seq, final_ori = self._generate_plan(self.steps)
         per_step, end_agent = self.build_action_sequence(seq, final_ori)
-        final_obs = self._final_obs_text(end_agent)
-        correct_actions = self.action_sequence_to_string(per_step, include_final_face=True)
+        final_obs = action_results_to_text([ObserveApproxAction().execute(self.room, end_agent.copy())])
+        correct_actions = self.action_sequence_to_string(per_step)
         self._ctx = {'seq': list(seq), 'final_ori': tuple(final_ori)}
         choices, correct_idx = self.generate_choices(correct_actions)
         choices_text, correct_label = self.format_choices(choices, correct_idx)

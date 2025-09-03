@@ -197,7 +197,7 @@ class ObserveAction(BaseAction):
                 rid = agent.room_id
                 if isinstance(rid, (list, tuple)):
                     rid = list(set(agent.room_id) & set(obj.room_id))
-                    assert len(rid) == 1, f"intersection of room ids is not unique: {rid}"
+                    assert len(rid) == 1, f"intersection of room ids is not unique: {rid}" # For two rooms, there's only on gate connecting them
                     rid = rid[0]
                 gate_ori = obj.get_ori_for_room(int(rid)) if rid is not None else obj.ori
                 ori_pair = OrientationRel.get_relative_orientation(tuple(gate_ori), tuple(agent.ori))

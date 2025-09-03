@@ -12,6 +12,7 @@ from ..core.relationship import (
 
 class DirectionEvaluationTask(BaseEvaluationTask):
     """Pairwise discrete direction (allocentric) and perspective-taking (egocentric)."""
+    task_type = "dir"  # 'dir' for allocentric, 'pov' for egocentric
 
     QUESTION_TEMPLATE_DIR = (
         "Your starting facing direction is north.\n"
@@ -58,19 +59,25 @@ class DirectionEvaluationTask(BaseEvaluationTask):
             out.append(s)
         # same distance, adjacent dir
         for dk in [2, -2]:
-            s = self._fmt(dir_labels[self._wrap(d_idx + dk, len(dir_labels))], dist_labels[s_idx])
-            out.append(s)
+            new_d_idx = self._wrap(d_idx + dk, len(dir_labels))
+            # POV tasks avoid beyond-fov (first and last indices)
+            if self.task_type != "pov" or new_d_idx not in (0, len(dir_labels) - 1):
+                s = self._fmt(dir_labels[new_d_idx], dist_labels[s_idx])
+                out.append(s)
         return out
 
     def _gen_challenging_options(self, rel) -> List[str]:
-        """Coupled small errors (dir ±1/±2 and dist ±1)."""
+        """Coupled small errors (dir ±2 and dist ±2)."""
         dir_labels, dist_labels, d_idx, s_idx = self._labels(rel)
         out = []
         for dk in [2, -2]:
             for sk in [-2, -2]:
-                s = self._fmt(dir_labels[self._wrap(d_idx + dk, len(dir_labels))],
-                              dist_labels[self._clamp(s_idx + sk, len(dist_labels))])
-                out.append(s)
+                new_d_idx = self._wrap(d_idx + dk, len(dir_labels))
+                # POV tasks avoid beyond-fov (first and last indices)
+                if self.task_type != "pov" or new_d_idx not in (0, len(dir_labels) - 1):
+                    s = self._fmt(dir_labels[new_d_idx],
+                                  dist_labels[self._clamp(s_idx + sk, len(dist_labels))])
+                    out.append(s)
         return out
 
     # ---------- shared choice builder ----------
@@ -123,6 +130,7 @@ class DirectionEvaluationTask(BaseEvaluationTask):
 
 class PovEvaluationTask(DirectionEvaluationTask):
     """POV variant of direction task (reuses base helpers)."""
+    task_type = "pov"
 
     def generate_question(self) -> str:
         oriented_idxs = [i for i, o in enumerate(self.room.objects) if o.has_orientation]
