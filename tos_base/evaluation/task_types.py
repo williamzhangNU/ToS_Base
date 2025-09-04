@@ -16,7 +16,8 @@ class EvalTaskType(Enum):
     ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
     POV = ("pov", "PovEvaluationTask")
     E2A = ("e2a", "E2AEvaluationTask")
-    LOCALIZATION = ("loc", "LocalizationEvaluationTask")
+    FWD_LOC = ("fwd_loc", "ForwardLocEvaluationTask")
+    BWD_LOC = ("bwd_loc", "BackwardLocEvaluationTask")
     FALSE_BELIEF = ("false_belief", "FalseBeliefEvaluationTask")
     FWD_FOV = ("fwd_fov", "ForwardFOVEvaluationTask")
     BWD_NAV = ("bwd_nav", "BackwardNavEvaluationTask")
@@ -42,7 +43,7 @@ class EvalTaskType(Enum):
         from .direction import DirectionEvaluationTask, PovEvaluationTask
         from .rotation import RotEvaluationTask, RotDualEvaluationTask
         from .e2a import E2AEvaluationTask
-        from .localization import LocalizationEvaluationTask
+        from .localization import ForwardLocEvaluationTask, BackwardLocEvaluationTask
         from .false_belief import FalseBeliefEvaluationTask
         from .navigation_tasks import ForwardFOVEvaluationTask, BackwardNavEvaluationTask
         
@@ -52,7 +53,8 @@ class EvalTaskType(Enum):
             cls.ROT_DUAL.short_name: RotDualEvaluationTask,
             cls.POV.short_name: PovEvaluationTask,
             cls.E2A.short_name: E2AEvaluationTask,
-            cls.LOCALIZATION.short_name: LocalizationEvaluationTask,
+            cls.FWD_LOC.short_name: ForwardLocEvaluationTask,
+            cls.BWD_LOC.short_name: BackwardLocEvaluationTask,
             cls.FALSE_BELIEF.short_name: FalseBeliefEvaluationTask,
             cls.FWD_FOV.short_name: ForwardFOVEvaluationTask,
             cls.BWD_NAV.short_name: BackwardNavEvaluationTask,
