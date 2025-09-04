@@ -71,7 +71,7 @@ class AgentProxy:
         for obj_name in self.nodes_by_room.get(start_rid, set()):
             self.all_edges_by_room[start_rid].add(frozenset({self.initial_anchor, obj_name}))
 
-        self.total_object_nodes: int = sum(len(v) for v in self.object_nodes_by_room.values())
+        self.total_nodes: set = set().union(*self.nodes_by_room.values())
 
         self.turns: List[Turn] = []
         self.visited: Set[int] = set()
@@ -141,9 +141,6 @@ class AgentProxy:
     def _unknown_nodes_in_room(self, rid: int) -> Set[str]:
         return self.nodes_by_room.get(rid, set()) - self.known_nodes_by_room.get(rid, set())
 
-    def _unknown_objects_in_room(self, rid: int) -> Set[str]:
-        return self.object_nodes_by_room.get(rid, set()) - self.known_nodes_by_room.get(rid, set())
-
     def _unknown_edges_in_room(self, rid: int) -> Set[frozenset]:
         return self.all_edges_by_room.get(rid, set()) - self.known_edges_by_room.get(rid, set())
 
@@ -205,12 +202,10 @@ class AgentProxy:
             # not continuous: 0, 0 -> 90, 0 -> 180, 0 -> 270
             return (0, 90, 180, 270) if is_initial else ((0,) if fov == 180 else (0, 90, 270))
 
-    def _all_objects_known_globally(self) -> bool:
+    def _all_nodes_known_globally(self) -> bool:
         # early stop when all objects (exclude gates) are known
-        known_total = 0
-        for rid, objs in self.object_nodes_by_room.items():
-            known_total += len(objs & self.known_nodes_by_room.get(int(rid), set()))
-        return known_total >= self.total_object_nodes
+        known_total = set().union(*(objs & self.known_nodes_by_room.get(int(rid), set()) for rid, objs in self.nodes_by_room.items()))
+        return known_total == self.total_nodes
 
     def _subtree_has_nodes(self, start_rid: int) -> bool:
         """check if the subtree has any nodes. Start from start_rid"""
@@ -221,7 +216,7 @@ class AgentProxy:
             if r_id in seen:
                 continue
             seen.add(r_id)
-            if len(self.object_nodes_by_room.get(r_id, set())) > 0:
+            if len(self.nodes_by_room.get(r_id, set())) > 0:
                 return True
             stack.extend(int(adj_r_id) for adj_r_id in self.room.adjacent_rooms_by_room.get(r_id, []))
         return False
@@ -248,9 +243,9 @@ class AgentProxy:
         self._explore_room(is_initial=is_initial, prefix_actions=pre_actions or [])
         observed_here = len(self.turns) > before
         carry_actions: List = [] if observed_here else list(pre_actions or [])
-        if self._all_objects_known_globally():
+        if self._all_nodes_known_globally():
             assert not carry_actions, "Carry must be empty if all objects are known"
-            return carry_actions
+            return []
         for child_rid in sorted(self.room.adjacent_rooms_by_room.get(rid, [])):
             if child_rid in self.visited:
                 continue
@@ -259,7 +254,7 @@ class AgentProxy:
             to_child = carry_actions + self._traverse_to(int(child_rid))
             carry_actions = self._dfs(int(child_rid), is_initial=False, pre_actions=to_child)
             # Stop here if exploration is complete; avoid returning to parent.
-            if self._all_objects_known_globally():
+            if self._all_nodes_known_globally():
                 return carry_actions
             carry_actions = carry_actions + self._traverse_to(int(rid))
         return carry_actions
@@ -303,7 +298,7 @@ class StrategistAgentProxy(AgentProxy):
 
     def _on_entry_observe(self, is_initial: bool, prefix_actions: List = None) -> None:
         for d in self._allowed_rotations(is_initial):
-            if self._all_objects_known_globally():
+            if self._all_nodes_known_globally():
                 break
             self._observe((prefix_actions or []) + self._rotate_by(d))
             prefix_actions = []
@@ -316,7 +311,7 @@ class InquisitorAgentProxy(AgentProxy):
         # treat entry gate as anchor; at start, use initial anchor
         self.anchor = self.initial_anchor if is_initial else self.current_gate
         for d in self._allowed_rotations(is_initial):
-            if self._all_objects_known_globally(): # early stop if see all objects at entry
+            if self._all_nodes_known_globally(): # early stop if see all objects at entry
                 break
             self._observe((prefix_actions or []) + self._rotate_by(d))
             prefix_actions = []
@@ -647,8 +642,10 @@ def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = 
 
 if __name__ == "__main__":
     from ..utils.room_utils import RoomGenerator, RoomPlotter
+    ObserveAction.MODE = 'full'
     from tqdm import tqdm
-    for seed in tqdm(range(101, 102)):
+    costs = []
+    for seed in tqdm(range(0, 100)):
         room, agent = RoomGenerator.generate_room(
             room_size=[15, 15],
             n_objects=8,
@@ -656,19 +653,23 @@ if __name__ == "__main__":
             level=2,
             main=4
         )
-        print(room)
-        # print(room.mask)
-        # print(room.gates)
-        print(agent)
-        ObserveAction.MODE = 'full'
-        RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
+        # RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
 
+        # proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
         # proxy = OracleAgentProxy(room, agent)        # node_seeker (complete nodes)
         # proxy = StrategistAgentProxy(room, agent)    # node_sweeper
         # proxy = InquisitorAgentProxy(room, agent)    # edge_seeker (complete edges)
-        # proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
         # proxy = AnalystAgentProxy(room, agent, delegate='greedy_inquisitor')
         proxy = AnalystAgentProxy(room, agent, delegate='observer_analyst', observer_delegate='strategist')
         proxy.run()
-        print(proxy.to_text())
-        print(proxy.mgr.get_exp_summary())
+        # print(proxy.to_text())
+        # print(proxy.mgr.get_exp_summary())
+        cost = proxy.mgr.get_exp_summary()['action_cost']
+        costs.append(cost)
+
+        # print(room)
+        # print(room.mask)
+        # print(room.gates)
+        # print(agent)
+
+    print(f"Average Cost: {sum(costs) / len(costs)}")
