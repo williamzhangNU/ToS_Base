@@ -88,11 +88,7 @@ class ExplorationManager:
         
         # Count action, cost, and update coverage
         self.action_counts[result.action_type] = self.action_counts.get(result.action_type, 0) + 1
-        if hasattr(action, 'cost'):
-            try:
-                self.action_cost += int(action.cost())
-            except Exception:
-                pass
+        self.action_cost += int(action.cost)
         if isinstance(action, ObserveAction):
             self._update_coverage_from_observe(result)
         
