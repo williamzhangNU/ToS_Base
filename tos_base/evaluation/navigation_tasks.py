@@ -292,11 +292,10 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
     )
 
     def generate_choices(self, correct_answer: Any) -> Tuple[List[str], int]:
-        """Randomly mix wrong strategies; forward options are pairwise-only (no local/prefix), ≤3 lines."""
         end_agent: Agent = self._ctx['end_agent']
         final_ori: Tuple[int, int] = tuple(self._ctx['final_ori'])
         correct_obs = str(correct_answer)
-        choices, seen = [correct_obs], {correct_obs}
+        wrong_selected: List[str] = []
         # orientation variants (pairwise only)
         wrong_ori: List[str] = []
         for ori in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
@@ -315,23 +314,32 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
             if int(self.np_random.integers(0, 2)) == 1:
                 b.ori = np.array([(0, 1), (1, 0), (0, -1), (-1, 0)][int(self.np_random.integers(0, 4))])
             wrong_pos.append(self._observe_text(b, max_items=3))
-        # combine strategies into a single pool
+        # mutation/perturbation variants
         wrong_mut: List[str] = []
         for _ in range(3):
             s = self._perturb_observation_text(end_agent, max_items=3)
             if s: wrong_mut.append(s)
         correct_all = set(self._observe_relationships(end_agent))
-        pool = [s for s in (wrong_ori + wrong_pos + wrong_mut) if s and self._is_wrong_forward(s, correct_all)]
+        def valid(s: str) -> bool:
+            return bool(s) and self._is_wrong_forward(s, correct_all)
+        
+        for cat in (wrong_ori, wrong_pos, wrong_mut):
+            cands = [s for s in cat if valid(s) and (s != correct_obs) and (s not in wrong_selected)]
+            if cands:
+                pick = str(self.np_random.choice(cands))
+                if pick not in wrong_selected:
+                    wrong_selected.append(pick)
+        # Fallback: from combined pool, then random generator
+        pool = [s for s in (wrong_ori + wrong_pos + wrong_mut) if valid(s) and (s != correct_obs) and (s not in wrong_selected)]
         self.np_random.shuffle(pool)
         for s in pool:
-            if len(choices) == 4: break
-            if s not in seen:
-                choices.append(s); seen.add(s)
-        # fallback
-        while len(choices) < 4:
+            if len(wrong_selected) >= 3: break
+            wrong_selected.append(s)
+        while len(wrong_selected) < 3:
             s = self._random_forward_obs(end_agent)
-            if s and (s not in seen) and self._is_wrong_forward(s, correct_all):
-                choices.append(s); seen.add(s)
+            if s and valid(s) and (s != correct_obs) and (s not in wrong_selected):
+                wrong_selected.append(s)
+        choices = [correct_obs] + wrong_selected[:3]
         self.np_random.shuffle(choices)
         choices = choices[:4]
         return choices, int(choices.index(correct_obs))
@@ -394,22 +402,29 @@ class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
         # compute the correct set of pairwise relationships once
         correct_all = set(self._observe_relationships(self.build_action_sequence(seq, final_ori)[1]))
 
-        wrong: List[str] = []
-        strategies = [
-            lambda: self._wrong_by_orientation(seq, final_ori, avoid=final_ori),
-            lambda: self._wrong_by_final_object(seq, final_ori),
-            lambda: self._random_backward_action_string(),
-        ]
-        self.np_random.shuffle(strategies)
+        wrong_selected: List[str] = []
 
-        while len(wrong) < 3 and strategies:
-            cand = strategies.pop()()
-            if not cand: continue
+        def valid_choice(cand: Optional[Tuple[str, List[str], Tuple[int, int]]]) -> Optional[str]:
+            if not cand:
+                return None
             txt, s, o = cand
-            if txt not in wrong and self._is_wrong_backward(s, o, correct_all):
-                wrong.append(txt)
+            return txt if self._is_wrong_backward(s, o, correct_all) else None
 
-        choices = [correct] + wrong[:3]
+        for cand in (
+            self._wrong_by_orientation(seq, final_ori, avoid=final_ori),
+            self._wrong_by_final_object(seq, final_ori),
+            self._random_backward_action_string(),
+        ):
+            txt = valid_choice(cand)
+            if txt and (txt != correct) and (txt not in wrong_selected):
+                wrong_selected.append(txt)
+
+        while len(wrong_selected) < 3:
+            txt = valid_choice(self._random_backward_action_string())
+            if txt and (txt != correct) and (txt not in wrong_selected):
+                wrong_selected.append(txt)
+
+        choices = [correct] + wrong_selected[:3]
         self.np_random.shuffle(choices)
         return choices, int(choices.index(correct))
 
