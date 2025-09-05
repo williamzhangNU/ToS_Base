@@ -154,9 +154,64 @@ def generate_points_for_relationship(
     return out
 
 
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- 原样保留 ---
+def rose_glyph(sectors, rings, n_dirs=8, n_rings=3, ax=None, color=None, gap=0.96):
+    if ax is None:
+        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=(2.2, 2.2))
+    ax.set_theta_zero_location('N'); ax.set_theta_direction(-1)
+    ax.set_xticks([]); ax.set_yticks([]); ax.set_rlim(0, 1)
+
+    rb = np.linspace(0, 1, n_rings + 1)                 # 环半径边界
+    w  = 2*np.pi/n_dirs * gap                            # 扇区角宽(留一点缝隙)
+
+    for s in sectors:
+        th = (s + 0.5) * (2*np.pi/n_dirs)                # 扇区中心角
+        for r in rings:
+            ax.bar(th, rb[r+1]-rb[r], width=w, bottom=rb[r],
+                   align='center', linewidth=0, color=color)
+    return ax
+
+# --- 外部美化（刻度向外、底环对齐、整体更美观）---
+def beautify_rose(ax, n_dirs=8, n_rings=3, tick_len=0.08,
+                  ring_alpha=0.06, ring_color="#000", boundary_alpha=0.25):
+    # 旋转坐标，使“首扇区”为 [-22.5°, 22.5°]（即中心在 0°=北）
+    ax.set_theta_offset(-np.pi/(2*n_dirs))
+
+    rb = np.linspace(0, 1, n_rings+1)
+
+    # 半透明底环（与 distance rings 对齐，铺满 0..2π）
+    for i in range(n_rings):
+        ax.bar(0, rb[i+1]-rb[i], width=2*np.pi, bottom=rb[i],
+               color=ring_color, alpha=ring_alpha, linewidth=0, zorder=0)
+
+    # 环边界细线（可选，提气质）
+    for r in rb[1:-1]:
+        th = np.linspace(0, 2*np.pi, 361)
+        ax.plot(th, np.full_like(th, r), lw=0.6, alpha=boundary_alpha,
+                color=ring_color, zorder=1)
+
+    # 外圈 8 等分刻度（向外延伸；不画外圈圆环）
+    ax.set_rlim(0, 1+tick_len)
+    for k in range(n_dirs):
+        th = k * 2*np.pi/n_dirs
+        ax.plot([th, th], [1, 1+tick_len], lw=1.2, color=ring_color)
+
+
 if __name__ == "__main__":
-    relationship = PairwiseRelationshipDiscrete.relationship((4, 6), (0, 0), anchor_ori=(1, 0), bin_system=CardinalBinsEgo(), distance_bin_system=StandardDistanceBins())
-    points = generate_points_for_relationship((0, 0), relationship, (-20, 20), (-20, 20), (1, 0))
-    for p in sorted(points):
-        dist = math.hypot(p[0] - 0.0, p[1] - 0.0)
-        print(f"Point {p}: distance = {dist:.2f}")
+    # relationship = PairwiseRelationshipDiscrete.relationship((4, 6), (0, 0), anchor_ori=(1, 0), bin_system=CardinalBinsEgo(), distance_bin_system=StandardDistanceBins())
+    # points = generate_points_for_relationship((0, 0), relationship, (-20, 20), (-20, 20), (1, 0))
+    # for p in sorted(points):
+    #     dist = math.hypot(p[0] - 0.0, p[1] - 0.0)
+    #     print(f"Point {p}: distance = {dist:.2f}")
+
+    # 扇区: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
+    # 环:   near=0, mid=1, far=2
+    ax = rose_glyph(sectors=[7,0,1], rings=[1,2], color="#E59E1B")  # 统一颜色
+    beautify_rose(ax, n_dirs=8, n_rings=3, tick_len=0.08)
+    plt.tight_layout()
+    plt.savefig("rose_glyph_beauty.svg", transparent=True)
+    plt.show()
