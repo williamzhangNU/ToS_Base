@@ -18,13 +18,11 @@ def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -
     axn, ayn = ax / a_len, ay / a_len
 
     if isinstance(relationship, PairwiseRelationshipDiscrete):
-        # Distance bin check
+        # Distance bin check (open interval)
         j = relationship.dist.bin_id
-        if j == -1:
-            return dsq <= 1e-6
         lo, hi = relationship.dist.bin_system.BINS[j]
-        lo2, hi2 = float(lo)*float(lo), float(hi)*float(hi)
-        if not (dsq > lo2 - 1e-6 and dsq <= hi2 + 1e-6):
+        d = math.sqrt(dsq)
+        if not (d > float(lo) and d < float(hi)):
             return False
         
         # Direction bin check
@@ -58,7 +56,7 @@ def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -
 
     if isinstance(relationship, ProximityRelationship):
         th = float(getattr(relationship, 'PROXIMITY_THRESHOLD', 5.0))
-        if dsq > th * th - 1e-6:
+        if not (dsq < th * th):
             return False
         # Must match the discrete pairwise inside the proximity relation
         return relationship_applies(p1, p2, relationship.pairwise_rel, anchor_ori)
@@ -96,14 +94,12 @@ def generate_points_for_relationship(
     # Determine distance window [Rmin, Rmax]
     Rmin, Rmax = 0.0, None
     if isinstance(relationship, PairwiseRelationshipDiscrete) and relationship.dist is not None:
-        try:
-            j = relationship.dist.bin_id
-        except Exception:
-            j = None
-        if j == -1:
-            return out
+        j = relationship.dist.bin_id
         if j is not None and relationship.dist.bin_system is not None:
             lo, hi = relationship.dist.bin_system.BINS[j]
+            # same-distance bin detected by j==0
+            if j == 0:
+                return out
             Rmin, Rmax = float(lo), float(hi)
     elif isinstance(relationship, PairwiseRelationship) and relationship.dist is not None:
         d = float(relationship.dist.value)
@@ -114,7 +110,8 @@ def generate_points_for_relationship(
         return out
 
     # x scan with y ranges from circle ring
-    X0, X1 = max(xmin, int(math.ceil(ax - Rmax))), min(xmax, int(math.floor(ax + Rmax)))
+    X0 = max(xmin, int(math.ceil(ax - Rmax + 1e-9)))
+    X1 = min(xmax, int(math.floor(ax + Rmax - 1e-9)))
     Rmax2, Rmin2 = float(Rmax * Rmax), float(max(Rmin, 0.0) * max(Rmin, 0.0))
 
     # Precompute for fast discrete checks
@@ -135,56 +132,25 @@ def generate_points_for_relationship(
         t2 = Rmax2 - dx*dx
         if t2 < 0: continue
         yspan = math.sqrt(t2) if t2 > 0.0 else 0.0
-        y_top = int(math.floor(ay + yspan + 1e-6))
-        y_bot = int(math.ceil(ay - yspan - 1e-6))
-        if Rmin2 < 1e-6:
-            for y in range(max(ymin, y_bot), min(ymax, y_top) + 1):
-                if is_disc:
-                    dy = float(y - ay)
-                    dsq = dx*dx + dy*dy
-                    if dsq <= 1e-6:
-                        continue
-                    # Direction bin fast check
-                    dot = aoxn*dx + aoyn*dy
-                    cross = aoxn*dy - aoyn*dx
-                    deg = -math.degrees(math.atan2(cross, dot)) if (abs(dx) > 1e-6 or abs(dy) > 1e-6) else 0.0
-                    bid, _ = disc_bin_system.bin(deg)
-                    if bid == disc_dir_bin:
-                        out.add((x, y))
-                else:
-                    if relationship_applies((x, y), (ax, ay), relationship, anchor_ori):
-                        out.add((x, y))
-        else:
-            t2in = Rmin2 - dx*dx
-            if t2in > 1e-6:
-                yin = math.sqrt(t2in)
-                y_bot_in = int(math.ceil(ay - yin - 1e-6))
-                y_top_in = int(math.floor(ay + yin + 1e-6))
+        y_top = int(math.floor(ay + yspan - 1e-9))
+        y_bot = int(math.ceil(ay - yspan + 1e-9))
+        for y in range(max(ymin, y_bot), min(ymax, y_top) + 1):
+            if x == ax and y == ay:
+                continue
+            dy = float(y - ay)
+            dsq = dx*dx + dy*dy
+            if not (dsq > Rmin2 and dsq < Rmax2):
+                continue
+            if is_disc:
+                dot = aoxn*dx + aoyn*dy
+                cross = aoxn*dy - aoyn*dx
+                deg = -math.degrees(math.atan2(cross, dot)) if (abs(dx) > 1e-6 or abs(dy) > 1e-6) else 0.0
+                bid, _ = disc_bin_system.bin(deg)
+                if bid == disc_dir_bin:
+                    out.add((x, y))
             else:
-                y_bot_in, y_top_in = ay, ay-1
-            def _emit_range(y0: int, y1: int):
-                if y0 > y1:
-                    return
-                y0, y1 = max(ymin, y0), min(ymax, y1)
-                for y in range(y0, y1 + 1):
-                    if x == ax and y == ay:
-                        continue
-                    if is_disc:
-                        dy = float(y - ay)
-                        dsq = dx*dx + dy*dy
-                        # direction check only; distance ring already satisfied
-                        dot = aoxn*dx + aoyn*dy
-                        cross = aoxn*dy - aoyn*dx
-                        deg = -math.degrees(math.atan2(cross, dot)) if (abs(dx) > 1e-6 or abs(dy) > 1e-6) else 0.0
-                        bid, _ = disc_bin_system.bin(deg)
-                        if bid == disc_dir_bin:
-                            out.add((x, y))
-                    else:
-                        if relationship_applies((x, y), (ax, ay), relationship, anchor_ori):
-                            out.add((x, y))
-
-            _emit_range(y_bot, y_bot_in - 1)
-            _emit_range(y_top_in + 1, y_top)
+                if relationship_applies((x, y), (ax, ay), relationship, anchor_ori):
+                    out.add((x, y))
     return out
 
 

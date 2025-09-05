@@ -148,6 +148,7 @@ class BaseEvaluationTask(ABC):
         """Pick a new point (same room) so the discrete relation to anchor_pos changes.
 
         Relation is PairwiseRelationshipDiscrete(reference -> anchor). Distance to reference must be ≥ min_distance.
+        TODO debug
         """
         if distance_bin_system is None:
             distance_bin_system = StandardDistanceBins()

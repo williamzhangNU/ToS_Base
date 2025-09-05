@@ -46,7 +46,8 @@ class ExplorationManager:
         self.finished = False
         self.exp_summary = copy.deepcopy(self.DEFAULT_EXP_SUMMARY)
         self.turn_logs: List[ExplorationTurnLog] = []
-        self.history: List[ActionSequence] = []
+        # History now stores ActionResult for each executed action (in order)
+        self.history: List['ActionResult'] = []
         
         # Coverage tracking (exclude gates)
         self._init_node_name = "__init__"
@@ -83,6 +84,8 @@ class ExplorationManager:
         if isinstance(action, MoveAction):
             kwargs['observed_items'] = list(self.observed_items)
         result = action.execute(self.exploration_room, self.agent, **kwargs)
+        # Log every action result to history immediately
+        self.history.append(result)
         if not result.success:
             return result
         
@@ -229,7 +232,6 @@ class ExplorationManager:
             agent_state=self.agent.copy()
         )
         self.turn_logs.append(turn_log)
-        self.history.append(action_sequence)
     
     def _update_exp_summary(self) -> Dict[str, Any]:
         """Calculate current coverage and summary stats."""

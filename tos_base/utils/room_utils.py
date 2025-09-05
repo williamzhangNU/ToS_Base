@@ -1,12 +1,20 @@
 import numpy as np
 from typing import Optional, Tuple, List
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 
 from ..core.room import Room, BaseRoom
 from ..core.constant import CANDIDATE_OBJECTS, ObjectInfo
 from ..core.object import Object, Agent, Gate
 from .generate_room_layout import generate_room_layout
 from ..core.relationship import PairwiseRelationship
+from ..actions.base import BaseAction
+
+# Descriptive gate names to replace generic "door_X"
+GATE_NAMES = [
+    "red door", "blue door", "green door", "yellow door", "purple door",
+    "orange door", "black door", "white door", "brown door", "gray door"
+]
 
 
 class RoomGenerator:
@@ -87,8 +95,9 @@ class RoomGenerator:
         for x, y in zip(xs.tolist(), ys.tolist()):
             up, down = int(msk[x - 1, y]), int(msk[x + 1, y]) # NOTE up and down are with respect mask indexing
             if 1 <= up < 100 and 1 <= down < 100 and up != down:
+                gate_name = GATE_NAMES[cnt % len(GATE_NAMES)] if cnt < len(GATE_NAMES) else f"door_{cnt}"
                 g = Gate(
-                    name=f"door_{cnt}",
+                    name=gate_name,
                     pos=np.array([x, y], dtype=int),
                     ori=np.array([1, 0], dtype=int),
                     room_id=[int(up), int(down)],
@@ -100,8 +109,9 @@ class RoomGenerator:
         for x, y in zip(xs.tolist(), ys.tolist()):
             left, right = int(msk[x, y - 1]), int(msk[x, y + 1])
             if 1 <= left < 100 and 1 <= right < 100 and left != right:
+                gate_name = GATE_NAMES[cnt % len(GATE_NAMES)] if cnt < len(GATE_NAMES) else f"door_{cnt}"
                 g = Gate(
-                    name=f"door_{cnt}",
+                    name=gate_name,
                     pos=np.array([x, y], dtype=int),
                     ori=np.array([0, 1], dtype=int),
                     room_id=[int(left), int(right)],
@@ -290,6 +300,11 @@ class RoomGenerator:
 class RoomPlotter:
     @staticmethod
     def plot(room: Room, agent: Agent | None, mode: str = 'text', save_path: str | None = None):
+        """Render room.
+        - mode='text': print ASCII.
+        - mode='img': save image to save_path if provided; otherwise just draw (no return).
+        Use plot_to_image() when a numpy frame is needed.
+        """
         has_mask = getattr(room, 'mask', None) is not None and isinstance(room, Room)
         # gate labels: show gate index and connected rooms, e.g. G0[1-3]
         gate_labels = {}
@@ -373,77 +388,104 @@ class RoomPlotter:
 
             fig, ax = plt.subplots(figsize=(6, 6))
             ax.set_facecolor('white')
-            if has_mask:
-                h, w = room.mask.shape  # h: rows=x, w: cols=y
-                min_x, max_x, min_y, max_y = 0, h - 1, 0, w - 1
-                # build label map for background coloring
-                label = np.zeros_like(room.mask, dtype=int)
-                label[room.mask == 0] = 1
-                label[(room.mask == 100) | (room.mask == 101)] = 2
-                rids = sorted(int(r) for r in np.unique(room.mask) if 1 <= int(r) < 100)
-                for i, rid in enumerate(rids, start=3):
-                    label[room.mask == rid] = i
-                colors = ['#111111', '#888888', '#ffcc33', '#4e79a7', '#59a14f', '#f28e2b', '#e15759', '#76b7b2', '#edc949', '#af7aa1']
-                # repeat colors if many rooms
-                while len(colors) <= label.max():
-                    colors += colors[3:]
-                from matplotlib.colors import ListedColormap
-                # transpose so that imshow's x-axis corresponds to world x (rows)
-                ax.imshow(label.T, origin='lower', cmap=ListedColormap(colors[:label.max()+1]),
-                          extent=(min_x-0.5, max_x+0.5, min_y-0.5, max_y+0.5), interpolation='nearest', zorder=0, alpha=0.18)
-                # room id labels
-                for rid in rids:
-                    xs, ys = np.where(room.mask == rid)
-                    if len(xs) == 0:
-                        continue
-                    cx, cy = float(np.mean(xs)), float(np.mean(ys)) # x, y
-                    ax.text(cx, cy, str(rid), color='white', ha='center', va='center', fontsize=8, zorder=1, alpha=0.85)
-            else:
-                min_x, max_x, min_y, max_y = room.get_boundary()
-            # grid
-            ax.set_xlim(min_x-0.5, max_x+0.5); ax.set_ylim(min_y-0.5, max_y+0.5)
-            ax.set_xticks(np.arange(int(min_x), int(max_x)+1)); ax.set_yticks(np.arange(int(min_y), int(max_y)+1))
-            ax.grid(True, color='#bdbdbd', linewidth=0.2)
-            for s in ax.spines.values(): s.set_visible(False)
-            # draw objects/gates + orientation (distinct markers/colors; legend, no text labels)
-            palette = plt.get_cmap('tab10').colors
-            markers = ['o','s','D','P','X','h','H','*','p','d']
-            name_to_idx, seen_labels = {}, set()
-            offs = [(0.12,0.18), (0.18,-0.18), (-0.18,0.18), (-0.18,-0.18)]
-            for obj in room.all_objects:
-                x, y = float(obj.pos[0]), float(obj.pos[1])
-                if isinstance(obj, Gate) and hasattr(room, 'gates'):
-                    color, marker, label = 'crimson', 'D', ('gate' if 'gate' not in seen_labels else None)
-                    seen_labels.add('gate')
-                else:
-                    i = name_to_idx.setdefault(obj.name, len(name_to_idx))
-                    color, marker = palette[i % len(palette)], markers[i % len(markers)]
-                    label = obj.name if obj.name not in seen_labels else None
-                    seen_labels.add(obj.name)
-                ax.scatter(x, y, c=[color], marker=marker, s=64, edgecolors='white', linewidths=0.7, zorder=3, label=label)
-                # coords label
-                # orientation arrow
-                if getattr(obj, 'has_orientation', True):
-                    dx, dy = float(obj.ori[0])*0.4, float(obj.ori[1])*0.4
-                    ax.quiver(x, y, dx, dy, angles='xy', scale_units='xy', scale=0.5, color='grey', width=0.005)
-                # gate text label
-                if isinstance(obj, Gate) and gate_labels:
-                    ax.text(x+0.10, y+0.12, gate_labels.get(obj.name, ''), color='crimson', fontsize=8, zorder=4)
-            if agent is not None:
-                ax.scatter(agent.pos[0], agent.pos[1], c='green', marker='s', s=70, edgecolors='white', linewidths=0.7, label='agent', zorder=5)
-                ax.scatter(agent.init_pos[0], agent.init_pos[1], c='green', marker='x', s=60, label='agent_init', zorder=4)
-                dx, dy = float(agent.ori[0])*0.4, float(agent.ori[1])*0.4
-                idx, idy = float(agent.init_ori[0])*0.4, float(agent.init_ori[1])*0.4
-                ax.quiver(agent.pos[0], agent.pos[1], dx, dy, angles='xy', scale_units='xy', scale=0.5, color='grey', width=0.005)
-                ax.quiver(agent.init_pos[0], agent.init_pos[1], idx, idy, angles='xy', scale_units='xy', scale=0.5, color='grey', width=0.005)
-            h,l = ax.get_legend_handles_labels(); 
-            if l:
-                d = dict(zip(l,h)); ax.legend(d.values(), d.keys(), loc='upper right', frameon=False, fontsize=9)
-            ax.set_aspect('equal'); ax.set_title(room.name)
-            if save_path: plt.savefig(save_path, bbox_inches='tight', dpi=300)
+            RoomPlotter._draw_img(ax, room, agent)
+            if save_path:
+                plt.savefig(save_path, bbox_inches='tight', dpi=300)
             plt.close(); return
         else:
             raise ValueError('mode must be text or img')
+
+    @staticmethod
+    def _draw_img(ax, room: Room, agent: Agent | None):
+        has_mask = getattr(room, 'mask', None) is not None and isinstance(room, Room)
+        gate_labels = {}
+        if room.gates:
+            gate_labels = {g.name: g.name for i, g in enumerate(room.gates)}
+        if has_mask:
+            h, w = room.mask.shape  # h: rows=x, w: cols=y
+            min_x, max_x, min_y, max_y = 0, h - 1, 0, w - 1
+            # build label map for background coloring
+            label = np.zeros_like(room.mask, dtype=int)
+            label[room.mask == 0] = 1
+            label[(room.mask == 100) | (room.mask == 101)] = 2
+            rids = sorted(int(r) for r in np.unique(room.mask) if 1 <= int(r) < 100)
+            for i, rid in enumerate(rids, start=3):
+                label[room.mask == rid] = i
+            colors = ['#111111', '#888888', '#ffcc33', '#4e79a7', '#59a14f', '#f28e2b', '#e15759', '#76b7b2', '#edc949', '#af7aa1']
+            # repeat colors if many rooms
+            while len(colors) <= label.max():
+                colors += colors[3:]
+            
+            # transpose so that imshow's x-axis corresponds to world x (rows)
+            ax.imshow(label.T, origin='lower', cmap=ListedColormap(colors[:label.max()+1]),
+                      extent=(min_x-0.5, max_x+0.5, min_y-0.5, max_y+0.5), interpolation='nearest', zorder=0, alpha=0.18)
+            # room id labels
+            for rid in rids:
+                xs, ys = np.where(room.mask == rid)
+                if len(xs) == 0:
+                    continue
+                cx, cy = float(np.mean(xs)), float(np.mean(ys)) # x, y
+                ax.text(cx, cy, str(rid), color='white', ha='center', va='center', fontsize=8, zorder=1, alpha=0.85)
+        else:
+            min_x, max_x, min_y, max_y = room.get_boundary()
+        # grid
+        ax.set_xlim(min_x-0.5, max_x+0.5); ax.set_ylim(min_y-0.5, max_y+0.5)
+        ax.set_xticks(np.arange(int(min_x), int(max_x)+1)); ax.set_yticks(np.arange(int(min_y), int(max_y)+1))
+        ax.grid(True, color='#bdbdbd', linewidth=0.2)
+        for s in ax.spines.values(): s.set_visible(False)
+        # draw objects/gates + orientation (distinct markers/colors; legend, no text labels)
+        palette = plt.get_cmap('tab10').colors
+        markers = ['o','s','D','P','X','h','H','*','p','d']
+        name_to_idx, seen_labels = {}, set()
+        for obj in room.all_objects:
+            x, y = float(obj.pos[0]), float(obj.pos[1])
+            if isinstance(obj, Gate) and hasattr(room, 'gates'):
+                color, marker, label = 'crimson', 'D', ('gate' if 'gate' not in seen_labels else None)
+                seen_labels.add('gate')
+            else:
+                i = name_to_idx.setdefault(obj.name, len(name_to_idx))
+                color, marker = palette[i % len(palette)], markers[i % len(markers)]
+                label = obj.name if obj.name not in seen_labels else None
+                seen_labels.add(obj.name)
+            ax.scatter(x, y, c=[color], marker=marker, s=64, edgecolors='white', linewidths=0.7, zorder=3, label=label)
+            if getattr(obj, 'has_orientation', True):
+                dx, dy = float(obj.ori[0])*0.4, float(obj.ori[1])*0.4
+                ax.quiver(x, y, dx, dy, angles='xy', scale_units='xy', scale=0.5, color='grey', width=0.005)
+            if isinstance(obj, Gate) and gate_labels:
+                ax.text(x+0.10, y+0.12, gate_labels.get(obj.name, ''), color='crimson', fontsize=8, zorder=4)
+        if agent is not None:
+            ax.scatter(agent.pos[0], agent.pos[1], c='green', marker='s', s=70, edgecolors='white', linewidths=0.7, label='agent', zorder=5)
+            ax.scatter(agent.init_pos[0], agent.init_pos[1], c='green', marker='x', s=60, label='agent_init', zorder=4)
+            dx, dy = float(agent.ori[0])*0.4, float(agent.ori[1])*0.4
+            idx, idy = float(agent.init_ori[0])*0.4, float(agent.init_ori[1])*0.4
+            ax.quiver(agent.pos[0], agent.pos[1], dx, dy, angles='xy', scale_units='xy', scale=0.5, color='grey', width=0.005)
+            ax.quiver(agent.init_pos[0], agent.init_pos[1], idx, idy, angles='xy', scale_units='xy', scale=0.5, color='grey', width=0.005)
+        h,l = ax.get_legend_handles_labels(); 
+        if l:
+            d = dict(zip(l,h)); ax.legend(d.values(), d.keys(), loc='upper right', frameon=False, fontsize=9)
+        ax.set_aspect('equal'); ax.set_title(room.name)
+
+    @staticmethod
+    def plot_to_image(room: Room, agent: Agent | None, observe: bool = False, dpi: int = 120):
+        import io, imageio
+        from matplotlib import patches
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.set_facecolor('white')
+        RoomPlotter._draw_img(ax, room, agent)
+        if observe and agent is not None:
+            # Draw FOV boundary lines centered on agent orientation
+            fov = float(BaseAction.get_field_of_view())
+            theta = float(np.arctan2(float(agent.ori[1]), float(agent.ori[0])))
+            half = np.deg2rad(fov / 2.0)
+            lengths = 0.9
+            for ang in (theta - half, theta + half):
+                dx, dy = lengths * np.cos(ang), lengths * np.sin(ang)
+                ax.plot([float(agent.pos[0]), float(agent.pos[0]) + dx], [float(agent.pos[1]), float(agent.pos[1]) + dy], c='tab:green', lw=2.0, alpha=0.9)
+        buf = io.BytesIO()
+        plt.tight_layout(); plt.savefig(buf, format='png', dpi=int(dpi))
+        plt.close(fig)
+        buf.seek(0)
+        return imageio.v2.imread(buf)
 
 
 def get_topdown_info(room: Room, agent: Agent) -> str:
@@ -462,9 +504,26 @@ def get_topdown_info(room: Room, agent: Agent) -> str:
 
 
 def get_room_description(room: Room, agent: Agent, with_topdown: bool = False) -> str:
-    room_type = "multiple rooms connected by doors" if room.gates else "a room"
+    # Get room information
+    if hasattr(room, 'mask') and room.mask is not None:
+        room_ids = [int(rid) for rid in np.unique(room.mask) if 1 <= int(rid) < 100]
+        num_rooms = len(room_ids)
+        room_names = [f"room {rid}" for rid in sorted(room_ids)]
+    else:
+        num_rooms = 1
+        room_names = ["room 1"]
+
+    room_type = f"{num_rooms} rooms connected by doors" if room.gates else "a single room"
     assert isinstance(agent.room_id, int), f"Agent room id must be an integer, got {agent.room_id}"
-    desc = f"Imagine {room_type}. You are currently in room {agent.room_id}. You face north.\nObjects: {', '.join([o.name for o in room.all_objects])}"
+
+    # Separate objects and gates for clearer description
+    objects = [o.name for o in room.all_objects if not isinstance(o, Gate)]
+    gates = [o.name for o in room.all_objects if isinstance(o, Gate)]
+
+    desc = f"Imagine {room_type}: {', '.join(room_names)}. You are currently in room {agent.room_id}. You face north."
+    desc += f"\nObjects: {', '.join(objects)}" if objects else ""
+    desc += f"\nGates: {', '.join(gates)}" if gates else ""
+
     if with_topdown:
         desc += "\n" + get_topdown_info(room, agent)
     return desc

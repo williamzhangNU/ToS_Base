@@ -209,9 +209,11 @@ class Room(BaseRoom):
             rid = int(obj.room_id)
             self.objects_by_room.setdefault(rid, []).append(obj.name)
             self.room_by_object[obj.name] = rid
-        # Ensure empty lists for rooms with no objects
+
+        # Ensure all rooms have objects
         for rid in {int(x) for x in np.unique(self.mask) if 1 <= int(x) < 100}:
-            self.objects_by_room.setdefault(rid, [])
+            # self.objects_by_room.setdefault(rid, [])
+            assert self.objects_by_room.get(rid, []), f"Room {rid} is empty"
 
     def get_cell_info(self, x: int, y: int) -> Dict[str, Any]:
         info: Dict[str, Any] = {"room_id": None, "object_name": None, "gate_name": None}

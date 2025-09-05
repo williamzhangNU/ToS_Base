@@ -325,13 +325,11 @@ class InquisitorAgentProxy(AgentProxy):
             return
         objects_with_unknown_edges = self._anchors_with_unknown_edges(rid)
         while objects_with_unknown_edges:
-            anchor = objects_with_unknown_edges.pop()
-            self._observe(self._move_to(anchor))
-            for d in (0, 90, 90, 90):
-                if d == 0:
-                    continue
+            self.anchor = objects_with_unknown_edges.pop()
+            self._observe(self._move_to(self.anchor))
+            for d in (90, 90, 90):
                 self._observe(self._rotate_by(d))
-                if not any(anchor in p for p in self._unknown_edges_in_room(rid)): # no unknown edges from anchor
+                if not any(self.anchor in p for p in self._unknown_edges_in_room(rid)): # no unknown edges from anchor
                     break
             objects_with_unknown_edges = self._anchors_with_unknown_edges(rid)
 

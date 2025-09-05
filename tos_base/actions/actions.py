@@ -494,13 +494,15 @@ class ActionSequence:
             "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in final_actions)
         )
         examples = (
-            f"Valid Example:\nActions: [Move(table), Rotate(90), Observe()]\n\n" +
-            f"Valid Example:\nActions: [Observe()]\n\n" +
-            f"Valid Example:\nActions: [Move(table), Rotate(90), Query(a)]\n\n" +
-            f"Valid Example:\nActions: [Query(a)]\n\n" +
-            f"Invalid Example (no final action):\nActions: [Move(table)]\n\n"+
-            f"Invalid Example (more than one final action):\nActions: [Observe(), Rotate(90), Observe()]\n\n" +
-            f"Invalid Example (termination with other actions):\nActions: [Move(table), Term()]\n\n"
+            f"Valid Examples:\n" +
+            f"1: Actions: [Move(table), Rotate(90), Observe()]\n" +
+            f"2: Actions: [Observe()]\n" +
+            f"3: Actions: [Move(table), Rotate(90), Query(table)]\n" +
+            f"4: Actions: [Query(table)]\n\n" +
+            f"Invalid Examples:\n" +
+            f"1 (no final action): Actions: [Move(table)]\n" +
+            f"2 (more than one final action): Actions: [Observe(), Rotate(90), Observe()]\n" +
+            f"3 (termination with other actions): Actions: [Move(table), Term()]\n\n"
         )
         
         return ACTION_INSTRUCTION.format(

@@ -49,37 +49,37 @@ class DistanceBinSystem(Protocol):
 
 
 class EgoFrontBins:
-    """Ego-centric front-focused bins."""
-    BINS = [(-180, -45), (-45, -25), (-25, -5), (-5, 5), (5, 25), (25, 45), (45, 180)]
+    """Ego-centric front-focused bins (front is (-1e-3, 1e-3); nodes at ±22.5°, ±45°)."""
+    EPS: ClassVar[float] = 1e-3
+    # open intervals; preserve ±1e-3 slack at the interior edges
+    BINS = [
+        (-180.0, -45.0 - 1e-3),
+        (-45.0 - 1e-3, -22.5 - 1e-3),
+        (-22.5 - 1e-3, -1e-3),
+        (-1e-3, 1e-3),
+        (1e-3, 22.5 + 1e-3),
+        (22.5 + 1e-3, 45.0 + 1e-3),
+        (45.0 + 1e-3, 180.0 + 1e-3),
+    ]
     LABELS = ['beyond-fov', 'front-left', 'front-slight-left', 'front', 'front-slight-right', 'front-right', 'beyond-fov']
-    # (left_closed, right_closed) per bin index:
-    CLOSE = {
-        0:(False, False), 1:(True, False), 2:(True, False),
-        3:(True, True),  4:(False, True), 5:(False, True),
-        6:(False, True),
-    }
 
     def bin(self, degree: float):
-        eps = 1e-3
         v = float(degree)
         for i, (lo, hi) in enumerate(self.BINS):
-            lc, rc = self.CLOSE[i]
-            lo2 = lo - (eps if lc else 0.0)
-            hi2 = hi + (eps if rc else 0.0)
-            if lo2 < v < hi2:
+            if lo < v < hi:
                 return i, self.LABELS[i]
         return len(self.LABELS) - 1, self.LABELS[-1]
 
     @classmethod
     def prompt(cls) -> str:
-        parts = []
-        for i in range(1, 6):
-            (lo, hi), (lc, rc) = cls.BINS[i], cls.CLOSE[i]
-            l, r = ('[', ']') if lc else ('(', ']') if rc else ('(', ')')
-            l = '[' if lc else '('
-            r = ']' if rc else ')'
-            parts.append(f"{l}{lo}°,{hi}°{r}→{cls.LABELS[i]}")
-        return f"Bearing bins (egocentric): {', '.join(parts)}."
+        parts = [
+            "(-45°,-22.5°)→front-left",
+            "(-22.5°,0°)→front-slight-left",
+            "0°→front",
+            "(0°,22.5°)→front-slight-right",
+            "(22.5°,45°)→front-right",
+        ]
+        return "Bearing bins (egocentric, 0° is front): " + ", ".join(parts) + "."
 
 
 class _CardinalBinsBase:
@@ -100,7 +100,7 @@ class _CardinalBinsBase:
     @classmethod
     def prompt(cls) -> str:
         parts = [f"[{lo}°,{hi}°]→{label}" for (lo, hi), label in zip(cls.BINS, cls.LABELS)]
-        return f"Bearing bins: {', '.join(parts)}."
+        return "Bearing bins (0° is front): " + ", ".join(parts) + "."
 
 
 class CardinalBinsAllo(_CardinalBinsBase):
@@ -121,25 +121,39 @@ class CardinalBinsEgo(_CardinalBinsBase):
 
 
 class StandardDistanceBins:
-    """Standard distance bins."""
-    BINS = [(0.0, 2.0), (2.0, 4.0), (4.0, 8.0), (8.0, 16.0), (16.0, 32.0), (32.0, 64.0)]
-    ZERO_LABEL = 'same distance'
-    LABELS = ['near', 'mid distance', 'slightly far', 'far', 'very far', 'extremely far']
+    """Standard distance bins (open intervals with eps; includes same-distance bin)."""
+    EPS: ClassVar[float] = 1e-6
+    # open intervals; include same-distance bin (-EPS, +EPS)
+    BINS = [
+        (-1e-6, 1e-6),
+        (1e-6, 2.0 + 1e-6),
+        (2.0 + 1e-6, 4.0 + 1e-6),
+        (4.0 + 1e-6, 8.0 + 1e-6),
+        (8.0 + 1e-6, 16.0 + 1e-6),
+        (16.0 + 1e-6, 32.0 + 1e-6),
+        (32.0 + 1e-6, 64.0 + 1e-6),
+    ]
+    LABELS = ['same distance', 'near', 'mid distance', 'slightly far', 'far', 'very far', 'extremely far']
     
     def bin(self, value: float) -> Tuple[int, str]:
         d = float(value)
-        if d <= 1e-6:
-            return -1, self.ZERO_LABEL
         for i, (lo, hi) in enumerate(self.BINS):
-            if lo < d <= hi:
+            if lo < d < hi:
                 return i, self.LABELS[i]
         raise ValueError(f"Invalid distance: {d}")
     
     @classmethod
     def prompt(cls) -> str:
-        parts = [f"=0→{cls.ZERO_LABEL}"] + [f"({lo},{hi}]→{label}"
-                 for (lo, hi), label in zip(cls.BINS, cls.LABELS)]
-        return f"Distance bins: {', '.join(parts)}."
+        parts = [
+            "=0→same distance",
+            "(0,2)→near",
+            "(2,4)→mid distance",
+            "(4,8)→slightly far",
+            "(8,16)→far",
+            "(16,32)→very far",
+            "(32,64)→extremely far",
+        ]
+        return "Distance bins (0 means same distance): " + ", ".join(parts) + "."
 
 
 class Dir(Enum):
@@ -195,7 +209,7 @@ class DegreeRel:
 
     @classmethod
     def prompt(cls) -> str:
-        return "Bearing is a degree in [-180, 180]. +: clockwise, -: counterclockwise."
+        return "Bearing is a degree in [-180, 180]; 0° is front. +: clockwise, -: counterclockwise."
 
     def to_string(self, perspective: str = 'ego', kind: str = 'relation', gate_dir: 'DegreeRel' = None) -> str:
         return self._format_degree(self.degree)
@@ -491,7 +505,7 @@ class ProximityRelationship:
         """Create proximity relationship between two close objects (both must be in agent's FOV)."""
         # Check if objects are close enough to each other
         a_to_b_dist = np.linalg.norm(np.array(a_pos) - np.array(b_pos))
-        if a_to_b_dist > cls.PROXIMITY_THRESHOLD - 1e-3:
+        if not (a_to_b_dist < cls.PROXIMITY_THRESHOLD):
             return None
             
         # Create pairwise relationship between the two objects using agent's perspective
