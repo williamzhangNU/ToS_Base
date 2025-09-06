@@ -77,9 +77,8 @@ class ExplorationManager:
         # Observed names (objects and gates) to gate Move() eligibility
         self.observed_items: Set[str] = set()
         
-    def _execute_and_update(self, action: BaseAction) -> ActionResult:
+    def _execute_and_update(self, action: BaseAction, **kwargs) -> ActionResult:
         """Execute action and update exploration state."""
-        kwargs = {}
         # Enforce "observed-before-move"
         if isinstance(action, MoveAction):
             kwargs['observed_items'] = list(self.observed_items)
@@ -105,10 +104,10 @@ class ExplorationManager:
         """Execute single action and return result."""
         return self._execute_and_update(action)
     
-    def execute_success_action(self, action: BaseAction) -> ActionResult:
+    def execute_success_action(self, action: BaseAction, **kwargs) -> ActionResult:
         """Execute single action and return result (must be successful)."""
-        result = self._execute_and_update(action)
-        assert result.success, f"Action {action} failed: {result.message}"
+        result = self._execute_and_update(action, **kwargs)
+        assert result.success, f"Action {action} with kwargs {kwargs} failed: {result.message}"
         return result
 
     def execute_action_sequence(self, action_sequence: ActionSequence) -> Tuple[Dict[str, Any], List[ActionResult]]:

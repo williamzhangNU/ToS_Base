@@ -14,6 +14,7 @@ class DirectionEvaluationTask(BaseEvaluationTask):
     """Pairwise discrete direction (allocentric) and perspective-taking (egocentric)."""
 
     QUESTION_TEMPLATE_DIR = (
+        "Your starting facing direction is north.\n"
         "From a top-down view, what is the spatial relationship of {obj_name} relative to {anchor_obj_name}?\n"
         "Each choice is \"<direction-bin>, <distance-bin>\" (allocentric).\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"

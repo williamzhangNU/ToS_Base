@@ -11,7 +11,8 @@ class FalseBeliefEvaluationTask(BaseEvaluationTask):
     """Identify which object moved, which rotated, and rotation degrees (clockwise)."""
 
     QUESTION_TEMPLATE = (
-        "The environment changed. You turned 360° with 90° FOV and observed:\n"
+        "You change to a new location and facing direction.\n"
+        "Some objects changed their position or orientation, you observed:\n"
         "{observations}\n\n"
         "Which object moved, which object rotated, and by how many degrees (clockwise) did it rotate?\n"
         "Answer format: moved=<name>; rotated=<name>; deg=<0|90|180|270>\n\n"
