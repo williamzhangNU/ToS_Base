@@ -42,7 +42,7 @@ class RoomGenerator:
             return False
 
     @staticmethod
-    def _generate_objects_and_agent(mask, n_objects, fix_object_n, np_random, candidate_list=CANDIDATE_OBJECTS, room_name=""):
+    def _generate_objects_and_agent(mask, n_objects, fix_object_n, np_random, candidate_list=CANDIDATE_OBJECTS, gates= None, room_name=""):
         """Generate objects and agent for a room layout."""
         objects = RoomGenerator._gen_objects(
             n=n_objects,
@@ -64,7 +64,7 @@ class RoomGenerator:
         agent.room_id = 1
         agent.init_room_id = 1
         
-        room = Room(objects=objects, name=room_name, mask=mask.copy(), gates=[])
+        room = Room(objects=objects, name=room_name, mask=mask.copy(), gates=gates)
         
         return room, agent
     @staticmethod
@@ -192,10 +192,9 @@ class RoomGenerator:
                             fix_object_n[max_idx] += diff
                 
                 room, agent = RoomGenerator._generate_objects_and_agent(
-                    mask, n_objects, fix_object_n, attempt_random, candidate_objects, room_name
+                    mask, n_objects, fix_object_n, attempt_random, candidate_objects, gates, room_name
                 )
-                room.gates = gates
-
+                
                 # Validate layout for rotation tasks
                 if RoomGenerator._validate_rotation_tasks(room, agent, eval_tasks):
                     return room, agent
