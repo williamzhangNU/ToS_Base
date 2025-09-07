@@ -1,6 +1,8 @@
 from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, EgoFrontBins, StandardDistanceBins, CardinalBinsEgo
 from typing import Union
 import math
+import numpy as np
+import matplotlib.pyplot as plt
 
 
 def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -> bool:
@@ -155,50 +157,55 @@ def generate_points_for_relationship(
 
 
 
-import numpy as np
-import matplotlib.pyplot as plt
+# ------------ rose glyph for paper plot ------------
 
-# --- 原样保留 ---
-def rose_glyph(sectors, rings, n_dirs=8, n_rings=3, ax=None, color=None, gap=0.96):
-    if ax is None:
-        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=(2.2, 2.2))
+def rose_glyph_pretty(sectors, rings,
+                      color="#E6A23C",
+                      ring_colors=("#E8F3FF","#EAF7F0","#FFF3E0"),
+                      tick_colors=("#4C78A8","#8E9ED6","#74C0E3","#BDE0FE",
+                                   "#A8DADC","#95D5B2","#FFD166","#F4A261"),
+                      gap=0.92, n_dirs=8, n_rings=3, figsize=(2.4,2.4)):
+    fig, ax = plt.subplots(subplot_kw={'projection':'polar'}, figsize=figsize)
     ax.set_theta_zero_location('N'); ax.set_theta_direction(-1)
-    ax.set_xticks([]); ax.set_yticks([]); ax.set_rlim(0, 1)
+    ax.set_xticks([]); ax.set_yticks([])
 
-    rb = np.linspace(0, 1, n_rings + 1)                 # 环半径边界
-    w  = 2*np.pi/n_dirs * gap                            # 扇区角宽(留一点缝隙)
-
-    for s in sectors:
-        th = (s + 0.5) * (2*np.pi/n_dirs)                # 扇区中心角
-        for r in rings:
-            ax.bar(th, rb[r+1]-rb[r], width=w, bottom=rb[r],
-                   align='center', linewidth=0, color=color)
-    return ax
-
-# --- 外部美化（刻度向外、底环对齐、整体更美观）---
-def beautify_rose(ax, n_dirs=8, n_rings=3, tick_len=0.08,
-                  ring_alpha=0.06, ring_color="#000", boundary_alpha=0.25):
-    # 旋转坐标，使“首扇区”为 [-22.5°, 22.5°]（即中心在 0°=北）
-    ax.set_theta_offset(-np.pi/(2*n_dirs))
-
-    rb = np.linspace(0, 1, n_rings+1)
-
-    # 半透明底环（与 distance rings 对齐，铺满 0..2π）
-    for i in range(n_rings):
+    rb = np.linspace(0, 1, n_rings + 1)
+    for i, c in enumerate(ring_colors[:n_rings]):
         ax.bar(0, rb[i+1]-rb[i], width=2*np.pi, bottom=rb[i],
-               color=ring_color, alpha=ring_alpha, linewidth=0, zorder=0)
+               color=c, alpha=0.75, linewidth=0)
 
-    # 环边界细线（可选，提气质）
+    def rose_glyph(sectors, rings, n_dirs=8, n_rings=3, ax=None, color=None, gap=0.96):
+        if ax is None:
+            fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=(2.2, 2.2))
+        ax.set_theta_zero_location('N'); ax.set_theta_direction(-1)
+        ax.set_xticks([]); ax.set_yticks([]); ax.set_rlim(0, 1)
+
+        rb = np.linspace(0, 1, n_rings + 1)
+        w  = 2*np.pi/n_dirs * gap
+
+        for s in sectors:
+            th = (s + 0.5) * (2*np.pi/n_dirs)
+            for r in rings:
+                ax.bar(th, rb[r+1]-rb[r], width=w, bottom=rb[r],
+                       align='center', linewidth=0, color=color)
+        return ax
+
+    rose_glyph(sectors, rings, n_dirs=n_dirs, n_rings=n_rings, ax=ax, color=color, gap=gap)
+
     for r in rb[1:-1]:
-        th = np.linspace(0, 2*np.pi, 361)
-        ax.plot(th, np.full_like(th, r), lw=0.6, alpha=boundary_alpha,
-                color=ring_color, zorder=1)
+        th = np.linspace(0, 2*np.pi, 241)
+        ax.plot(th, np.full_like(th, r), lw=1.8, color="white")
 
-    # 外圈 8 等分刻度（向外延伸；不画外圈圆环）
-    ax.set_rlim(0, 1+tick_len)
-    for k in range(n_dirs):
-        th = k * 2*np.pi/n_dirs
-        ax.plot([th, th], [1, 1+tick_len], lw=1.2, color=ring_color)
+    ax.set_rlim(0, 1.12)
+    centers = np.arange(n_dirs) * (2*np.pi/n_dirs)
+    for i, th in enumerate(centers):
+        ax.plot([th, th], [1.00, 1.115], lw=2.2,
+                color=tick_colors[i % len(tick_colors)],
+                solid_capstyle='round')
+
+    for sp in ax.spines.values(): sp.set_visible(False)
+    return fig, ax
+
 
 
 if __name__ == "__main__":
@@ -210,8 +217,5 @@ if __name__ == "__main__":
 
     # 扇区: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
     # 环:   near=0, mid=1, far=2
-    ax = rose_glyph(sectors=[7,0,1], rings=[1,2], color="#E59E1B")  # 统一颜色
-    beautify_rose(ax, n_dirs=8, n_rings=3, tick_len=0.08)
-    plt.tight_layout()
-    plt.savefig("rose_glyph_beauty.svg", transparent=True)
-    plt.show()
+    ax = rose_glyph_pretty(sectors=[7,0,1], rings=[1,2], color="#E59E1B")
+    plt.savefig("rose_glyph_pretty.png", transparent=True); plt.show()

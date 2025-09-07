@@ -291,6 +291,7 @@ class RoomGenerator:
 
         for idx, pos, ori_idx in zip(indices, positions, orientations):
             obj_info = candidate_list[idx]
+            print(obj_info)
             ori = np.array(ori_vectors[int(ori_idx)]) if obj_info.has_orientation and perspective_taking else np.array([0, 1])
             objects.append(Object(name=obj_info.name, pos=np.array(pos, dtype=int), ori=ori, has_orientation=obj_info.has_orientation))
         
