@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from ..core.object import Agent
 from ..actions import *
 from ..core.room import Room
+from .spatial_solver import SpatialSolver
 
 @dataclass
 class ExplorationTurnLog:
@@ -17,6 +18,7 @@ class ExplorationTurnLog:
     action_counts: Dict[str, int]
     room_state: Optional['Room'] = None
     agent_state: Optional['Agent'] = None
+    information_gain: Optional[Dict[str, Any]] = None  # Information gain metrics
 
     def to_dict(self):
         return {
@@ -25,7 +27,8 @@ class ExplorationTurnLog:
             "step": self.step,
             "action_counts": dict(self.action_counts),
             "room_state": self.room_state.to_dict() if self.room_state else {},
-            "agent_state": self.agent_state.to_dict() if self.agent_state else {}
+            "agent_state": self.agent_state.to_dict() if self.agent_state else {},
+            "information_gain": self.information_gain or 0.0
         }
 
 class ExplorationManager:
@@ -77,6 +80,16 @@ class ExplorationManager:
         self.action_cost: int = 0
         # Observed names (objects and gates) to gate Move() eligibility
         self.observed_items: Set[str] = set()
+        
+        # Initialize spatial solver for information gain tracking
+        object_names = [obj.name for obj in self.exploration_room.all_objects] + ['initial_pos']
+        # Get grid_size from room mask shape for accurate boundary
+        grid_size = max(self.exploration_room.mask.shape)
+        self.spatial_solver = SpatialSolver(object_names, grid_size)
+        self.spatial_solver.set_initial_position('initial_pos', (0, 0))
+        
+        # Store initial total positions for information gain ratio calculation
+        self.initial_total_positions = sum(len(domain) for domain in self.spatial_solver.get_possible_positions().values())
         
     def _execute_and_update(self, action: BaseAction, **kwargs) -> ActionResult:
         """Execute action and update exploration state."""
@@ -131,7 +144,7 @@ class ExplorationManager:
                 action_results.append(obs_result)
                 assert obs_result.success, f"Observe action failed: {obs_result.message}"
                 info.update(obs_result.data)
-                self._log_exploration(action_sequence)
+                self._log_exploration(action_sequence, action_results)
                 return info, action_results
 
         # Execute final action
@@ -142,7 +155,7 @@ class ExplorationManager:
         info.update(result.data)
 
         # Always log before return
-        self._log_exploration(action_sequence)
+        self._log_exploration(action_sequence, action_results)
         return info, action_results
     
     def finish_exploration(self, return_to_origin: bool = True) -> Room:
@@ -218,8 +231,17 @@ class ExplorationManager:
 
 
     
-    def _log_exploration(self, action_sequence: ActionSequence) -> None:
+    def _log_exploration(self, action_sequence: ActionSequence, action_results: List['ActionResult']) -> None:
         """Log exploration history and efficiency."""
+        # Calculate total information gain ratio for observe actions in this turn
+        total_information_gain_ratio = None
+        for action_result in action_results:
+            # Only calculate information gain for observe actions
+            if action_result.action_type in ('observe', 'observe_approx', 'observe_rel', 'observe_dir'):
+                # Calculate information gain for this observe action
+                total_information_gain_ratio = self._calculate_single_action_information_gain(action_result)
+
+        
         # Log current turn with coverage snapshot
         self._update_exp_summary()
         step_idx = len(self.turn_logs) + 1
@@ -229,7 +251,8 @@ class ExplorationManager:
             step=step_idx,
             action_counts=dict(self.exp_summary.get('action_counts', {})),
             room_state=self.exploration_room.copy(),
-            agent_state=self.agent.copy()
+            agent_state=self.agent.copy(),
+            information_gain=total_information_gain_ratio if total_information_gain_ratio is not None else self.turn_logs[-1].information_gain
         )
         self.turn_logs.append(turn_log)
     
@@ -248,6 +271,22 @@ class ExplorationManager:
         }
         return self.exp_summary
     
+    def _calculate_single_action_information_gain(self, action_result: 'ActionResult') -> float:
+        """Calculate information gain for a single action result as ratio to initial total positions."""
+        
+        # Only process observation actions that have relation triples
+        if action_result.action_type in ('observe', 'observe_approx', 'observe_rel', 'observe_dir'):
+            triples = action_result.data.get('relation_triples', []) if hasattr(action_result, 'data') else []
+            if triples:
+                # Add observations to spatial solver
+                self.spatial_solver.add_observation(triples)
+        
+        # Calculate position count after action
+        positions_after = sum(len(domain) for domain in self.spatial_solver.get_possible_positions().values())
+        
+        
+        # Calculate and return ratio of reduced positions to initial total positions
+        return (self.initial_total_positions - positions_after) / self.initial_total_positions
 
 if __name__ == "__main__":
     pass
