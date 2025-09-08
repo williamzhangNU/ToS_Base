@@ -49,7 +49,7 @@ class BaseLocEvaluationTask(BaseEvaluationTask):
                 in_room = [o for o in self.room.objects if int(o.room_id) == rid]
                 vis = [o for o in in_room if BaseAction._is_visible(tmp, o) and not np.allclose(o.pos, tmp.pos)]
                 hid = [o for o in in_room if o not in vis and not np.allclose(o.pos, tmp.pos)]
-                if len(vis) >= 2 and hid:
+                if len(vis) >= 1 and hid:
                     return pos, ori, rid, vis, hid
         raise ValueError("No valid pose found")
 

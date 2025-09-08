@@ -4,7 +4,7 @@ import os
 import shutil
 import json
 import hashlib
-from ragen.env.spatial.Base.tos_base.utils.room_utils import RoomPlotter
+from ..utils.room_utils import RoomPlotter
 
 class HistoryManager:
     """Simple conversation history manager.
