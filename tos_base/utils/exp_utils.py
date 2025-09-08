@@ -148,7 +148,7 @@ def _zoom_from_icon_dim(ax, dim: int, s_points2: float = 70.0) -> float:
     diam_px = float(np.sqrt(max(1e-6, 4.0 * area_px / np.pi)))
     return max(0.02, min(0.6, 0.95 * diam_px / float(max(1, int(dim)))))
 
-# -------------------- HDR contours (sketchy dashed only) --------------------
+# -------------------- smooth HDR dashed outlines --------------------
 def _hdr_thresholds(pdf: np.ndarray, masses=(0.8,)) -> List[float]:
     flat = pdf.ravel()
     if flat.sum() <= 0: return [1.0 for _ in masses]
@@ -160,29 +160,45 @@ def _hdr_thresholds(pdf: np.ndarray, masses=(0.8,)) -> List[float]:
         thrs.append(float(flat[order[idx]]))
     return thrs
 
-def _upsample_for_contour(pdf: np.ndarray, scale: int = 4) -> np.ndarray:
-    return pdf if scale <= 1 else np.kron(pdf, np.ones((scale, scale), dtype=pdf.dtype))
+def _draw_smooth_hdr(ax,
+                     positions: List[Tuple[int,int]],
+                     bounds: Tuple[float,float,float,float],
+                     sigma: float,
+                     color: str,
+                     is_single: bool = False,
+                     center: Optional[Tuple[float,float]] = None,
+                     small: bool = False,
+                     density: int = 6):
+    """
+    Smooth, tight dashed HDR outline using a high-res continuous field.
+    No blocky, tiled look; no simplistic circles.
+    """
+    if not positions: return
+    x_min, x_max, y_min, y_max = bounds
+    # high-res grid within current bounds
+    nx = max(40, int((x_max - x_min) * density))
+    ny = max(40, int((y_max - y_min) * density))
+    xs = np.linspace(x_min, x_max, nx)
+    ys = np.linspace(y_min, y_max, ny)
+    XX, YY = np.meshgrid(xs, ys)
 
-def _draw_hdr_contours(ax, pdf: np.ndarray, extent: Tuple[float,float,float,float],
-                       color: str, is_single: bool=False, center: Optional[Tuple[float,float]]=None, small: bool=False):
-    """Single dashed HDR outline (≈80% mass) for a clean, consistent sketch look."""
-    if pdf.sum() <= 0: return
-    dense = _upsample_for_contour(pdf, scale=4)
-    (lv80,) = _hdr_thresholds(dense, (0.8,))
+    heat = _accumulate_gaussians_continuous(positions, XX, YY, sigma)
+    if heat.sum() <= 0: return
+
+    (lv80,) = _hdr_thresholds(heat, (0.8,))
     lw = 0.9 if not small else 0.55
-    cs = ax.contour(dense, levels=[lv80], colors=[color], linewidths=lw,
-                    linestyles='--', origin='lower', extent=extent, zorder=35)
+    cs = ax.contour(XX, YY, heat, levels=[lv80], colors=[color], linewidths=lw, linestyles='--', zorder=35)
 
+    # fallback (rare) when contour fails to close
     if is_single and (not getattr(cs, 'allsegs', None) or len(cs.allsegs[0]) == 0):
         if center is None: return
         x0, y0 = center
-        e = patches.Circle((x0, y0), 0.40, fill=False, edgecolor=color,
-                           linestyle='--', linewidth=lw, zorder=36)
+        e = patches.Circle((x0, y0), 0.40, fill=False, edgecolor=color, linestyle='--', linewidth=lw, zorder=36)
         ax.add_patch(e)
 
 # -------------------- main replay --------------------
 class ReplayHelper:
-    """Replay utilities for heatmaps and trajectory GIFs (polished for print)."""
+    """Replay utilities for heatmaps and trajectory GIFs (clean sketch style)."""
 
     def __init__(self, room: 'Room', agent: 'Agent', grid_size: Optional[int] = None):
         self.room = room.copy(); self.agent = agent.copy()
@@ -194,11 +210,7 @@ class ReplayHelper:
                                   use_icons: bool = False, icons_dir: Optional[str] = None,
                                   use_icon_colors: bool = False, bg: float = 0.96, small_bg: float = 0.08) -> List[np.ndarray]:
         """
-        Changes:
-        - Tighter vertical rhythm: legend and bottom strips closer to the main plot.
-        - Dashed-only HDR outlines (≈80% mass) for a clean sketch style.
-        - Thinner dashed placeholder frames in bottom strips.
-        - Bottom row always shows ALL objects (auto-fit width; no truncation).
+        Sketch style with smooth dashed HDR outlines: continuous, tight, non-blocky.
         """
         mgr = ExplorationManager(self.room, self.agent)
         names = [o.name for o in self.room.all_objects] + ['initial_pos']
@@ -227,23 +239,19 @@ class ReplayHelper:
             g = int(self.grid_size); H = W = 2 * g + 1
             fig = plt.figure(figsize=(7.0, 7.4), dpi=140); fig.patch.set_facecolor((bg, bg, bg))
 
-            # layout (tighter)
+            # compact layout
             LEGEND_ICON_S, STRIP_ICON_S = 38.0, 32.0
             rows_legend_factor = 0.028
-            legend_gap = 0.006  # gap between main top and legend
+            legend_gap = 0.006
             main_left, main_bottom, main_width = 0.08, 0.30, 0.84
 
-            # legend rows/height
             n_legend = len(obj_names) if (use_icons and len(obj_names) > 0) else 0
             rows = int(np.ceil(n_legend / 9.0)) if n_legend else 0
             leg_h = rows_legend_factor * rows
             top = 0.92 - leg_h if rows else 0.93
 
-            # main axes (closer to strips and legend)
             ax = fig.add_axes([main_left, main_bottom, main_width, max(0.20, top - main_bottom - 0.02)])
-
-            if axes:
-                ax.set_xlabel('x'); ax.set_ylabel('y')
+            if axes: ax.set_xlabel('x'); ax.set_ylabel('y')
             ax.set_aspect('equal'); ax.grid(axes, linestyle=':', linewidth=0.35, alpha=0.33)
             for sp in ax.spines.values(): sp.set_visible(False)
 
@@ -255,7 +263,7 @@ class ReplayHelper:
 
             canvas = np.zeros((H, W, 3), dtype=np.float32)
             alpha_map = np.zeros((H, W), dtype=np.float32)
-            hdr_queue: List[Tuple[np.ndarray, str, bool, Optional[Tuple[float,float]]]] = []
+            hdr_queue: List[Tuple[List[Tuple[int,int]], float, str, bool, Optional[Tuple[float,float]]]] = []
 
             # appearance constants
             SIGMA_SINGLE = 0.08
@@ -301,7 +309,8 @@ class ReplayHelper:
                 alpha_map = np.maximum(alpha_map, boost)
 
                 ctr_center = dom[0] if (n == 1 and len(dom) == 1) else None
-                hdr_queue.append((heat_prob, _color_by_name.get(name, '#E69F00'), (n == 1), ctr_center))
+                # queue positions & sigma for smooth dashed outline
+                hdr_queue.append((dom, sigma_local, _color_by_name.get(name, '#E69F00'), (n == 1), ctr_center))
 
                 if n == 1:
                     (x, y) = dom[0]
@@ -316,8 +325,9 @@ class ReplayHelper:
             final = (1.0 - alpha)[..., None] * np.array([bg, bg, bg], dtype=np.float32) + alpha[..., None] * canvas
             ax.imshow(final, origin='lower', extent=extent, interpolation='bicubic', zorder=0)
 
-            for pdf, color, is_single, ctr in hdr_queue:
-                _draw_hdr_contours(ax, pdf, extent, color, is_single=is_single, center=ctr, small=False)
+            # smooth, continuous dashed HDR outlines
+            for dom, sig, color, is_single, ctr in hdr_queue:
+                _draw_smooth_hdr(ax, dom, bounds, sig, color, is_single=is_single, center=ctr, small=False, density=7)
 
             if not axes: ax.set_xticks([]); ax.set_yticks([])
 
@@ -327,7 +337,7 @@ class ReplayHelper:
             else:
                 ax.scatter([0], [0], s=88, c='#000000', marker='*', linewidths=0.55, zorder=48)
 
-            # top legend (closer to main)
+            # top legend
             if use_icons and icon_files and rows:
                 cols = int(np.ceil(len(obj_names) / rows))
                 y0 = top + legend_gap
@@ -350,13 +360,13 @@ class ReplayHelper:
                 by_label = {h.get_label(): h for h in handles}
                 ax.legend(handles=list(by_label.values()), loc='upper right', fontsize=8, framealpha=0.85)
 
-            # bottom mini-strips (closer to main; always show ALL objects)
+            # bottom mini-strips (always all objects)
             names_local = sorted({o.name for o in self.room.all_objects} | {n for n in domains.keys()})
             names_local = [n for n in names_local if n != 'initial_pos']; nobj = len(names_local)
             if nobj > 0:
                 gap, height, bottom = 0.006, 0.16, 0.11
                 width = (main_width - (nobj - 1) * gap) / nobj
-                width = max(0.04, min(0.15, width))  # compact but readable
+                width = max(0.04, min(0.15, width))
                 total = nobj * width + (nobj - 1) * gap
                 left0 = main_left + (main_width - total) * 0.5
                 for i, name in enumerate(names_local):
@@ -376,31 +386,34 @@ class ReplayHelper:
                             ab.set_clip_on(False); ax_s.add_artist(ab)
                         else:
                             ax_s.set_title(name, fontsize=7, color=_color_by_name.get(name, '#444444'), pad=1)
-                        # thinner placeholder frame
-                        cx, cy = (x_min + x_max) / 2.0, (y_min + y_max) / 2.0
-                        circ = patches.Ellipse((cx, cy), 0.08*(x_max-x_min), 0.08*(y_max-y_min),
+                        circ = patches.Ellipse(((x_min + x_max) / 2.0, (y_min + y_max) / 2.0),
+                                               0.08*(x_max-x_min), 0.08*(y_max-y_min),
                                                fill=False, edgecolor='#C7C7C7', linestyle='--', linewidth=0.20, zorder=10)
                         ax_s.add_patch(circ); continue
 
                     if len(dom) > max_positions: dom = random.sample(dom, max_positions)
+
+                    # subtle color wash (kept), tight dashed outline (smooth)
                     sigma_local = (0.08 if len(dom) == 1 else sigma)
                     heat = _accumulate_gaussians(np.zeros((H, W), dtype=np.float32), dom, self.grid_size, sigma=sigma_local)
-                    ssum = float(heat.sum())
-                    if ssum <= 0: continue
-                    prob = heat / ssum
-                    vmax = (prob.max() + 1e-9)
-                    h = np.clip(prob / vmax, 0, 1)
-                    t = 0.93 if len(dom) == 1 else 0.30
-                    h = np.clip((h - t) / (1.0 - t), 0, 1)
-                    rgb = np.array(_hex_to_rgb(_color_by_name.get(name, '#E69F00')), dtype=np.float32)
-                    bg_rgb = np.array([small_bg, small_bg, small_bg], dtype=np.float32)
-                    h = np.power(h, 0.55)
-                    final_small = bg_rgb + (rgb - bg_rgb) * np.clip(h * 1.2, 0, 1)[..., None]
-                    ax_s.imshow(final_small, origin='lower', extent=extent, interpolation='bicubic', zorder=0)
+                    ssum = float(heat.sum()); 
+                    if ssum > 0:
+                        prob = heat / ssum
+                        vmax = (prob.max() + 1e-9)
+                        h = np.clip(prob / vmax, 0, 1)
+                        t = 0.93 if len(dom) == 1 else 0.30
+                        h = np.clip((h - t) / (1.0 - t), 0, 1)
+                        rgb = np.array(_hex_to_rgb(_color_by_name.get(name, '#E69F00')), dtype=np.float32)
+                        bg_rgb = np.array([small_bg, small_bg, small_bg], dtype=np.float32)
+                        h = np.power(h, 0.55)
+                        final_small = bg_rgb + (rgb - bg_rgb) * np.clip(h * 1.2, 0, 1)[..., None]
+                        ax_s.imshow(final_small, origin='lower', extent=extent, interpolation='bicubic', zorder=0)
 
-                    ctr_center = dom[0] if len(dom) == 1 else None
-                    _draw_hdr_contours(ax_s, prob, extent, _color_by_name.get(name, '#E69F00'),
-                                       is_single=(len(dom) == 1), center=ctr_center, small=True)
+                    _draw_smooth_hdr(ax_s, dom, bounds, sigma_local, _color_by_name.get(name, '#E69F00'),
+                                     is_single=(len(dom) == 1),
+                                     center=(dom[0] if len(dom) == 1 else None),
+                                     small=True, density=6)
+
                     if len(dom) == 1:
                         (x, y) = dom[0]
                         ax_s.scatter([x], [y], s=34, c=_color_by_name.get(name, '#E69F00'),
@@ -420,11 +433,20 @@ class ReplayHelper:
         # collect observe snapshots
         snapshots: List[Dict[str, set]] = []
         for res in action_results:
-            if res.action_type in ('observe', 'observe_approx'):
+            if res.action_type in ('observe', 'observe_approx', 'query'):
                 triples = res.data.get('relation_triples', []) if hasattr(res, 'data') else []
-                if triples: solver.add_observation(triples)
-                snapshots.append(solver.get_possible_positions())
-        print(solver.get_possible_positions())
+                if triples:
+                    solver.add_observation(triples)
+                    rel_sets = solver.get_possible_relations()
+                    for (a, b), rels in rel_sets.items():
+                        print(f"{a} -> {b}: {rels}")
+                    print(solver.get_possible_positions()['chair'])
+                    print("-" * 100)
+                    snapshots.append(solver.get_possible_positions())
+
+        rel_sets = solver.get_possible_relations()
+        for (a, b), rels in rel_sets.items():
+            print(f"{a} -> {b}: {rels}")
 
         # shared bounds
         g = int(self.grid_size); full_size = _full_domain_size(self.grid_size)
@@ -473,7 +495,7 @@ class ReplayHelper:
 
 
 if __name__ == "__main__":
-    from ..managers.agent_proxy import OracleAgentProxy, InquisitorAgentProxy, AnalystAgentProxy
+    from ..managers.agent_proxy import OracleAgentProxy, InquisitorAgentProxy, AnalystAgentProxy, StrategistAgentProxy
     from ..utils.room_utils import RoomGenerator
     from ..core.constant import ObjectInfo
     candidate_objects = [
@@ -492,12 +514,14 @@ if __name__ == "__main__":
         ObjectInfo(name='floor-lamp', has_orientation=True),
     ]
     room, agent = RoomGenerator.generate_room(
-        room_size=[20, 20], n_objects=8, np_random=np.random.default_rng(2),
+        room_size=[20, 20], n_objects=8, np_random=np.random.default_rng(3),
         level=1, main=8, candidate_objects=candidate_objects
     )
     print(room, agent)
-    proxy = InquisitorAgentProxy(room, agent)
+    # proxy = StrategistAgentProxy(room, agent)
+    proxy = AnalystAgentProxy(room, agent, delegate='observer_analyst', observer_delegate='strategist')
     proxy.run()
+    print(proxy.to_text())
     action_results = ReplayHelper.flatten_turns(proxy.turns)
     replay = ReplayHelper(room, agent)
     replay.plot_observation_heatmaps(action_results, out_dir='heatmaps', fps=1, axes=False, use_icons=True, use_icon_colors=True)

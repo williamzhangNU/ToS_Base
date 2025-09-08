@@ -159,51 +159,58 @@ def generate_points_for_relationship(
 
 # ------------ rose glyph for paper plot ------------
 
-def rose_glyph_pretty(sectors, rings,
-                      color="#E6A23C",
-                      ring_colors=("#E8F3FF","#EAF7F0","#FFF3E0"),
-                      tick_colors=("#4C78A8","#8E9ED6","#74C0E3","#BDE0FE",
-                                   "#A8DADC","#95D5B2","#FFD166","#F4A261"),
-                      gap=0.92, n_dirs=8, n_rings=3, figsize=(2.4,2.4)):
-    fig, ax = plt.subplots(subplot_kw={'projection':'polar'}, figsize=figsize)
+def rose_glyph_pretty(
+    sectors,                # list of sector indices (0..7); 0° sector spans -22.5°..22.5°
+    rings,                  # list of ring indices (0..n_rings-1); each fills from center up to that ring
+    color="#E6A23C",
+    ring_colors=("#E8F3FF", "#EAF7F0", "#FFF3E0"),
+    tick_colors=("#4C78A8","#8E9ED6","#74C0E3","#BDE0FE","#A8DADC","#95D5B2","#FFD166","#F4A261"),
+    gap=0.92,               # angular fill fraction (1=no gap)
+    n_dirs=8,               # 8 sectors ⇒ 45° each
+    n_rings=3,
+    figsize=(2.4, 2.4),
+    ring_heights=(0.6, 0.25, 0.20)  # make inner ring larger; gently tighten spacing
+):
+    # --- setup polar axes (0° at top) ---
+    fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=figsize)
     ax.set_theta_zero_location('N'); ax.set_theta_direction(-1)
-    ax.set_xticks([]); ax.set_yticks([])
+    ax.set_xticks([]); ax.set_yticks([]); ax.set_rlim(0, 1)
 
-    rb = np.linspace(0, 1, n_rings + 1)
+    # --- build radial boundaries with a larger first ring ---
+    rh = np.array(ring_heights[:n_rings], dtype=float)
+    rh = rh / rh.sum()                                 # normalize to total radius=1
+    rb = np.concatenate([[0.0], np.cumsum(rh)])        # ring boundaries [0..1]
+
+    # --- paint background rings ---
     for i, c in enumerate(ring_colors[:n_rings]):
         ax.bar(0, rb[i+1]-rb[i], width=2*np.pi, bottom=rb[i],
-               color=c, alpha=0.75, linewidth=0)
+               color=c, alpha=0.8, linewidth=0)
 
-    def rose_glyph(sectors, rings, n_dirs=8, n_rings=3, ax=None, color=None, gap=0.96):
-        if ax is None:
-            fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=(2.2, 2.2))
-        ax.set_theta_zero_location('N'); ax.set_theta_direction(-1)
-        ax.set_xticks([]); ax.set_yticks([]); ax.set_rlim(0, 1)
-
-        rb = np.linspace(0, 1, n_rings + 1)
-        w  = 2*np.pi/n_dirs * gap
-
-        for s in sectors:
-            th = (s + 0.5) * (2*np.pi/n_dirs)
-            for r in rings:
-                ax.bar(th, rb[r+1]-rb[r], width=w, bottom=rb[r],
+    # --- core glyph: 45° sectors; sector 0 centered at 0° (spans -22.5°..22.5°) ---
+    width = (2*np.pi / n_dirs) * gap
+    for s in sectors:
+        theta = (s % n_dirs) * (2*np.pi / n_dirs)      # centers at 0°,45°,...,315°
+        # fill from center up to each requested ring index
+        for r in rings:
+            r = int(r)
+            for rr in range(0, min(r, n_rings-1) + 1):
+                ax.bar(theta, rb[rr+1]-rb[rr], width=width, bottom=rb[rr],
                        align='center', linewidth=0, color=color)
-        return ax
 
-    rose_glyph(sectors, rings, n_dirs=n_dirs, n_rings=n_rings, ax=ax, color=color, gap=gap)
-
+    # --- subtle ring separators (tighter spacing look) ---
+    th = np.linspace(0, 2*np.pi, 361)
     for r in rb[1:-1]:
-        th = np.linspace(0, 2*np.pi, 241)
-        ax.plot(th, np.full_like(th, r), lw=1.8, color="white")
+        ax.plot(th, np.full_like(th, r), lw=1.1, color="white")
 
-    ax.set_rlim(0, 1.12)
-    centers = np.arange(n_dirs) * (2*np.pi/n_dirs)
-    for i, th in enumerate(centers):
-        ax.plot([th, th], [1.00, 1.115], lw=2.2,
+    # --- outer ticks at each 45° center ---
+    centers = np.arange(n_dirs) * (2*np.pi / n_dirs)
+    for i, th_c in enumerate(centers):
+        ax.plot([th_c, th_c], [1.00, 1.07], lw=2.0,
                 color=tick_colors[i % len(tick_colors)],
                 solid_capstyle='round')
 
     for sp in ax.spines.values(): sp.set_visible(False)
+    ax.set_rlim(0, 1.07)  # small outer padding
     return fig, ax
 
 
@@ -217,5 +224,5 @@ if __name__ == "__main__":
 
     # 扇区: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
     # 环:   near=0, mid=1, far=2
-    ax = rose_glyph_pretty(sectors=[7,0,1], rings=[1,2], color="#E59E1B")
-    plt.savefig("rose_glyph_pretty.png", transparent=True); plt.show()
+    ax = rose_glyph_pretty(sectors=[0], rings=[0], color="#E59E1B")
+    plt.savefig("rose_glyph_pretty.png", transparent=True)

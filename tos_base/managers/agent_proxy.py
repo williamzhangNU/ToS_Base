@@ -611,9 +611,11 @@ class AnalystAgentProxy(AgentProxy):
 
         # Ingest all observed relation triples into solver
         self._ingest_observations()
+
         # Ensure return to initial state before queries
         ret = self.mgr.execute_success_action(ReturnAction())
         self._add_turn([ret])
+
         # Global greedy queries
         self._global_query_loop()
         # Terminate

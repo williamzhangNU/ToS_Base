@@ -280,46 +280,9 @@ class SpatialSolver:
             self._ensure_domain_initialized(name)
         return {name: var.domain.copy() for name, var in self.solver.variables.items()}
 
-    def _ensure_domain_initialized(self, name: str):
-        if not self.solver.variables[name].domain:
-            g = int(self.grid_size)
-            self.solver.variables[name].domain = {(x, y) for x in range(-g, g + 1) for y in range(-g, g + 1)}
-
-    def copy(self) -> 'SpatialSolver':
-        new_spatial = object.__new__(SpatialSolver)
-        new_spatial.grid_size = self.grid_size
-        new_spatial.solver = self.solver.copy()
-        return new_spatial
-
-    # ---- Path-consistency API ----
-    def is_pair_value_path_consistent(self, obj1_name: str, pos1: Tuple[int, int],
-                                      obj2_name: str, pos2: Tuple[int, int]) -> bool:
-        """PC check for (obj1=pos1, obj2=pos2) against all other variables."""
-        # Ensure domains exist for referenced vars (others assumed initialized already)
-        self._ensure_domain_initialized(obj1_name)
-        self._ensure_domain_initialized(obj2_name)
-        return self.solver.is_pair_value_path_consistent(obj1_name, tuple(pos1), obj2_name, tuple(pos2))
-
-    # ---- Metrics ----
-    def compute_metrics(self, max_samples_per_var: int = 50,
-                        perspective: Tuple[int, int] = (0, 1), bin_system=None, distance_bin_system=None,
-                        path_consistent: bool = True) -> tuple[
-        Dict[str, int], int, Dict[Tuple[str, str], Set[str]], int
-    ]:
-        """
-        Compute discrete relationship sets using the provided bin systems.
-        Returns: (domain_sizes, total_positions, pair_rel_sets, total_relationships)
-        """
-        bin_system = bin_system or CardinalBinsAllo()
-        distance_bin_system = distance_bin_system or StandardDistanceBins()
-        
-        # Domain sizes
-        domain_sizes: Dict[str, int] = {}
-        for name in self.solver.variables:
-            self._ensure_domain_initialized(name)
-            domain_sizes[name] = len(self.solver.variables[name].domain)
-        total_positions = sum(domain_sizes.values())
-
+    def get_possible_relations(self, max_samples_per_var: int = 50,
+                        perspective: Tuple[int, int] = (0, 1), bin_system=CardinalBinsAllo(), distance_bin_system=StandardDistanceBins(),
+                        path_consistent: bool = True) -> Dict[Tuple[str, str], Set[str]]:
         # Possible relationship sets per unordered pair (discrete only)
         names = sorted(self.solver.variables.keys())
         rel_sets: Dict[Tuple[str, str], Set[str]] = {}
@@ -342,6 +305,51 @@ class SpatialSolver:
                         rel = PairwiseRelationshipDiscrete.relationship(pa, pb, perspective, bin_system, distance_bin_system)
                         s.add(rel.to_string())
                 rel_sets[(a, b)] = s
+
+        return rel_sets
+
+    def _ensure_domain_initialized(self, name: str):
+        if not self.solver.variables[name].domain:
+            g = int(self.grid_size)
+            self.solver.variables[name].domain = {(x, y) for x in range(-g, g + 1) for y in range(-g, g + 1)}
+
+    def copy(self) -> 'SpatialSolver':
+        new_spatial = object.__new__(SpatialSolver)
+        new_spatial.grid_size = self.grid_size
+        new_spatial.solver = self.solver.copy()
+        return new_spatial
+
+    # ---- Path-consistency API ----
+    def is_pair_value_path_consistent(self, obj1_name: str, pos1: Tuple[int, int],
+                                      obj2_name: str, pos2: Tuple[int, int]) -> bool:
+        """PC check for (obj1=pos1, obj2=pos2) against all other variables."""
+        # Ensure domains exist for referenced vars (others assumed initialized already)
+        self._ensure_domain_initialized(obj1_name)
+        self._ensure_domain_initialized(obj2_name)
+        return self.solver.is_pair_value_path_consistent(obj1_name, tuple(pos1), obj2_name, tuple(pos2))
+
+    # ---- Metrics ----
+    def compute_metrics(self, max_samples_per_var: int = 50,
+                        perspective: Tuple[int, int] = (0, 1), bin_system=CardinalBinsAllo(), distance_bin_system=StandardDistanceBins(),
+                        path_consistent: bool = True) -> tuple[
+        Dict[str, int], int, Dict[Tuple[str, str], Set[str]], int
+    ]:
+        """
+        Compute discrete relationship sets using the provided bin systems.
+        Returns: (domain_sizes, total_positions, pair_rel_sets, total_relationships)
+        """
+        bin_system = bin_system or CardinalBinsAllo()
+        distance_bin_system = distance_bin_system or StandardDistanceBins()
+        
+        # Domain sizes
+        domain_sizes: Dict[str, int] = {}
+        for name in self.solver.variables:
+            self._ensure_domain_initialized(name)
+            domain_sizes[name] = len(self.solver.variables[name].domain)
+        total_positions = sum(domain_sizes.values())
+
+        # Possible relationship sets per unordered pair (discrete only)
+        rel_sets = self.get_possible_relations(max_samples_per_var, perspective, bin_system, distance_bin_system, path_consistent)
 
         total_relationships = sum(len(v) for v in rel_sets.values())
         return domain_sizes, total_positions, rel_sets, total_relationships
