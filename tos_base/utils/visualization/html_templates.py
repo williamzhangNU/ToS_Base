@@ -476,6 +476,12 @@ body {
     color: #0d47a1;
 }
 
+.block.cogmap-response {
+    background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+    border-left-color: #ffa000;
+    color: #e65100;
+}
+
 .metrics {
     margin-top: 15px;
     font-size: 13px;
