@@ -9,18 +9,19 @@ from ..core.relationship import CardinalBinsAllo
 
 class FalseBeliefEvaluationTask(BaseEvaluationTask):
     """Identify which object moved, which rotated, and rotation degrees (clockwise)."""
-
-    QUESTION_TEMPLATE = (
+    ACTION_TEMPLATE = (
         "You change to a new location and facing direction.\n"
         "Some objects changed their position or orientation, you observed:\n"
         "{observations}\n\n"
+    )
+    QUESTION_TEMPLATE = (
         "Which object moved, which object rotated, and by how many degrees (clockwise) did it rotate?\n"
         "Answer format: moved=<name>; rotated=<name>; deg=<0|90|180|270>\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
 
-    def generate_question(self) -> str:
+    def generate_question(self) -> dict:
         # 1) Pick a room with ≥3 objects AND ≥3 oriented objects; place agent randomly
         rids = [int(r) for r in self.room.objects_by_room.keys() if isinstance(r, int) and r > 0]
         self.np_random.shuffle(rids)
@@ -58,8 +59,8 @@ class FalseBeliefEvaluationTask(BaseEvaluationTask):
         observations = self._take_full_observations()
         choices, correct_idx = self.generate_choices((moved_name, rotated_name, deg))
         choices_text, correct_label = self.format_choices(choices, correct_idx)
-
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(observations=observations, choices_text=choices_text)
+        self.eval_data.action = self.ACTION_TEMPLATE.format(observations=observations)
+        self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(choices_text=choices_text)
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
         self.eval_data.reasoning = self._generate_reasoning()

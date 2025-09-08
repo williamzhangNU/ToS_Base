@@ -47,7 +47,9 @@ Content rules:
 - Local: include visible objects only; exclude agent
 - Rooms: include observed objects in that room only; exclude origin gate and agent
 
-Always output the cognitive map JSON first in your thinking. Include `local`, `rooms`, `global`, and `gates`.
+In your thinking (<think> ... </think>):
+1) Briefly reason about your cognitive map
+2) Then provide the cognitive map JSON in <answer>...</answer>
 
 Example:
 ```json
@@ -353,7 +355,7 @@ class CognitiveMapManager:
             overall_sim=global_m.overall,
         )
         self.turn_logs.append(turn_log)
-        return metrics
+        return turn_log
             
     
     def get_cogmap_summary(self) -> Dict[str, Any]:

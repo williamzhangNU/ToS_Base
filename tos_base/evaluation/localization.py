@@ -56,17 +56,18 @@ class BaseLocEvaluationTask(BaseEvaluationTask):
 
 class BackwardLocEvaluationTask(BaseLocEvaluationTask):
     """Localize your own coordinate (x, y). TODO treat ... as origin, including orientation?"""
-
-    QUESTION_TEMPLATE = (
+    ACTION_TEMPLATE = (
         "You change to a new location and facing direction, you observed:\n"
         "{observations}\n"
+    )
+    QUESTION_TEMPLATE = (
         "Treat {origin_name} as the origin (0, 0), and your starting facing direction is north.\n"
         "What is your current 2D coordinate (x, y)?\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
 
-    def generate_question(self) -> str:
+    def generate_question(self) -> dict:
         pos, ori, rid, visible_objs, hidden_objs = self._sample_valid_agent_pose()
         self.agent.pos, self.agent.ori, self.agent.room_id = np.array(pos), np.array(ori), int(rid)
         origin_obj = self.np_random.choice(hidden_objs)
@@ -84,9 +85,10 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
         }
         choices, correct_idx = self.generate_choices(correct_coord)
         choices_text, correct_label = self.format_choices(choices, correct_idx)
-
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(
-            observations=observations,
+        self.eval_data.action = self.ACTION_TEMPLATE.format(
+            observations=observations
+        )
+        self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(
             origin_name=origin_obj.name,
             choices_text=choices_text,
         )
@@ -153,9 +155,11 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
 
 
 class ForwardLocEvaluationTask(BaseLocEvaluationTask):
-    QUESTION_TEMPLATE = (
+    ACTION_TEMPLATE = (
         "Treat {origin_name} as the origin (0, 0), and your starting facing direction is north.\n"
         "You move to {loc} and face {direction}.\n"
+    )
+    QUESTION_TEMPLATE = (
         "What will you observe?\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
@@ -217,7 +221,7 @@ class ForwardLocEvaluationTask(BaseLocEvaluationTask):
             lines.append(f"{obj.name}: {dir_labels[d_idx]}, {dist_labels[s_idx]}, {ori_str}")
         return "; ".join(lines)
 
-    def generate_question(self) -> str:
+    def generate_question(self) -> dict:
         pos, ori, rid, _, hidden_objs = self._sample_valid_agent_pose()
         self.agent.pos, self.agent.ori, self.agent.room_id = np.array(pos), np.array(ori), int(rid)
         origin_obj = self.np_random.choice(hidden_objs)
@@ -240,10 +244,12 @@ class ForwardLocEvaluationTask(BaseLocEvaluationTask):
         choices, correct_idx = self.generate_choices(correct_obs)
         choices_text, correct_label = self.format_choices(choices, correct_idx)
 
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(
+        self.eval_data.action = self.ACTION_TEMPLATE.format(
             origin_name=origin_obj.name,
             loc=f"({int(loc_rel[0])}, {int(loc_rel[1])})",
             direction=dir_name,
+        )
+        self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(
             choices_text=choices_text,
         )
         self.eval_data.answer = correct_label

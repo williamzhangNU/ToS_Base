@@ -281,11 +281,12 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
 
 class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
     """Predict final observation from an action sequence."""
-
-    QUESTION_TEMPLATE = (
+    ACTION_TEMPLATE = (
         "You return to your starting position and face north.\n"
         "You will execute an action sequence.\n"
         "Actions:\n{actions}\n\n"
+    )
+    QUESTION_TEMPLATE = (
         "What will you observe at the end?\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
@@ -344,7 +345,7 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
         choices = choices[:4]
         return choices, int(choices.index(correct_obs))
 
-    def generate_question(self) -> str:
+    def generate_question(self) -> dict:
         self.steps = int(self.config.get('steps', 2))
         seq, final_ori = self._generate_plan(self.steps)
         per_step, end_agent = self.build_action_sequence(seq, final_ori)
@@ -353,7 +354,8 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
         self._ctx = {'end_agent': end_agent.copy(), 'final_ori': tuple(final_ori)}
         choices, correct_idx = self.generate_choices(correct_obs)
         choices_text, correct_label = self.format_choices(choices, correct_idx)
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(actions=actions_str, choices_text=choices_text)
+        self.eval_data.action = self.ACTION_TEMPLATE.format(actions=actions_str)
+        self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(choices_text=choices_text)
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
         self.eval_data.reasoning = self._generate_reasoning()
@@ -361,11 +363,12 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
 
 class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
     """Infer action sequence from final observation."""
-
-    QUESTION_TEMPLATE = (
+    ACTION_TEMPLATE = (
         "You have executed an action sequence and changed to a new location and facing direction.\n"
         "You see the final observation below:\n"
         "{final_obs}\n\n"
+    )
+    QUESTION_TEMPLATE = (
         "Which action sequence led to this final view?\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
@@ -428,7 +431,7 @@ class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
         self.np_random.shuffle(choices)
         return choices, int(choices.index(correct))
 
-    def generate_question(self) -> str:
+    def generate_question(self) -> dict:
         self.steps = int(self.config.get('max_steps', 2))
         seq, final_ori = self._generate_plan(self.steps)
         per_step, end_agent = self.build_action_sequence(seq, final_ori)
@@ -437,7 +440,8 @@ class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
         self._ctx = {'seq': list(seq), 'final_ori': tuple(final_ori)}
         choices, correct_idx = self.generate_choices(correct_actions)
         choices_text, correct_label = self.format_choices(choices, correct_idx)
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(final_obs=final_obs, choices_text=choices_text)
+        self.eval_data.action = self.ACTION_TEMPLATE.format(final_obs=final_obs)
+        self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(choices_text=choices_text)
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
         self.eval_data.reasoning = self._generate_reasoning()
