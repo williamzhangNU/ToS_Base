@@ -122,6 +122,7 @@ def evaluate_cognitive_maps_from_turnlogs(
             )
         
         # include Term
+        turn_log.cognitive_map_response = response
         if not turn_log.is_exploration_phase:
             turn_log.cogmap_final_log = cogmap_log
         else:
