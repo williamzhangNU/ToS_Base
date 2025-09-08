@@ -88,8 +88,8 @@ class ExplorationManager:
         self.spatial_solver = SpatialSolver(object_names, grid_size)
         self.spatial_solver.set_initial_position('initial_pos', (0, 0))
         
-        # Store initial total positions for information gain ratio calculation
-        self.initial_total_positions = sum(len(domain) for domain in self.spatial_solver.get_possible_positions().values())
+        # Store previous total positions for information gain calculation
+        self.previous_total_positions = sum(len(domain) for domain in self.spatial_solver.get_possible_positions().values())
         
     def _execute_and_update(self, action: BaseAction, **kwargs) -> ActionResult:
         """Execute action and update exploration state."""
@@ -272,7 +272,10 @@ class ExplorationManager:
         return self.exp_summary
     
     def _calculate_single_action_information_gain(self, action_result: 'ActionResult') -> float:
-        """Calculate information gain for a single action result as ratio to initial total positions."""
+        """Calculate information gain as negative log of ratio between current and previous total positions."""
+        
+        # Store previous positions before processing the action
+        previous_positions = self.previous_total_positions
         
         # Only process observation actions that have relation triples
         if action_result.action_type in ('observe', 'observe_approx', 'observe_rel', 'observe_dir'):
@@ -282,11 +285,17 @@ class ExplorationManager:
                 self.spatial_solver.add_observation(triples)
         
         # Calculate position count after action
-        positions_after = sum(len(domain) for domain in self.spatial_solver.get_possible_positions().values())
+        current_positions = sum(len(domain) for domain in self.spatial_solver.get_possible_positions().values())
         
+        # Update previous_total_positions for next calculation
+        self.previous_total_positions = current_positions
         
-        # Calculate and return ratio of reduced positions to initial total positions
-        return (self.initial_total_positions - positions_after) / self.initial_total_positions
+        # Calculate and return negative log of the ratio
+        if previous_positions > 0:
+            ratio = current_positions / previous_positions
+            return -np.log(ratio) if ratio > 0 else 0.0
+        else:
+            return 0.0
 
 if __name__ == "__main__":
     pass

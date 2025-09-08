@@ -104,29 +104,29 @@ def evaluate_cognitive_maps_from_turnlogs(
             llm_wrapper, all_messages_list, all_env_ids, all_env_ids
         )
 
-    for (response, original_env_id) in zip(lm_outputs.non_tensor_batch['response_texts'], lm_outputs.non_tensor_batch['env_ids']):
-        env_idx, turn_idx = env_id_to_location[original_env_id]
-        env = envs[env_idx]
-        cognitive_map_manager=env.cognitive_map_manager
-        assert cognitive_map_manager is not None, "CognitiveMapManager is not initialized in the environment."
-        turn_log = env.turn_logs[turn_idx]
-        
-        # Evaluate the cognitive map using the manager
-        cogmap_log = None
-        if response and turn_log.room_state and turn_log.agent_state:
-            cogmap_log = cognitive_map_manager.evaluate_cognitive_map(
-                response,
-                turn_log.room_state,
-                turn_log.agent_state,
-                turn_log.observed_items if turn_log.is_exploration_phase else [o.name for o in turn_log.room_state.all_objects]
-            )
-        
-        # include Term
-        turn_log.cognitive_map_response = response
-        if not turn_log.is_exploration_phase:
-            turn_log.cogmap_final_log = cogmap_log
-        else:
-            turn_log.cogmap_log = cogmap_log
+        for (response, original_env_id) in zip(lm_outputs.non_tensor_batch['response_texts'], lm_outputs.non_tensor_batch['env_ids']):
+            env_idx, turn_idx = env_id_to_location[original_env_id]
+            env = envs[env_idx]
+            cognitive_map_manager=env.cognitive_map_manager
+            assert cognitive_map_manager is not None, "CognitiveMapManager is not initialized in the environment."
+            turn_log = env.turn_logs[turn_idx]
+            
+            # Evaluate the cognitive map using the manager
+            cogmap_log = None
+            if response and turn_log.room_state and turn_log.agent_state:
+                cogmap_log = cognitive_map_manager.evaluate_cognitive_map(
+                    response,
+                    turn_log.room_state,
+                    turn_log.agent_state,
+                    turn_log.observed_items if turn_log.is_exploration_phase else [o.name for o in turn_log.room_state.all_objects]
+                )
+            
+            # include Term
+            turn_log.cognitive_map_response = response
+            if not turn_log.is_exploration_phase:
+                turn_log.cogmap_final_log = cogmap_log
+            else:
+                turn_log.cogmap_log = cogmap_log
 
 def _call_llm_batch(
     llm_wrapper: ApiCallingWrapperWg, 
