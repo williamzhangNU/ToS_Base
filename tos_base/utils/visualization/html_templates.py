@@ -85,13 +85,13 @@ body {
 
 .sample-page {
     display: none;
-    padding: 100px 24px 24px 24px;
-    max-width: 1200px;
+    padding: 80px 16px 16px 16px;
+    max-width: 1400px;
     margin: auto;
     background: rgba(255, 255, 255, 0.95);
     border-radius: 12px;
-    margin-top: 20px;
-    margin-bottom: 20px;
+    margin-top: 10px;
+    margin-bottom: 10px;
     box-shadow: 0 8px 32px rgba(0,0,0,0.1);
     backdrop-filter: blur(10px);
 }
@@ -291,13 +291,13 @@ body {
     background: #fff;
     border: 1px solid #e1e5e9;
     border-radius: 12px;
-    margin: 30px 0;
-    padding: 30px;
+    margin: 20px 0;
+    padding: 20px;
     box-shadow: 0 4px 6px rgba(0,0,0,0.05);
     transition: all 0.3s ease;
     display: flex;
     flex-direction: column;
-    min-height: 400px;
+    min-height: 350px;
 }
 
 .turn-split:hover {
@@ -315,8 +315,8 @@ body {
 }
 
 .turn-left {
-    flex: 1;
-    margin-right: 20px;
+    flex: 2;
+    margin-right: 16px;
 }
 
 .turn-right {
@@ -324,8 +324,8 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 15px;
-    padding: 10px;
+    gap: 12px;
+    padding: 8px;
 }
 
 .room-plot {
@@ -354,11 +354,11 @@ body {
 }
 
 .block {
-    padding: 15px;
+    padding: 12px;
     border-radius: 8px;
-    margin: 12px 0;
+    margin: 10px 0;
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.5;
     border-left: 4px solid;
     position: relative;
     overflow: hidden;
@@ -403,43 +403,6 @@ body {
     font-weight: normal;
 }
 
-.modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.7);
-    z-index: 1000;
-    display: none;
-    justify-content: center;
-    align-items: center;
-}
-
-.modal-content {
-    background: white;
-    border-radius: 12px;
-    padding: 30px;
-    max-width: 80%;
-    max-height: 80%;
-    overflow-y: auto;
-    position: relative;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-}
-
-.modal-close {
-    position: absolute;
-    top: 15px;
-    right: 20px;
-    font-size: 24px;
-    cursor: pointer;
-    color: #666;
-    font-weight: bold;
-}
-
-.modal-close:hover {
-    color: #333;
-}
 
 .block.think {
     background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
@@ -482,10 +445,20 @@ body {
     color: #e65100;
 }
 
+.block.cogmap-response.expandable {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.block.cogmap-response.expandable:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 12px rgba(255, 160, 0, 0.2);
+}
+
 /* Cognitive map layout */
 .cogmap-compare {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 16px;
     margin-top: 10px;
 }
@@ -507,6 +480,15 @@ body {
     font-weight: 600;
     padding: 10px 12px;
     border-bottom: 1px solid #d0e2ff;
+}
+
+.cogmap-box-title.expandable {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cogmap-box-title.expandable:hover {
+    background: linear-gradient(135deg, #d7ebff 0%, #c5dbff 100%);
 }
 /* Ground Truth framed panel */
 .groundtruth-box.framed {
@@ -546,19 +528,13 @@ body {
     border: 1px solid #e1ecfb;
     border-radius: 6px;
 }
-/* Responsive: stack the two columns on small screens */
-@media (max-width: 900px) {
-    .cogmap-compare {
-        grid-template-columns: 1fr;
-    }
-}
 
 .metrics {
-    margin-top: 15px;
+    margin-top: 12px;
     font-size: 13px;
     color: #555;
     background: #f8f9fa;
-    padding: 12px;
+    padding: 10px;
     border-radius: 6px;
     border-left: 3px solid #6c757d;
 }
@@ -891,47 +867,25 @@ document.addEventListener('DOMContentLoaded', () => {
     document.head.appendChild(style);
 });
 
-// Expand observation functionality
-function expandObservation(obsId) {
-    const fullContent = document.getElementById(obsId).innerHTML;
+// Toggle observation functionality
+function toggleObservation(obsId) {
+    const mainDiv = document.getElementById(obsId);
+    const fullContentDiv = document.getElementById(obsId + '_full');
+    const shortContentDiv = document.getElementById(obsId + '_short');
+    const contentSpan = mainDiv.querySelector('.content-text');
     
-    // Create modal if it doesn't exist
-    let modal = document.getElementById('obs-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'obs-modal';
-        modal.className = 'modal-overlay';
-        modal.innerHTML = `
-            <div class="modal-content">
-                <span class="modal-close" onclick="closeObservation()">&times;</span>
-                <h3>🔍 Full Environment Observation</h3>
-                <div id="modal-obs-content"></div>
-            </div>
-        `;
-        document.body.appendChild(modal);
+    if (mainDiv && fullContentDiv && shortContentDiv && contentSpan) {
+        const isExpanded = mainDiv.getAttribute('data-expanded') === 'true';
         
-        // Close on background click
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) closeObservation();
-        });
-        
-        // Close on Escape key
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeObservation();
-        });
-    }
-    
-    // Set content and show modal
-    document.getElementById('modal-obs-content').innerHTML = fullContent;
-    modal.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-}
-
-function closeObservation() {
-    const modal = document.getElementById('obs-modal');
-    if (modal) {
-        modal.style.display = 'none';
-        document.body.style.overflow = 'auto';
+        if (isExpanded) {
+            // Switch to short content
+            contentSpan.innerHTML = shortContentDiv.innerHTML;
+            mainDiv.setAttribute('data-expanded', 'false');
+        } else {
+            // Switch to full content
+            contentSpan.innerHTML = fullContentDiv.innerHTML;
+            mainDiv.setAttribute('data-expanded', 'true');
+        }
     }
 }
 
@@ -971,6 +925,40 @@ function closeThinking() {
     if (modal) {
         modal.style.display = 'none';
         document.body.style.overflow = 'auto';
+    }
+}
+
+// Toggle cognitive map response functionality
+function toggleCogmapResponse(cogmapId) {
+    const mainDiv = document.getElementById(cogmapId);
+    const fullContentDiv = document.getElementById(cogmapId + '_full');
+    const shortContentDiv = document.getElementById(cogmapId + '_short');
+    const contentSpan = mainDiv.querySelector('.content-text');
+    
+    if (mainDiv && fullContentDiv && shortContentDiv && contentSpan) {
+        const isExpanded = mainDiv.getAttribute('data-expanded') === 'true';
+        
+        if (isExpanded) {
+            // Switch to short content
+            contentSpan.innerHTML = shortContentDiv.innerHTML;
+            mainDiv.setAttribute('data-expanded', 'false');
+        } else {
+            // Switch to full content
+            contentSpan.innerHTML = fullContentDiv.innerHTML;
+            mainDiv.setAttribute('data-expanded', 'true');
+        }
+    }
+}
+
+// Toggle ground truth visibility
+function toggleGroundTruth(gtId) {
+    const content = document.getElementById(gtId);
+    if (content) {
+        if (content.style.display === 'none') {
+            content.style.display = 'block';
+        } else {
+            content.style.display = 'none';
+        }
     }
 }
 """

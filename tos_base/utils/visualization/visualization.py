@@ -262,10 +262,10 @@ class HTMLGenerator:
                 u_short = escape(env_log['user_message'][:300]).replace("\n", "<br>")
                 u_full = escape(env_log['user_message']).replace("\n", "<br>")
                 obs_id = f"obs_{page_idx}_{t_idx}"
-                f.write(f"<div class='block user expandable' onclick='expandObservation(\"{obs_id}\")'><strong>👤 Environment Observation <span class='expand-hint'>(click to expand)</span></strong><br>{u_short}...</div>\n")
-                f.write(f"<div id='{obs_id}' class='observation-full' style='display:none'>{u_full}</div>\n")
-                # u_full = escape(env_log['user_message']).replace("\n", "<br>")
-                # f.write(f"<div class='block user'><strong>👤 Environment Observation</strong><br>{u_full}</div>\n")
+                f.write(f"<div id='{obs_id}' class='block user expandable' onclick='toggleObservation(\"{obs_id}\")' data-expanded='false'><strong>👤 Environment Observation <span class='expand-hint'>(click to toggle)</span></strong><br><span class='content-text'>{u_short}...</span></div>\n")
+                # Store full content in hidden div
+                f.write(f"<div id='{obs_id}_full' style='display:none'>{u_full}</div>\n")
+                f.write(f"<div id='{obs_id}_short' style='display:none'>{u_short}...</div>\n")
             
             think_content, answer_content = env_log['assistant_think_message'], env_log['assistant_parsed_message']
             # Display think content
@@ -301,10 +301,13 @@ class HTMLGenerator:
             # Display cognitive map response if available
             if env_log.get('cognitive_map_response'):
                 response_content = env_log['cognitive_map_response']
-                f.write("<div class='block cogmap-response'><strong>🗺️ Cognitive Map Response</strong>")
-                response_html = escape(response_content).replace("\n", "<br>")
-                f.write(f"<div class='response-content'>{response_html}</div>")
-                f.write("</div>\n")
+                response_short = escape(response_content[:300]).replace("\n", "<br>")
+                response_full = escape(response_content).replace("\n", "<br>")
+                cogmap_id = f"cogmap_response_{page_idx}_{t_idx}"
+                f.write(f"<div id='{cogmap_id}' class='block cogmap-response expandable' onclick='toggleCogmapResponse(\"{cogmap_id}\")' data-expanded='false'><strong>🗺️ Cognitive Map Response <span class='expand-hint'>(click to toggle)</span></strong><br><span class='content-text'>{response_short}...</span></div>\n")
+                # Store full content in hidden div
+                f.write(f"<div id='{cogmap_id}_full' style='display:none'>{response_full}</div>\n")
+                f.write(f"<div id='{cogmap_id}_short' style='display:none'>{response_short}...</div>\n")
             def _fmt_xy(v):
                 try:
                     return f"[{int(v[0])},{int(v[1])}]"
@@ -416,9 +419,11 @@ class HTMLGenerator:
                 f.write("</div>")
 
                 # RIGHT: Ground Truth
+                gt_id = f"gt_{page_idx}_{t_idx}"
                 f.write("<div class='cogmap-box side groundtruth-box framed'>")
-                f.write("<div class='cogmap-box-title'>Ground Truth</div>")
+                f.write(f"<div class='cogmap-box-title expandable' onclick='toggleGroundTruth(\"{gt_id}\")'>Ground Truth <span class='expand-hint'>(click to toggle)</span></div>")
 
+                f.write(f"<div id='{gt_id}' class='ground-truth-content' style='display:none'>")
                 f.write("<div class='cogmap-gt-section'><div class='cogmap-section-title'>Global</div>")
                 f.write(f"<div class='cogmap-box-body'>{gt_global_txt}</div></div>")
 
@@ -430,6 +435,7 @@ class HTMLGenerator:
 
                 f.write("<div class='cogmap-gt-section'><div class='cogmap-section-title'>Gates</div>")
                 f.write(f"<div class='cogmap-box-body'>{gt_gates_txt}</div></div>")
+                f.write("</div>")
 
                 f.write("</div>")  # end RIGHT
                 f.write("</div>")  # end compare row
