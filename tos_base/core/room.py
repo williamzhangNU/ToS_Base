@@ -13,7 +13,7 @@ class BaseRoom:
         self.mask = None
         self._init_objects(objects, [])
 
-    def _init_objects(self, objects: List[Object], gates: List[Object] | None = None):
+    def _init_objects(self, objects: List[Object], gates: List[Gate] | None = None):
         self.objects = copy.deepcopy(objects)
         self.gates = copy.deepcopy(gates or [])
         self.object_map = None

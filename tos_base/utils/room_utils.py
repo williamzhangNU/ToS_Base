@@ -42,7 +42,7 @@ class RoomGenerator:
             return False
 
     @staticmethod
-    def _generate_objects_and_agent(mask, n_objects, fix_object_n, np_random, candidate_list=CANDIDATE_OBJECTS, room_name=""):
+    def _generate_objects_and_agent(mask, n_objects, fix_object_n, np_random, candidate_list=CANDIDATE_OBJECTS, gates= None, room_name=""):
         """Generate objects and agent for a room layout."""
         objects = RoomGenerator._gen_objects(
             n=n_objects,
@@ -64,7 +64,7 @@ class RoomGenerator:
         agent.room_id = 1
         agent.init_room_id = 1
         
-        room = Room(objects=objects, name=room_name, mask=mask.copy(), gates=[])
+        room = Room(objects=objects, name=room_name, mask=mask.copy(), gates=gates)
         
         return room, agent
     @staticmethod
@@ -129,12 +129,14 @@ class RoomGenerator:
         candidate_objects: List[ObjectInfo] = CANDIDATE_OBJECTS,
         level: int = 0,
         main: Optional[int] = None,
+        fixed_mask: bool = False,
         **kwargs
     ) -> Tuple[Room, Agent]:
         """Generate a multi-room layout, gates, objects, and agent.
         - Mask is generated via generate_room_layout; gates derived from mask.
         - Agent is sampled from main room (room id = 1).
         - Validates layout for rotation tasks and retries if needed.
+        - If fixed_mask is True, uses seed=42 for mask generation while preserving original randomness for object/agent placement.
         """
         eval_tasks = kwargs.get('eval_tasks', [])
         min_angle_eps = kwargs.get('min_angle_eps', 30.0)
@@ -156,14 +158,24 @@ class RoomGenerator:
                 
                 n = int(max(room_size[0], room_size[1]))
                 
-                # Generate layout
+                # Generate layout - use seed=42 for mask if fixed_mask is True, otherwise use attempt_random
                 fix_room_size = kwargs.get('fix_room_size', None)
                 same_room_size = kwargs.get('same_room_size', False)
-                mask = generate_room_layout(
-                    n=n, level=int(level), main=main, 
-                    np_random=attempt_random, fix_room_size=fix_room_size,
-                    same_room_size=same_room_size
-                )
+                if fixed_mask:
+                    # Use fixed seed=42 for mask generation to get consistent room layout
+                    mask_random = np.random.default_rng(42)
+                    mask = generate_room_layout(
+                        n=n, level=int(level), main=main, 
+                        np_random=mask_random, fix_room_size=fix_room_size,
+                        same_room_size=same_room_size
+                    )
+                else:
+                    # Use original random behavior
+                    mask = generate_room_layout(
+                        n=n, level=int(level), main=main, 
+                        np_random=attempt_random, fix_room_size=fix_room_size,
+                        same_room_size=same_room_size
+                    )
 
                 gates = RoomGenerator._gen_gates_from_mask(mask)
                 
@@ -192,10 +204,9 @@ class RoomGenerator:
                             fix_object_n[max_idx] += diff
                 
                 room, agent = RoomGenerator._generate_objects_and_agent(
-                    mask, n_objects, fix_object_n, attempt_random, candidate_objects, room_name
+                    mask, n_objects, fix_object_n, attempt_random, candidate_objects, gates, room_name
                 )
-                room.gates = gates
-
+                
                 # Validate layout for rotation tasks
                 if RoomGenerator._validate_rotation_tasks(room, agent, eval_tasks):
                     return room, agent

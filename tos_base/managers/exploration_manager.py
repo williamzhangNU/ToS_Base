@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from ..core.object import Agent
 from ..actions import *
 from ..core.room import Room
+from .spatial_solver import SpatialSolver
 
 @dataclass
 class ExplorationTurnLog:
@@ -17,6 +18,7 @@ class ExplorationTurnLog:
     action_counts: Dict[str, int]
     room_state: Optional['Room'] = None
     agent_state: Optional['Agent'] = None
+    information_gain: Optional[Dict[str, Any]] = None  # Information gain metrics
 
     def to_dict(self):
         return {
@@ -25,7 +27,8 @@ class ExplorationTurnLog:
             "step": self.step,
             "action_counts": dict(self.action_counts),
             "room_state": self.room_state.to_dict() if self.room_state else {},
-            "agent_state": self.agent_state.to_dict() if self.agent_state else {}
+            "agent_state": self.agent_state.to_dict() if self.agent_state else {},
+            "information_gain": self.information_gain or 0.0
         }
 
 class ExplorationManager:
@@ -78,6 +81,16 @@ class ExplorationManager:
         # Observed names (objects and gates) to gate Move() eligibility
         self.observed_items: Set[str] = set()
         
+        # Initialize spatial solver for information gain tracking
+        object_names = [obj.name for obj in self.exploration_room.all_objects] + ['initial_pos']
+        # Get grid_size from room mask shape for accurate boundary
+        grid_size = max(self.exploration_room.mask.shape)
+        self.spatial_solver = SpatialSolver(object_names, grid_size)
+        self.spatial_solver.set_initial_position('initial_pos', (0, 0))
+        
+        # Store previous total positions for information gain calculation
+        self.previous_total_positions = sum(len(domain) for domain in self.spatial_solver.get_possible_positions().values())
+        
     def _execute_and_update(self, action: BaseAction, **kwargs) -> ActionResult:
         """Execute action and update exploration state."""
         # Enforce "observed-before-move"
@@ -87,6 +100,7 @@ class ExplorationManager:
         # Log every action result to history immediately
         self.history.append(result)
         if not result.success:
+            result.message += " Movement actions after this action will not be executed as well."
             return result
         
         # Count action, cost, and update coverage
@@ -131,7 +145,7 @@ class ExplorationManager:
                 action_results.append(obs_result)
                 assert obs_result.success, f"Observe action failed: {obs_result.message}"
                 info.update(obs_result.data)
-                self._log_exploration(action_sequence)
+                self._log_exploration(action_sequence, action_results)
                 return info, action_results
 
         # Execute final action
@@ -142,7 +156,7 @@ class ExplorationManager:
         info.update(result.data)
 
         # Always log before return
-        self._log_exploration(action_sequence)
+        self._log_exploration(action_sequence, action_results)
         return info, action_results
     
     def finish_exploration(self, return_to_origin: bool = True) -> Room:
@@ -159,18 +173,56 @@ class ExplorationManager:
         return dict(self._update_exp_summary())
     
     @staticmethod
-    def aggregate_group_performance(exp_summaries: List[Dict]) -> Dict[str, float]:
+    def aggregate_group_performance(exp_summaries: List[Dict], env_data_list: List[Dict] = None) -> Dict[str, Any]:
         """Calculate exploration performance for a group."""
         if not exp_summaries:
             return {"avg_coverage": 0.0, "avg_exploration_steps": 0.0, "avg_node_coverage": 0.0, "avg_edge_coverage": 0.0}
         
         n = len(exp_summaries)
-        return {
+        result = {
             "avg_coverage": sum(m.get('coverage', 0.0) for m in exp_summaries) / n,
             "avg_exploration_steps": sum(m.get('n_exploration_steps', 0) for m in exp_summaries) / n,
             "avg_node_coverage": sum(m.get('node_coverage', m.get('coverage', 0.0)) for m in exp_summaries) / n,
             "avg_edge_coverage": sum(m.get('edge_coverage', 0.0) for m in exp_summaries) / n,
         }
+        
+        # Calculate average infogain per turn across all samples
+        if env_data_list:
+            infogain_per_turn = ExplorationManager._calculate_infogain_per_turn(env_data_list)
+            result["infogain_per_turn"] = infogain_per_turn
+        
+        return result
+    
+    @staticmethod
+    def _calculate_infogain_per_turn(env_data_list: List[Dict]) -> List[float]:
+        """Calculate average information gain for each turn across all samples."""
+        # Collect all turn information gains by turn index
+        turn_infogains = {}  # turn_index -> list of infogain values
+        
+        for env_data in env_data_list:
+            env_turn_logs = env_data.get('env_turn_logs', [])
+            for turn_idx, turn_log in enumerate(env_turn_logs):
+                # Only consider exploration phases
+                if turn_log.get('is_exploration_phase', False):
+                    exploration_log = turn_log.get('exploration_log', {})
+                    infogain = exploration_log.get('information_gain')
+                    if infogain is not None:
+                        if turn_idx not in turn_infogains:
+                            turn_infogains[turn_idx] = []
+                        turn_infogains[turn_idx].append(infogain)
+        
+        # Calculate averages for each turn
+        max_turns = max(turn_infogains.keys()) if turn_infogains else -1
+        avg_infogains = []
+        
+        for turn_idx in range(max_turns + 1):
+            if turn_idx in turn_infogains and turn_infogains[turn_idx]:
+                avg_infogain = sum(turn_infogains[turn_idx]) / len(turn_infogains[turn_idx])
+                avg_infogains.append(avg_infogain)
+            else:
+                avg_infogains.append(0.0)
+        
+        return avg_infogains
     
     # No passive history generation here; proxies produce text histories directly.
     
@@ -218,8 +270,17 @@ class ExplorationManager:
 
 
     
-    def _log_exploration(self, action_sequence: ActionSequence) -> None:
+    def _log_exploration(self, action_sequence: ActionSequence, action_results: List['ActionResult']) -> None:
         """Log exploration history and efficiency."""
+        # Calculate total information gain ratio for observe actions in this turn
+        total_information_gain_ratio = None
+        for action_result in action_results:
+            # Only calculate information gain for observe actions
+            if action_result.action_type in ('observe', 'observe_approx', 'observe_rel', 'observe_dir'):
+                # Calculate information gain for this observe action
+                total_information_gain_ratio = self._calculate_single_action_information_gain(action_result)
+
+        
         # Log current turn with coverage snapshot
         self._update_exp_summary()
         step_idx = len(self.turn_logs) + 1
@@ -229,7 +290,8 @@ class ExplorationManager:
             step=step_idx,
             action_counts=dict(self.exp_summary.get('action_counts', {})),
             room_state=self.exploration_room.copy(),
-            agent_state=self.agent.copy()
+            agent_state=self.agent.copy(),
+            information_gain=total_information_gain_ratio if total_information_gain_ratio is not None else self.turn_logs[-1].information_gain
         )
         self.turn_logs.append(turn_log)
     
@@ -248,6 +310,31 @@ class ExplorationManager:
         }
         return self.exp_summary
     
+    def _calculate_single_action_information_gain(self, action_result: 'ActionResult') -> float:
+        """Calculate information gain as negative log of ratio between current and previous total positions."""
+        
+        # Store previous positions before processing the action
+        previous_positions = self.previous_total_positions
+        
+        # Only process observation actions that have relation triples
+        if action_result.action_type in ('observe', 'observe_approx', 'observe_rel', 'observe_dir'):
+            triples = action_result.data.get('relation_triples', []) if hasattr(action_result, 'data') else []
+            if triples:
+                # Add observations to spatial solver
+                self.spatial_solver.add_observation(triples)
+        
+        # Calculate position count after action
+        current_positions = sum(len(domain) for domain in self.spatial_solver.get_possible_positions().values())
+        
+        # Update previous_total_positions for next calculation
+        self.previous_total_positions = current_positions
+        
+        # Calculate and return negative log of the ratio
+        if previous_positions > 0:
+            ratio = current_positions / previous_positions
+            return -np.log(ratio) if ratio > 0 else 0.0
+        else:
+            return 0.0
 
 if __name__ == "__main__":
     pass

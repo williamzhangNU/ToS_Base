@@ -23,6 +23,7 @@ class EvaluationData:
     answer: str
     reasoning: str
     task_type: str
+    action: str = None
     choices: List[str] = None
 
     def __post_init__(self):
@@ -44,6 +45,7 @@ class EvaluationData:
             'answer': self.answer,
             'reasoning': self.reasoning,
             'task_type': self.task_type,
+            'action': self.action,
             'choices': self.choices,
         }
 
@@ -66,6 +68,7 @@ class BaseEvaluationTask(ABC):
             question="",
             answer="",
             reasoning="",
+            action=None,
             task_type=self.__class__.__name__,
             choices=[]
         )
