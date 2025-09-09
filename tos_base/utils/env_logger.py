@@ -181,7 +181,7 @@ class SpatialEnvLogger:
             eval_summaries = [d['summary']['eval_summary'] for d in env_data_list]
             cogmap_summaries = [d['summary']['cogmap_summary'] for d in env_data_list]
 
-            result["exp_summary"]["group_performance"][config_name] = ExplorationManager.aggregate_group_performance(exp_summaries)
+            result["exp_summary"]["group_performance"][config_name] = ExplorationManager.aggregate_group_performance(exp_summaries, env_data_list)
             result["eval_summary"]["group_performance"][config_name] = EvaluationManager.aggregate_group_performance(eval_summaries)
             result["cogmap_summary"]["group_performance"][config_name] = CognitiveMapManager.aggregate_group_performance(cogmap_summaries)
             

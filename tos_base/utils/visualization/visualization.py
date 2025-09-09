@@ -7,7 +7,11 @@ from html import escape
 from itertools import zip_longest
 from typing import List, Dict, Optional
 import copy
-
+import base64
+from io import BytesIO
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
 from .html_templates import HTML_TEMPLATE, CSS_STYLES, JAVASCRIPT_CODE
 
 
@@ -57,6 +61,31 @@ class VisualizationHelper:
         answer_content = answer_match.group(1).strip() if answer_match else text
         
         return think_content, answer_content
+    
+    @staticmethod
+    def create_infogain_plot(infogain_per_turn: List[float], config_name: str) -> str:
+        """Create a line plot for information gain per turn and return as base64 image."""
+
+        fig, ax = plt.subplots(figsize=(8, 4))
+        turns = list(range(1, len(infogain_per_turn) + 1))
+        ax.plot(turns, infogain_per_turn, marker='o', linewidth=2, markersize=4)
+        ax.set_xlabel('Turn')
+        ax.set_ylabel('Average Information Gain')
+        ax.set_title(f'Average Information Gain per Turn - {config_name}')
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim(0.5, len(infogain_per_turn) + 0.5)
+        
+        # Save plot to base64 string
+        buffer = BytesIO()
+        plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
+        buffer.seek(0)
+        plot_data = buffer.getvalue()
+        buffer.close()
+        plt.close(fig)
+        
+        # Convert to base64
+        plot_base64 = base64.b64encode(plot_data).decode('utf-8')
+        return f"data:image/png;base64,{plot_base64}"
 
 
 
@@ -139,7 +168,19 @@ class HTMLGenerator:
                 exp_group = self.exp_summary["group_performance"][gname]
                 f.write("<div class='group-metrics'>")
                 f.write("<strong>Exploration:</strong>")
-                f.write(VisualizationHelper.dict_to_html(exp_group))
+                
+                # Create infogain plot if data is available
+                infogain_per_turn = exp_group.get("infogain_per_turn", [])
+                if infogain_per_turn:
+                    plot_src = VisualizationHelper.create_infogain_plot(infogain_per_turn, gname)
+                    if plot_src:
+                        f.write("<div class='infogain-plot'>")
+                        f.write(f"<img src='{plot_src}' alt='Information Gain per Turn' style='max-width: 100%; height: auto; margin: 10px 0;'>")
+                        f.write("</div>")
+                
+                # Display exploration metrics but exclude the infogain_per_turn list
+                exp_group_filtered = {k: v for k, v in exp_group.items() if k != "infogain_per_turn"}
+                f.write(VisualizationHelper.dict_to_html(exp_group_filtered))
                 f.write("</div>\n")
             
             # Group evaluation performance

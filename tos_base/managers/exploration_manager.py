@@ -172,18 +172,56 @@ class ExplorationManager:
         return dict(self._update_exp_summary())
     
     @staticmethod
-    def aggregate_group_performance(exp_summaries: List[Dict]) -> Dict[str, float]:
+    def aggregate_group_performance(exp_summaries: List[Dict], env_data_list: List[Dict] = None) -> Dict[str, Any]:
         """Calculate exploration performance for a group."""
         if not exp_summaries:
             return {"avg_coverage": 0.0, "avg_exploration_steps": 0.0, "avg_node_coverage": 0.0, "avg_edge_coverage": 0.0}
         
         n = len(exp_summaries)
-        return {
+        result = {
             "avg_coverage": sum(m.get('coverage', 0.0) for m in exp_summaries) / n,
             "avg_exploration_steps": sum(m.get('n_exploration_steps', 0) for m in exp_summaries) / n,
             "avg_node_coverage": sum(m.get('node_coverage', m.get('coverage', 0.0)) for m in exp_summaries) / n,
             "avg_edge_coverage": sum(m.get('edge_coverage', 0.0) for m in exp_summaries) / n,
         }
+        
+        # Calculate average infogain per turn across all samples
+        if env_data_list:
+            infogain_per_turn = ExplorationManager._calculate_infogain_per_turn(env_data_list)
+            result["infogain_per_turn"] = infogain_per_turn
+        
+        return result
+    
+    @staticmethod
+    def _calculate_infogain_per_turn(env_data_list: List[Dict]) -> List[float]:
+        """Calculate average information gain for each turn across all samples."""
+        # Collect all turn information gains by turn index
+        turn_infogains = {}  # turn_index -> list of infogain values
+        
+        for env_data in env_data_list:
+            env_turn_logs = env_data.get('env_turn_logs', [])
+            for turn_idx, turn_log in enumerate(env_turn_logs):
+                # Only consider exploration phases
+                if turn_log.get('is_exploration_phase', False):
+                    exploration_log = turn_log.get('exploration_log', {})
+                    infogain = exploration_log.get('information_gain')
+                    if infogain is not None:
+                        if turn_idx not in turn_infogains:
+                            turn_infogains[turn_idx] = []
+                        turn_infogains[turn_idx].append(infogain)
+        
+        # Calculate averages for each turn
+        max_turns = max(turn_infogains.keys()) if turn_infogains else -1
+        avg_infogains = []
+        
+        for turn_idx in range(max_turns + 1):
+            if turn_idx in turn_infogains and turn_infogains[turn_idx]:
+                avg_infogain = sum(turn_infogains[turn_idx]) / len(turn_infogains[turn_idx])
+                avg_infogains.append(avg_infogain)
+            else:
+                avg_infogains.append(0.0)
+        
+        return avg_infogains
     
     # No passive history generation here; proxies produce text histories directly.
     

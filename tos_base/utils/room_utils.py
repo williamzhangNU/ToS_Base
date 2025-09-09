@@ -129,12 +129,14 @@ class RoomGenerator:
         candidate_objects: List[ObjectInfo] = CANDIDATE_OBJECTS,
         level: int = 0,
         main: Optional[int] = None,
+        fixed_mask: bool = False,
         **kwargs
     ) -> Tuple[Room, Agent]:
         """Generate a multi-room layout, gates, objects, and agent.
         - Mask is generated via generate_room_layout; gates derived from mask.
         - Agent is sampled from main room (room id = 1).
         - Validates layout for rotation tasks and retries if needed.
+        - If fixed_mask is True, uses seed=42 for mask generation while preserving original randomness for object/agent placement.
         """
         eval_tasks = kwargs.get('eval_tasks', [])
         min_angle_eps = kwargs.get('min_angle_eps', 30.0)
@@ -156,14 +158,24 @@ class RoomGenerator:
                 
                 n = int(max(room_size[0], room_size[1]))
                 
-                # Generate layout
+                # Generate layout - use seed=42 for mask if fixed_mask is True, otherwise use attempt_random
                 fix_room_size = kwargs.get('fix_room_size', None)
                 same_room_size = kwargs.get('same_room_size', False)
-                mask = generate_room_layout(
-                    n=n, level=int(level), main=main, 
-                    np_random=attempt_random, fix_room_size=fix_room_size,
-                    same_room_size=same_room_size
-                )
+                if fixed_mask:
+                    # Use fixed seed=42 for mask generation to get consistent room layout
+                    mask_random = np.random.default_rng(42)
+                    mask = generate_room_layout(
+                        n=n, level=int(level), main=main, 
+                        np_random=mask_random, fix_room_size=fix_room_size,
+                        same_room_size=same_room_size
+                    )
+                else:
+                    # Use original random behavior
+                    mask = generate_room_layout(
+                        n=n, level=int(level), main=main, 
+                        np_random=attempt_random, fix_room_size=fix_room_size,
+                        same_room_size=same_room_size
+                    )
 
                 gates = RoomGenerator._gen_gates_from_mask(mask)
                 
