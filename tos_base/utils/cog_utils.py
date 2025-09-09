@@ -122,37 +122,36 @@ def evaluate_cognitive_maps_from_turnlogs(
         for response, original_env_id in zip(response_texts, all_env_ids):
             env_idx, turn_idx = env_id_to_location[original_env_id]
             env_summary = env_summarys[env_idx]
-            turn_log_dict = env_summary['env_turn_logs'][turn_idx]
+            turn_log = env_summary['env_turn_logs'][turn_idx]
             cognitive_map_manager = env_cogmap_managers[env_idx]
             
             # Store the cognitive map response in the turn log dictionary
-            turn_log_dict['cognitive_map_response'] = response
-            
-            # Evaluate the cognitive map using the manager
+            turn_log['cognitive_map_response'] = response
             cogmap_log = None
-            if response and turn_log_dict.get('room_state') and turn_log_dict.get('agent_state'):
+            if response and turn_log.get('room_state') and turn_log.get('agent_state'):
                 # Reconstruct Room and Agent states from turn log
-                room_state = Room.from_dict(turn_log_dict['room_state'])
-                agent_state = Agent.from_dict(turn_log_dict['agent_state'])
+                room_state = Room.from_dict(turn_log['room_state'])
+                agent_state = Agent.from_dict(turn_log['agent_state'])
                 
                 # Get observed items
-                observed_items = turn_log_dict.get('observed_items', [])
-                if not turn_log_dict.get('is_exploration_phase', False):
-                    # For evaluation phase, use all objects
-                    observed_items = [obj.name for obj in room_state.all_objects]
-                
-                cogmap_log = cognitive_map_manager.evaluate_cognitive_map(
+                observed_items = turn_log['observed_items']
+                if env_summary['env_info']['config'].get('exp_type') == 'active':
+                    cogmap_log = cognitive_map_manager.evaluate_cognitive_map(
+                        response,
+                        room_state,
+                        agent_state,
+                        observed_items
+                    )
+                cogmap_full_log = cognitive_map_manager.evaluate_cognitive_map(
                     response,
                     room_state,
                     agent_state,
-                    observed_items
+                    [obj.name for obj in room_state.all_objects]
                 )
+
             
-            # Store cognitive map evaluation results
-            if not turn_log_dict.get('is_exploration_phase', False):
-                turn_log_dict['cogmap_final_log'] = cogmap_log.to_dict() if cogmap_log else None
-            else:
-                turn_log_dict['cogmap_log'] = cogmap_log.to_dict() if cogmap_log else None
+            turn_log['cogmap_full_log'] = cogmap_full_log.to_dict() 
+            turn_log['cogmap_log'] = cogmap_log.to_dict() if cogmap_log else None
     
     # After processing all cognitive maps, generate cogmap_summary for each environment
     for env_idx, cognitive_map_manager in env_cogmap_managers.items():

@@ -30,7 +30,7 @@ class EnvTurnLog:
     exploration_log: Optional["ExplorationTurnLog"] = None
     evaluation_log: Optional["EvaluationTurnLog"] = None
     cogmap_log: Optional["CognitiveMapTurnLog"] = None
-    cogmap_final_log: Optional["CognitiveMapTurnLog"] = None
+    cogmap_full_log: Optional["CognitiveMapTurnLog"] = None
     room_state: Optional["Room"] = None
     agent_state: Optional["Agent"] = None
     room_image: Optional[str] = None
@@ -51,7 +51,7 @@ class EnvTurnLog:
             "exploration_log": self.exploration_log.to_dict() if self.exploration_log else {},
             "evaluation_log": self.evaluation_log.to_dict() if self.evaluation_log else {},
             "cogmap_log": self.cogmap_log.to_dict() if self.cogmap_log else {},
-            "cogmap_final_log": self.cogmap_final_log.to_dict() if self.cogmap_final_log else {},
+            "cogmap_full_log": self.cogmap_full_log.to_dict() if self.cogmap_full_log else {},
             "room_state": self.room_state.to_dict() if self.room_state else {},
             "agent_state": self.agent_state.to_dict() if self.agent_state else {},
             "observed_items": self.observed_items,

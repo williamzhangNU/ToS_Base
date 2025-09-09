@@ -275,8 +275,8 @@ class HTMLGenerator:
                 f.write(VisualizationHelper.dict_to_html(details))
                 f.write("</div>\n")
                 
-            if env_log.get('cogmap_final_log'):
-                final_log = env_log['cogmap_final_log']
+            if env_log.get('cogmap_full_log'):
+                final_log = env_log['cogmap_full_log']
                 f.write("<div class='block cogmap'><strong>🧠 Cognitive Map (final)</strong>")
                 final_details = copy.deepcopy(final_log)
                 final_details.pop('pred_room_state')
