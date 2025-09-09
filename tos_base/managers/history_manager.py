@@ -11,12 +11,12 @@ class HistoryManager:
     save room images and responses of each exploration turn
     """
 
-    def __init__(self, seed, config, dir = ".cache"):
+    def __init__(self, seed, config, room, agent,  dir = ".cache"):
         self.responses = []
         self.images = []
         self.initial_observation = None
         self.current_turn = 0
-        self.dir = os.path.abspath(os.path.join(dir, self.generate_unique_name(config), f"seed_{seed}"))
+        self.dir = os.path.abspath(os.path.join(dir, self.generate_unique_name(config, room, agent), f"seed_{seed}"))
         self.path = os.path.join(self.dir, "env_history.json")
 
         override = config.kwargs.get('override', False)
@@ -32,9 +32,12 @@ class HistoryManager:
     def is_history_exist(self):
         return os.path.exists(self.path)
     
-    def generate_unique_name(self,config):
+    def generate_unique_name(self, config, room, agent):
         config_dict = config.get_observation_config()
-
+        room_dict = room.to_dict()
+        agent_dict = agent.to_dict()
+        config_dict.update(room_dict)
+        config_dict.update(agent_dict)
         config_str = json.dumps(config_dict, sort_keys=True)
         
         return hashlib.sha256(config_str.encode("utf-8")).hexdigest()[:16] 
