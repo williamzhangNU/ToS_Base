@@ -50,9 +50,6 @@ def evaluate_cognitive_maps_from_turnlogs(
     env_id_counter = 0
     for env_idx, env_summary in enumerate(env_summarys):
         env_config = env_summary['env_info']['config']
-        if not env_config.get('prompt_config', {}).get("cogmap", False):
-            continue
-        
         # Create CognitiveMapManager
         cognitive_map_manager = CognitiveMapManager(
             **cogmap_config
