@@ -14,7 +14,6 @@ class HistoryManager:
     def __init__(self, seed, config, room, agent,  dir = ".cache"):
         self.responses = []
         self.images = []
-        self.initial_observation = None
         self.current_turn = 0
         self.dir = os.path.abspath(os.path.join(dir, self.generate_unique_name(config, room, agent), f"seed_{seed}"))
         self.path = os.path.join(self.dir, "env_history.json")
@@ -34,8 +33,10 @@ class HistoryManager:
     
     def generate_unique_name(self, config, room, agent):
         config_dict = config.get_observation_config()
+        model_dict = config.kwargs['model_config']
         room_dict = room.to_dict()
         agent_dict = agent.to_dict()
+        config_dict.update(model_dict)
         config_dict.update(room_dict)
         config_dict.update(agent_dict)
         config_str = json.dumps(config_dict, sort_keys=True)
@@ -46,7 +47,6 @@ class HistoryManager:
         with open(self.path, "r") as f:
             data = json.load(f)
             self.responses = data['responses']
-            self.initial_observation = data['initial_observation']
             self.images = data['images']    
 
     def get_image_path(self, turn_num):
@@ -58,15 +58,8 @@ class HistoryManager:
         with open(self.path, "w") as f:
             json.dump({
                 "responses": self.responses,
-                "initial_observation": self.initial_observation,
                 "images": self.images
             }, f, ensure_ascii=False, indent=2)
-
-    def update_initial_observation(self, observation: str):
-        self.initial_observation = observation
-
-    def get_initial_observation(self) -> str:
-        return self.initial_observation
     
     def update_response(self, response: Union[str, Dict[str, Any]], room_state, agent_state):
         self.responses.append(response)
