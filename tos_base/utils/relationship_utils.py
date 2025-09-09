@@ -160,57 +160,66 @@ def generate_points_for_relationship(
 # ------------ rose glyph for paper plot ------------
 
 def rose_glyph_pretty(
-    sectors,                # list of sector indices (0..7); 0° sector spans -22.5°..22.5°
-    rings,                  # list of ring indices (0..n_rings-1); each fills from center up to that ring
+    pairs,                      # list of (sector_id, ring_id)
     color="#E6A23C",
-    ring_colors=("#E8F3FF", "#EAF7F0", "#FFF3E0"),
+    ring_colors=("#E8F3FF", "#EAF7F0", "#FFF3E0", "#F3E8FF"),
     tick_colors=("#4C78A8","#8E9ED6","#74C0E3","#BDE0FE","#A8DADC","#95D5B2","#FFD166","#F4A261"),
-    gap=0.92,               # angular fill fraction (1=no gap)
-    n_dirs=8,               # 8 sectors ⇒ 45° each
-    n_rings=3,
+    gap=0.92,
+    n_dirs=8,
+    n_rings=4,
     figsize=(2.4, 2.4),
-    ring_heights=(0.6, 0.25, 0.20)  # make inner ring larger; gently tighten spacing
+    ring_heights=(0.4, 0.25, 0.25, 0.25),
+    bg_band_ratio=1,          # 0..1, portion of eacF4A261h ring colored near the outer edge
+    sector_highlight_color="#FDE68A",
+    sector_highlight_alpha=0.9
 ):
-    # --- setup polar axes (0° at top) ---
+    """Rose glyph with (sector, ring) fills; background rings colored on outer band, and selected sectors highlighted."""
     fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=figsize)
     ax.set_theta_zero_location('N'); ax.set_theta_direction(-1)
     ax.set_xticks([]); ax.set_yticks([]); ax.set_rlim(0, 1)
 
-    # --- build radial boundaries with a larger first ring ---
-    rh = np.array(ring_heights[:n_rings], dtype=float)
-    rh = rh / rh.sum()                                 # normalize to total radius=1
-    rb = np.concatenate([[0.0], np.cumsum(rh)])        # ring boundaries [0..1]
+    # radial boundaries
+    rh = np.array(ring_heights[:n_rings], dtype=float); rh /= rh.sum()
+    rb = np.concatenate([[0.0], np.cumsum(rh)])
 
-    # --- paint background rings ---
+    sector_angle = 2*np.pi / n_dirs
+    width = sector_angle * gap
+    sectors = {int(s) % n_dirs for s, _ in pairs}
+
+    # background rings: only outer band portion
     for i, c in enumerate(ring_colors[:n_rings]):
-        ax.bar(0, rb[i+1]-rb[i], width=2*np.pi, bottom=rb[i],
-               color=c, alpha=0.8, linewidth=0)
+        h = rb[i+1] - rb[i]
+        band_h = h * max(0.0, min(1.0, bg_band_ratio))
+        bottom = rb[i+1] - band_h
+        ax.bar(0, band_h, width=2*np.pi, bottom=bottom, color=c, alpha=0.5, linewidth=0)
 
-    # --- core glyph: 45° sectors; sector 0 centered at 0° (spans -22.5°..22.5°) ---
-    width = (2*np.pi / n_dirs) * gap
+    # sector highlights (any sector appearing in `pairs`)
     for s in sectors:
-        theta = (s % n_dirs) * (2*np.pi / n_dirs)      # centers at 0°,45°,...,315°
-        # fill from center up to each requested ring index
-        for r in rings:
-            r = int(r)
-            for rr in range(0, min(r, n_rings-1) + 1):
-                ax.bar(theta, rb[rr+1]-rb[rr], width=width, bottom=rb[rr],
-                       align='center', linewidth=0, color=color)
+        theta = s * sector_angle
+        ax.bar(theta, 1.0, width=width, bottom=0.0, color=sector_highlight_color,
+               linewidth=0, alpha=sector_highlight_alpha, align='center')
 
-    # --- subtle ring separators (tighter spacing look) ---
+    # target (sector, ring) wedges
+    theta_map = {s: s * sector_angle for s in sectors}
+    for s, r in pairs:
+        s = int(s) % n_dirs; r = int(r)
+        if 0 <= r < n_rings:
+            theta = theta_map.get(s, s * sector_angle)
+            ax.bar(theta, rb[r+1]-rb[r], width=width, bottom=rb[r],
+                   align='center', linewidth=0, color=color)
+
+    # ring separators
     th = np.linspace(0, 2*np.pi, 361)
-    for r in rb[1:-1]:
-        ax.plot(th, np.full_like(th, r), lw=1.1, color="white")
+    for r in rb[1:-1]: ax.plot(th, np.full_like(th, r), lw=1.1, color="white")
 
-    # --- outer ticks at each 45° center ---
-    centers = np.arange(n_dirs) * (2*np.pi / n_dirs)
+    # ticks
+    centers = np.arange(n_dirs) * sector_angle
     for i, th_c in enumerate(centers):
-        ax.plot([th_c, th_c], [1.00, 1.07], lw=2.0,
-                color=tick_colors[i % len(tick_colors)],
-                solid_capstyle='round')
+        ax.plot([th_c, th_c], [1.02, 1.08], lw=2.4,
+                color=tick_colors[i % len(tick_colors)], solid_capstyle='round')
 
     for sp in ax.spines.values(): sp.set_visible(False)
-    ax.set_rlim(0, 1.07)  # small outer padding
+    ax.set_rlim(0, 1.10)
     return fig, ax
 
 
@@ -223,6 +232,11 @@ if __name__ == "__main__":
     #     print(f"Point {p}: distance = {dist:.2f}")
 
     # 扇区: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
-    # 环:   near=0, mid=1, far=2
-    ax = rose_glyph_pretty(sectors=[0], rings=[0], color="#E59E1B")
+    # 环:   near=0, mid=1, slightly far=2, far=3
+    # ax = rose_glyph_pretty(pairs=[(7, 1), (6, 1), (7, 2), (6, 2)], color="#E59E1B")
+    # ax = rose_glyph_pretty(pairs=[(7, 2), (0, 1), (7, 1)], color="#E59E1B")
+    # ax = rose_glyph_pretty(pairs=[(6, 1), (5, 2), (5, 1), (6, 2)], color="#E59E1B")
+    # ax = rose_glyph_pretty(pairs=[(6, 3), (7, 2), (6, 2), (7, 3)], color="#E59E1B")
+    ax = rose_glyph_pretty(pairs=[(3, 2)], color="#E59E1B")
+
     plt.savefig("rose_glyph_pretty.png", transparent=True)
