@@ -305,24 +305,144 @@ class HTMLGenerator:
                 response_html = escape(response_content).replace("\n", "<br>")
                 f.write(f"<div class='response-content'>{response_html}</div>")
                 f.write("</div>\n")
+            def _fmt_xy(v):
+                try:
+                    return f"[{int(v[0])},{int(v[1])}]"
+                except Exception:
+                    try:
+                        return f"[{round(float(v[0]),2)},{round(float(v[1]),2)}]"
+                    except Exception:
+                        return str(v)
 
+            def _compact_from_objmap(objmap: Dict[str, Dict]) -> str:
+                """Compact text for {name:{position:[x,y], facing:str, ...}} dict."""
+                if not isinstance(objmap, dict) or not objmap:
+                    return "(none)"
+                lines = []
+                for name, info in objmap.items():
+                    pos = _fmt_xy(info.get("position", [0, 0]))
+                    facing = info.get("facing", "unknown")
+                    lines.append(f"{name}: {pos}, {facing}")
+                return "<br>".join(lines) if lines else "(none)"
+
+            def _compact_rooms(rooms: Dict) -> str:
+                """Compact text for rooms dict: { '1': {...}, '2': {...} }."""
+                if not isinstance(rooms, dict) or not rooms:
+                    return "(none)"
+                parts = []
+                for rid in sorted(rooms.keys(), key=lambda x: int(x) if str(x).isdigit() else str(x)):
+                    body = _compact_from_objmap(rooms[rid])
+                    parts.append(f"<div class='room-chunk'><strong>Room {escape(str(rid))}</strong><br>{body}</div>")
+                return "".join(parts)
+
+            def _compact_gates(gates: Dict) -> str:
+                """Compact gates dict: { gate_name: {'connects':[a,b]} }."""
+                if not isinstance(gates, dict) or not gates:
+                    return "(none)"
+                lines = []
+                for gname, ginfo in gates.items():
+                    conn = ginfo.get("connects", [])
+                    try:
+                        conn = [int(x) for x in conn]
+                    except Exception:
+                        pass
+                    lines.append(f"{gname}: connects {conn}")
+                return "<br>".join(lines) if lines else "(none)"
+
+            def _metrics_dict_from_log(log: Dict) -> Dict[str, Dict]:
+                """
+                Build a tidy metrics dict with hierarchical + flat fields + consistency.
+                """
+                out = {
+                    "Global": log.get("global", {}),
+                    "Local": log.get("local", {}),
+                    "Rooms": log.get("rooms", {}),
+                    "Gates": (log.get("gates") or {}),
+                }
+
+                # Flat metrics (back-compat)
+                flat = {
+                    "dir_sim": log.get("dir_sim"),
+                    "facing_sim": log.get("facing_sim"),
+                    "pos_sim": log.get("pos_sim"),
+                    "overall_sim": log.get("overall_sim"),
+                }
+                flat = {k: v for k, v in flat.items() if v is not None}
+                if flat:
+                    out["Summary"] = flat
+
+                # Consistency block (if present)
+                cons = log.get("consistency") or {}
+                if isinstance(cons, dict) and cons:
+                    # normalize fields we know about
+                    local_vs_global = cons.get("local_vs_global", {}) or {}
+                    rvg = cons.get("rooms_vs_global", {}) or {}
+                    rooms_avg = rvg.get("average", {}) or {}
+                    rooms_per = rvg.get("per_room", {}) or {}
+
+                    out["Local vs Global"] = local_vs_global
+                    out["Rooms vs Global (avg)"] = rooms_avg,
+                    out["Rooms vs Global (per_room)"] = rooms_per
+
+                return out
+
+            def _render_cogmap_metrics_vs_gt(f, log: Dict, title: str):
+                """
+                Render side-by-side:
+                LEFT: metrics (hierarchical + flat)
+                RIGHT: ground truth cognitive map (global/local/rooms/gates)
+                """
+                # Left = metrics
+                metrics_block = _metrics_dict_from_log(log)
+
+                # Right = ground truth
+                gt_global = log.get("gt_global_cog", {})
+                gt_local  = log.get("gt_local_cog", {})
+                gt_rooms  = log.get("gt_rooms_cog", {})
+                gt_gates  = log.get("gt_gates", {})
+
+                gt_global_txt = _compact_from_objmap(gt_global)
+                gt_local_txt  = _compact_from_objmap(gt_local)
+                gt_rooms_txt  = _compact_rooms(gt_rooms)
+                gt_gates_txt  = _compact_gates(gt_gates)
+
+                f.write("<div class='block cogmap'><strong>🧠 Cognitive Map (" + escape(title) + ")</strong>")
+                f.write("<div class='cogmap-compare'>")
+
+                # LEFT: Metrics
+                f.write("<div class='cogmap-box side metrics-box'>")
+                f.write("<div class='cogmap-box-title'>Metrics</div>")
+                f.write(VisualizationHelper.dict_to_html(metrics_block))
+                f.write("</div>")
+
+                # RIGHT: Ground Truth
+                f.write("<div class='cogmap-box side groundtruth-box framed'>")
+                f.write("<div class='cogmap-box-title'>Ground Truth</div>")
+
+                f.write("<div class='cogmap-gt-section'><div class='cogmap-section-title'>Global</div>")
+                f.write(f"<div class='cogmap-box-body'>{gt_global_txt}</div></div>")
+
+                f.write("<div class='cogmap-gt-section'><div class='cogmap-section-title'>Local</div>")
+                f.write(f"<div class='cogmap-box-body'>{gt_local_txt}</div></div>")
+
+                f.write("<div class='cogmap-gt-section'><div class='cogmap-section-title'>Rooms</div>")
+                f.write(f"<div class='cogmap-box-body'>{gt_rooms_txt}</div></div>")
+
+                f.write("<div class='cogmap-gt-section'><div class='cogmap-section-title'>Gates</div>")
+                f.write(f"<div class='cogmap-box-body'>{gt_gates_txt}</div></div>")
+
+                f.write("</div>")  # end RIGHT
+                f.write("</div>")  # end compare row
+                f.write("</div>")  # end block
+
+
+
+            if env_log.get('cogmap_log'):
+                _render_cogmap_metrics_vs_gt(f, env_log['cogmap_log'], "update")
             # Display cognitive map information if available
-            if env_log['cogmap_log']:
-                cogmap_log = env_log['cogmap_log']
-                f.write("<div class='block cogmap'><strong>🧠 Cognitive Map (update)</strong>")
-                
-                details = copy.deepcopy(cogmap_log)
-                details.pop('pred_room_state')
-                f.write(VisualizationHelper.dict_to_html(details))
-                f.write("</div>\n")
                 
             if env_log.get('cogmap_full_log'):
-                final_log = env_log['cogmap_full_log']
-                f.write("<div class='block cogmap'><strong>🧠 Cognitive Map (final)</strong>")
-                final_details = copy.deepcopy(final_log)
-                final_details.pop('pred_room_state')
-                f.write(VisualizationHelper.dict_to_html(final_details))
-                f.write("</div>\n")
+                _render_cogmap_metrics_vs_gt(f, env_log['cogmap_full_log'], "full")
 
 
             # Display turn metrics from env log

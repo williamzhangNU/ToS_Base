@@ -100,7 +100,8 @@ def evaluate_cognitive_maps_from_turnlogs(
                     # Add to batch
                     all_messages_list.append(messages)
                     all_env_ids.append(env_id_counter)
-                    env_id_to_location[env_id_counter] = (env_idx, turn_idx)
+                    # very important: map env_id to (env_idx, turn_idx-1) since cogmap is for previous turn
+                    env_id_to_location[env_id_counter] = (env_idx, turn_idx - 1)
                     env_id_counter += 1
 
             elif env_config.get('exp_type') == 'passive':

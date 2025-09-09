@@ -100,6 +100,7 @@ class ExplorationManager:
         # Log every action result to history immediately
         self.history.append(result)
         if not result.success:
+            result.message += " Movement actions after this action will not be executed as well."
             return result
         
         # Count action, cost, and update coverage

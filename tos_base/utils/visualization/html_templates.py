@@ -482,6 +482,77 @@ body {
     color: #e65100;
 }
 
+/* Cognitive map layout */
+.cogmap-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 10px;
+}
+.cogmap-box {
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    overflow: hidden;
+}
+.cogmap-box.side {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+}
+.cogmap-box-title {
+    background: linear-gradient(135deg, #e9f3ff 0%, #d7ebff 100%);
+    color: #0d47a1;
+    font-weight: 600;
+    padding: 10px 12px;
+    border-bottom: 1px solid #d0e2ff;
+}
+/* Ground Truth framed panel */
+.groundtruth-box.framed {
+    border: 1px solid #bcd4f6;
+    background: linear-gradient(135deg, #eff6ff 0%, #e7f0ff 100%);
+    box-shadow: 0 4px 14px rgba(13, 71, 161, 0.10);
+}
+/* Section chunks inside GT */
+.cogmap-gt-section {
+    padding: 10px 12px;
+    border-bottom: 1px dashed #dbe4f3;
+}
+.cogmap-gt-section:last-child {
+    border-bottom: none;
+}
+.cogmap-section-title {
+    font-weight: 600;
+    color: #1b4b91;
+    margin-bottom: 6px;
+}
+/* Content body with readable mono + soft background */
+.cogmap-box-body {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    background: #f8fbff;
+    border: 1px solid #e6eefb;
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: #0d47a1;
+}
+/* Room chunk blocks inside the Rooms section */
+.room-chunk {
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    background: #f1f7ff;
+    border: 1px solid #e1ecfb;
+    border-radius: 6px;
+}
+/* Responsive: stack the two columns on small screens */
+@media (max-width: 900px) {
+    .cogmap-compare {
+        grid-template-columns: 1fr;
+    }
+}
+
 .metrics {
     margin-top: 15px;
     font-size: 13px;
