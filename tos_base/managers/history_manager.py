@@ -11,11 +11,11 @@ class HistoryManager:
     save room images and responses of each exploration turn
     """
 
-    def __init__(self, seed, config, room, agent,  dir = ".cache"):
+    def __init__(self, config, room, agent,  dir = ".cache"):
         self.responses = []
         self.images = []
         self.current_turn = 0
-        self.dir = os.path.abspath(os.path.join(dir, self.generate_unique_name(config, room, agent), f"seed_{seed}"))
+        self.dir = os.path.abspath(os.path.join(dir, self.generate_unique_name(config, room, agent)))
         self.path = os.path.join(self.dir, "env_history.json")
 
         override = config.kwargs.get('override', False)

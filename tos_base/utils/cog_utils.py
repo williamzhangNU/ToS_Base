@@ -17,6 +17,7 @@ def evaluate_cognitive_maps_from_turnlogs(
     env_summarys: List[Dict[str, Any]],  # List of env summaries from get_env_summary()
     message_lists: List[List[Dict[str, str]]],  # Corresponding list of message histories
     llm_wrapper,
+    cogmap_config: Dict[str, Any] = None,
     vagen: bool = False,  # Whether to use _generate_batch_responses interface
 ) -> None:
     """
@@ -35,11 +36,12 @@ def evaluate_cognitive_maps_from_turnlogs(
         use_new_interface: If True, use _generate_batch_responses interface;
                           if False, use _call_llm_batch interface
     """
-    cogmap_config = {
-        "cogmap_type": "standard",
-        "pos_allow_scale": True,
-        "scope": "all"
-    }
+    if not cogmap_config:
+        cogmap_config = {
+            "cogmap_type": "standard",
+            "pos_allow_scale": True,
+            "scope": "all"
+        }
     
     # Collect all message sequences and metadata
     all_messages_list = []
@@ -80,16 +82,20 @@ def evaluate_cognitive_maps_from_turnlogs(
                         messages.append(msg.copy())
                     
                     # Add cogmap prompt to the appropriate message
-                    if turn_logs[turn_idx-1].get('is_exploration_phase', False):
+                    if turn_logs[turn_idx-1]['is_exploration_phase']:
                         # Modify the second-to-last user message to include cogmap instruction
                         if len(messages) >= 2:
                             assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
                             messages[-2]["content"] = turn_log.get('user_message', '') + COGMAP_INSTRUCTION_SHORTER
-                    elif not turn_log.get('is_exploration_phase', False) and turn_log.get('evaluation_log') and turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('action'):
+                        # very important: map env_id to (env_idx, turn_idx-1) since cogmap is for previous turn
+                        env_id_to_location[env_id_counter] = (env_idx, turn_idx - 1)
+                    elif not turn_log['is_exploration_phase'] and turn_log.get('evaluation_log') and turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('action'):
                         if len(messages) >= 2:
                             assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
                             messages[-2]["content"] = re.sub(r'## Evaluation Question.*', '', turn_log.get('user_message', ''), flags=re.DOTALL) \
                                 + turn_log['evaluation_log']['evaluation_data']['action'] + COGMAP_INSTRUCTION_SHORTER
+                        # Term action don't need cogmap evaluation
+                        env_id_to_location[env_id_counter] = (env_idx, turn_idx)
                     else:
                         continue
                     
@@ -100,8 +106,6 @@ def evaluate_cognitive_maps_from_turnlogs(
                     # Add to batch
                     all_messages_list.append(messages)
                     all_env_ids.append(env_id_counter)
-                    # very important: map env_id to (env_idx, turn_idx-1) since cogmap is for previous turn
-                    env_id_to_location[env_id_counter] = (env_idx, turn_idx - 1)
                     env_id_counter += 1
 
             elif env_config.get('exp_type') == 'passive':
@@ -151,7 +155,7 @@ def evaluate_cognitive_maps_from_turnlogs(
                 )
 
             
-            turn_log['cogmap_full_log'] = cogmap_full_log.to_dict() 
+            turn_log['cogmap_full_log'] = cogmap_full_log.to_dict() if cogmap_full_log else None
             turn_log['cogmap_log'] = cogmap_log.to_dict() if cogmap_log else None
     
     # After processing all cognitive maps, generate cogmap_summary for each environment

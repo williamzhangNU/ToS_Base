@@ -31,15 +31,16 @@ COGMAP_INSTRUCTION_SHORTER = """\
 
 Keep a concise multi-map JSON. Coordinate frames:
 
-- Global: origin [0,0]; +Y is your initial facing direction.
+- Global: origin [0,0] which is your initial position; +Y is your initial facing direction.
 - Local: **must include** `"origin":"agent"` and an `"objects"` dict. Each object's
   position and facing are **relative to the agent** at the time of writing.
   Facings use `+x`, `-x`, `+y`, `-y` relative to the local frame.
   Do **not** include the agent itself here.
-- Rooms: each room entry is keyed by room id and must include `"origin":"<gate_name>"` and
-  an `"objects"` dict. All positions/facings are **relative to that origin gate**,
-  with +Y pointing into that room. Do **not** include the agent or the origin gate
-  inside the room’s `"objects"`.
+- Rooms: each room entry is keyed by room id and must include `"origin":"<gate_name>"` and an `"objects"` dict. 
+  The origin gate is the gate you first used to enter the room.
+  All positions/facings are **relative to that origin gate**, with +Y pointing into that room. 
+  Do **not** include the agent or the origin gate inside the room's `"objects"`.
+  Also exclude initial room because it doesn't have an origin gate.
 
 - Gates (global): map `{gate_name: {"connects": [room_id_a, room_id_b]}}`.
 
@@ -51,8 +52,8 @@ Fields:
 - `confidence`: `"high" | "medium" | "low"`.
 
 Content rules recap:
-- `global`: include observed objects, gates, and `agent` (no `initial_pos`).
-- `local`: `origin:"agent"`, visible objects only, **exclude** agent.
+- `global`: include all observed objects, gates, and `agent` (no `initial_pos`).
+- `local`: `origin:"agent"`, current visible objects only, **exclude** agent.
 - `rooms`: `origin:"<entry_gate>"`, objects of that room only, **exclude** agent and origin gate.
 - `gates`: only `"connects"` field.
 
