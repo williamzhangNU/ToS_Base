@@ -6,7 +6,7 @@ import numpy as np
 
 from ..core.room import Room
 from ..actions.base import BaseAction
-from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, ObserveApproxAction, QueryAction, ReturnAction
+from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, QueryAction, ReturnAction
 from .spatial_solver import SpatialSolver
 from ..core.relationship import CardinalBinsAllo
 from .exploration_manager import ExplorationManager
@@ -133,7 +133,7 @@ class AgentProxy:
 
     def _observe(self, prefix_actions: List = None) -> None:
         acts = list(prefix_actions or [])
-        obs = self.mgr.execute_success_action(ObserveApproxAction())
+        obs = self.mgr.execute_success_action(ObserveAction())
         acts.append(obs)
         self._update_known_from_observe(obs)
         self._add_turn(acts)
@@ -435,7 +435,7 @@ class ObserverAnalystAgentProxy(AgentProxy):
         tmp = self.agent.copy()
         obj = self.room.get_object_by_name(anchor)
         tmp.pos, tmp.room_id, tmp.ori = obj.pos.copy(), obj.room_id, desired_ori.copy()
-        res = ObserveApproxAction().execute(self.room, tmp)
+        res = ObserveAction().execute(self.room, tmp)
         triples = res.data.get('relation_triples', []) if hasattr(res, 'data') else []
         if not triples: return -1.0
         keep = set(sim.solver.variables.keys())
@@ -642,7 +642,6 @@ def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = 
 
 if __name__ == "__main__":
     from ..utils.room_utils import RoomGenerator, RoomPlotter
-    ObserveAction.MODE = 'full'
     from tqdm import tqdm
     costs = []
     for seed in tqdm(range(0, 100)):

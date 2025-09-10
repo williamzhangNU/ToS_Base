@@ -40,7 +40,7 @@ class ExplorationManager:
     """
     DEFAULT_EXP_SUMMARY = {"node_coverage": 0.0, "edge_coverage": 0.0, "n_exploration_steps": 0, "action_counts": {}}
     
-    def __init__(self, room: Room, agent: Agent):
+    def __init__(self, room: Room, agent: Agent, enable_information_gain: bool = False):
         self.base_room = room.copy()
         self.exploration_room = room.copy()
         self.agent = agent.copy()
@@ -53,23 +53,23 @@ class ExplorationManager:
         self.history: List['ActionResult'] = []
         
         # Coverage tracking (exclude gates)
-        self._init_node_name = "__init__"
+        self._init_node_name = "initial_pos"
         self.init_pos = self.agent.init_pos.copy()
         self._init_room_id = int(self.agent.init_room_id)
 
         # Node names: all objects in the exploration room
-        self.node_names: List[str] = [o.name for o in self.exploration_room.objects]
+        self.node_names: List[str] = [o.name for o in self.exploration_room.all_objects]
 
         # Edge targets: per-room object pairs + (init, object-in-init-room)
         self.target_edges: Set[frozenset] = set()
-        for _, names in self.exploration_room.objects_by_room.items():
+        for rid, names in self.exploration_room.objects_by_room.items():
+            names += self.exploration_room.gates_by_room.get(rid, [])
             if not names:
                 continue
             for i, a in enumerate(names):
                 for b in names[i + 1:]:
                     self.target_edges.add(frozenset({a, b}))
-        init_room_objects = self.exploration_room.objects_by_room.get(self._init_room_id, [])
-        for name in init_room_objects:
+        for name in self.exploration_room.objects_by_room[self._init_room_id] + self.exploration_room.gates_by_room.get(self._init_room_id, []):
             self.target_edges.add(frozenset({self._init_node_name, name}))
         
         self.observed_nodes: Set[str] = set()
@@ -81,15 +81,18 @@ class ExplorationManager:
         # Observed names (objects and gates) to gate Move() eligibility
         self.observed_items: Set[str] = set()
         
-        # Initialize spatial solver for information gain tracking
-        object_names = [obj.name for obj in self.exploration_room.all_objects] + ['initial_pos']
-        # Get grid_size from room mask shape for accurate boundary
-        grid_size = max(self.exploration_room.mask.shape)
-        self.spatial_solver = SpatialSolver(object_names, grid_size)
-        self.spatial_solver.set_initial_position('initial_pos', (0, 0))
-        
-        # Store previous total positions for information gain calculation
-        self.previous_total_positions = sum(len(domain) for domain in self.spatial_solver.get_possible_positions().values())
+        # Information gain control
+        self.enable_information_gain = bool(enable_information_gain)
+        # Initialize spatial solver for information gain tracking (only when enabled)
+        if self.enable_information_gain:
+            object_names = self.node_names + ['initial_pos']
+            grid_size = max(self.exploration_room.mask.shape)
+            self.spatial_solver = SpatialSolver(object_names, grid_size)
+            self.spatial_solver.set_initial_position('initial_pos', (0, 0))
+            self.previous_total_positions = sum(len(domain) for domain in self.spatial_solver.get_possible_positions().values())
+        else:
+            self.spatial_solver = None
+            self.previous_total_positions = 0
         
     def _execute_and_update(self, action: BaseAction, **kwargs) -> ActionResult:
         """Execute action and update exploration state."""
@@ -229,13 +232,13 @@ class ExplorationManager:
     # === Coverage helpers ===
     def _anchor_name(self) -> Optional[str]:
         # If standing on an object position, use that object as anchor (exclude gates)
-        for obj in self.exploration_room.objects:
+        for obj in self.exploration_room.all_objects:
             if np.allclose(obj.pos, self.agent.pos):
                 return obj.name
         # Initial position anchor
         if np.allclose(self.agent.pos, self.init_pos):
             return self._init_node_name
-        return None
+        raise ValueError("No anchor found")
 
     def _update_coverage_from_observe(self, observe_result: 'ActionResult') -> None:
         visible = observe_result.data.get('visible_objects', []) or []
@@ -246,8 +249,6 @@ class ExplorationManager:
                 self.observed_nodes.add(name)
         # edge coverage: observe A from B (B is anchor)
         anchor = self._anchor_name()
-        if not anchor:
-            return
         for name in visible:
             if name == anchor:
                 continue
@@ -272,13 +273,14 @@ class ExplorationManager:
     
     def _log_exploration(self, action_sequence: ActionSequence, action_results: List['ActionResult']) -> None:
         """Log exploration history and efficiency."""
-        # Calculate total information gain ratio for observe actions in this turn
+        # Calculate total information gain ratio for this turn (optional)
         total_information_gain_ratio = None
-        for action_result in action_results:
-            # Only calculate information gain for observe actions
-            if action_result.action_type in ('observe', 'observe_approx', 'observe_rel', 'observe_dir'):
-                # Calculate information gain for this observe action
-                total_information_gain_ratio = self._calculate_single_action_information_gain(action_result)
+        if self.enable_information_gain:
+            for action_result in action_results:
+                if action_result.action_type in ('observe', 'query'):
+                    total_information_gain_ratio = self._calculate_single_action_information_gain(action_result)
+        else:
+            total_information_gain_ratio = 0.0
 
         
         # Log current turn with coverage snapshot
@@ -291,33 +293,38 @@ class ExplorationManager:
             action_counts=dict(self.exp_summary.get('action_counts', {})),
             room_state=self.exploration_room.copy(),
             agent_state=self.agent.copy(),
-            information_gain=total_information_gain_ratio if total_information_gain_ratio is not None else self.turn_logs[-1].information_gain
+            information_gain=total_information_gain_ratio if total_information_gain_ratio is not None else (self.turn_logs[-1].information_gain if self.turn_logs else 0.0)
         )
         self.turn_logs.append(turn_log)
     
     def _update_exp_summary(self) -> Dict[str, Any]:
         """Calculate current coverage and summary stats."""
-        n_nodes = len(self.node_names) or 1
-        node_cov = len(self.observed_nodes) / n_nodes
-        edge_den = len(self.target_edges) or 1
-        edge_cov = len(self.known_edges) / edge_den
+        node_cov = len(self.observed_nodes) / len(self.node_names)
+        edge_cov = len(self.known_edges) / len(self.target_edges)
+        info_gain_list = [turn_log.information_gain for turn_log in self.turn_logs] if self.turn_logs else []
+        acc_info_gain = sum(info_gain_list)
+        avg_info_gain = acc_info_gain / len(self.turn_logs) if self.turn_logs else 0.0
         self.exp_summary = {
             "node_coverage": node_cov,
             "edge_coverage": edge_cov,
             "n_exploration_steps": len(self.turn_logs),
             "action_counts": dict(self.action_counts),
             "action_cost": int(self.action_cost),
+            "info_gain_list": info_gain_list,
+            "acc_info_gain": acc_info_gain,
+            "avg_info_gain": avg_info_gain,
         }
         return self.exp_summary
     
     def _calculate_single_action_information_gain(self, action_result: 'ActionResult') -> float:
         """Calculate information gain as negative log of ratio between current and previous total positions."""
-        
+        if not self.enable_information_gain or (self.spatial_solver is None):
+            return 0.0
         # Store previous positions before processing the action
         previous_positions = self.previous_total_positions
         
         # Only process observation actions that have relation triples
-        if action_result.action_type in ('observe', 'observe_approx', 'observe_rel', 'observe_dir'):
+        if action_result.action_type in ('observe', 'query'):
             triples = action_result.data.get('relation_triples', []) if hasattr(action_result, 'data') else []
             if triples:
                 # Add observations to spatial solver

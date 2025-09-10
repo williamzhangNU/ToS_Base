@@ -10,7 +10,7 @@ import numpy as np
 from .tasks import BaseEvaluationTask
 from ..core.object import Agent, Object, Gate
 from ..core.relationship import EgoFrontBins, StandardDistanceBins, PairwiseRelationshipDiscrete, OrientationRel
-from ..actions import BaseAction, ObserveApproxAction, RotateAction, MoveAction
+from ..actions import BaseAction, ObserveAction, RotateAction, MoveAction
 from ..managers.exploration_manager import ExplorationManager
 from ..utils.action_utils import action_results_to_text
 
@@ -76,7 +76,7 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
         dir_label, dist_label = rel_t.direction.bin_label, rel_t.dist.bin_label
         # Build groups via current Observe; indices only when multiple
         dir_group, dist_group = [], []
-        for name in mgr.execute_success_action(ObserveApproxAction()).data['visible_objects']:
+        for name in mgr.execute_success_action(ObserveAction()).data['visible_objects']:
             o = self.room.get_object_by_name(name)
             rel = PairwiseRelationshipDiscrete.relationship(tuple(o.pos), tuple(mgr.agent.pos), anchor_ori=tuple(mgr.agent.ori), bin_system=bin_sys, distance_bin_system=dist_sys)
             deg = float(rel.direction.degree)
@@ -113,7 +113,7 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
                 group.append(rot_res)
             # compute description BEFORE moving
             desc = self._describe_target(mgr, target)
-            obs_names = set(mgr.execute_success_action(ObserveApproxAction()).data['visible_objects'])
+            obs_names = set(mgr.execute_success_action(ObserveAction()).data['visible_objects'])
             move_res = mgr.execute_success_action(MoveAction(name), observed_items=obs_names)
             move_res.message = desc
             group.append(move_res)
@@ -184,14 +184,14 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
         valid_oris = []
         for ori in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
             tmp = a.copy(); tmp.ori = np.array(ori)
-            if ObserveApproxAction().execute(self.room, tmp).data.get('visible_objects', []):
+            if ObserveAction().execute(self.room, tmp).data.get('visible_objects', []):
                 valid_oris.append(ori)
         final_ori = tuple(valid_oris[int(self.np_random.integers(0, len(valid_oris)))] if valid_oris else (0, 1))
         return seq, final_ori
 
     def _observe_relationships(self, end_agent: Agent) -> List[str]:
         """All pairwise relationship strings (exclude local) from end agent's perspective."""
-        return ObserveApproxAction().execute(self.room, end_agent.copy()).data.get('relationships', [])
+        return ObserveAction().execute(self.room, end_agent.copy()).data.get('relationships', [])
 
     def _observe_text(self, end_agent: Agent, max_items: int = 3) -> str:
         """Shuffle and join up to max_items pairwise lines in one sentence."""
@@ -212,7 +212,7 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
     def _random_forward_obs(self, end_agent: Agent) -> str:
         """Random slight variant: move to a random visible object's pos or randomize orientation, then return pairwise text (no manager)."""
         a = end_agent.copy()
-        vis_names = ObserveApproxAction().execute(self.room, a.copy()).data.get('visible_objects', [])
+        vis_names = ObserveAction().execute(self.room, a.copy()).data.get('visible_objects', [])
         if vis_names:
             pick = self.room.get_object_by_name(str(self.np_random.choice(vis_names)))
             a.pos, a.room_id = pick.pos.copy(), pick.room_id
@@ -222,7 +222,7 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
     def _perturb_observation_text(self, end_agent: Agent, max_items: int = 3) -> Optional[str]:
         """Perturb selected relationships: shift dir/dist bins and change orientation following direction task pattern."""
         a = end_agent.copy()
-        res = ObserveApproxAction().execute(self.room, a)
+        res = ObserveAction().execute(self.room, a)
         triples = [tr for tr in res.data.get('relation_triples', []) if isinstance(tr.relation, PairwiseRelationshipDiscrete)]
         assert triples, "No pairwise relationships found"
 
@@ -435,7 +435,7 @@ class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
         self.steps = int(self.config.get('max_steps', 2))
         seq, final_ori = self._generate_plan(self.steps)
         per_step, end_agent = self.build_action_sequence(seq, final_ori)
-        final_obs = action_results_to_text([ObserveApproxAction().execute(self.room, end_agent.copy())])
+        final_obs = action_results_to_text([ObserveAction().execute(self.room, end_agent.copy())])
         correct_actions = self.action_sequence_to_string(per_step)
         self._ctx = {'seq': list(seq), 'final_ori': tuple(final_ori)}
         choices, correct_idx = self.generate_choices(correct_actions)

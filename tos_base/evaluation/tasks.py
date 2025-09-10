@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from ..core.room import Room
 from ..core.object import Agent, Object
 from ..utils.eval_utilities import multi_choice_eval_fn
-from ..actions import RotateAction, ObserveApproxAction
+from ..actions import RotateAction, ObserveAction
 from ..utils.action_utils import action_results_to_text
 from ..core.relationship import (
     PairwiseRelationshipDiscrete,
@@ -186,14 +186,14 @@ class BaseEvaluationTask(ABC):
         return None
     
     def _take_observations(self, neglect_objects: List[str] = None) -> str:
-        obs_result = ObserveApproxAction().execute(self.room, self.agent, neglect_objects=neglect_objects or [], free_position=True)
+        obs_result = ObserveAction().execute(self.room, self.agent, neglect_objects=neglect_objects or [], free_position=True)
         return action_results_to_text([obs_result])
 
     def _take_full_observations(self, neglect_objects: List[str] = None) -> str:
         action_results = []
         # Always take 4 views (90° FOV) covering a full 360° turn
-        action_results.append(ObserveApproxAction().execute(self.room, self.agent, neglect_objects=neglect_objects or [], free_position=True))
+        action_results.append(ObserveAction().execute(self.room, self.agent, neglect_objects=neglect_objects or [], free_position=True))
         for _ in range(3):
             action_results.append(RotateAction(90).execute(self.room, self.agent))
-            action_results.append(ObserveApproxAction().execute(self.room, self.agent, neglect_objects=neglect_objects or [], free_position=True))
+            action_results.append(ObserveAction().execute(self.room, self.agent, neglect_objects=neglect_objects or [], free_position=True))
         return action_results_to_text(action_results)

@@ -7,7 +7,7 @@ from .tasks import BaseEvaluationTask
 from ..core.object import Object, Gate
 from ..core.relationship import  PairwiseRelationshipDiscrete,  OrientationRel
 from ..actions import BaseAction
-from ..actions import ObserveApproxAction
+from ..actions import ObserveAction
 
 def _ori_to_name(ori: Tuple[int, int]) -> str:
     mapping = {(0, 1): "north", (1, 0): "east", (0, -1): "south", (-1, 0): "west"}
@@ -166,7 +166,7 @@ class ForwardLocEvaluationTask(BaseLocEvaluationTask):
     )
 
     def _observe_relationships(self, end_agent) -> List[str]:
-        return ObserveApproxAction().execute(self.room, end_agent.copy(), free_position=True).data.get('relationships', [])
+        return ObserveAction().execute(self.room, end_agent.copy(), free_position=True).data.get('relationships', [])
 
     def _observe_text(self, end_agent, max_items: int = 3) -> str:
         rels = self._observe_relationships(end_agent)
@@ -180,7 +180,7 @@ class ForwardLocEvaluationTask(BaseLocEvaluationTask):
 
     def _perturb_observation_text(self, end_agent, max_items: int = 3) -> str | None:
         a = end_agent.copy()
-        res = ObserveApproxAction().execute(self.room, a, free_position=True)
+        res = ObserveAction().execute(self.room, a, free_position=True)
         triples = [tr for tr in res.data.get('relation_triples', []) if isinstance(tr.relation, PairwiseRelationshipDiscrete)]
         if not triples:
             return None

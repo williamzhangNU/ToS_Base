@@ -499,7 +499,7 @@ class ReplayHelper:
         snapshots: List[Dict[str, set]] = []
         for res in action_results:
             at = getattr(res, 'action_type', None)
-            if at in ('observe', 'observe_approx', 'query'):
+            if at in ('observe', 'query'):
                 triples = res.data.get('relation_triples', []) if hasattr(res, 'data') else []
                 if triples:
                     solver.add_observation(triples)
@@ -764,7 +764,7 @@ class ReplayHelper:
         for res in action_results:
             act = ActionSequence._parse_single_action(res.action_command) if res.action_command else None
             if act is not None: _ = mgr.execute_success_action(act)
-            frame = RoomPlotter.plot_to_image(mgr.exploration_room, mgr.agent, observe=(res.action_type in ('observe', 'observe_approx')), dpi=120)
+            frame = RoomPlotter.plot_to_image(mgr.exploration_room, mgr.agent, observe=(res.action_type in ('observe',)), dpi=120)
             frames.append(frame)
         out_file = out_path or 'trajectory.gif'
         imageio.mimsave(out_file, frames, duration=(1.0 / max(1, int(fps))))

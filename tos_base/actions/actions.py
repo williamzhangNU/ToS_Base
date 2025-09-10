@@ -161,8 +161,8 @@ class ReturnAction(BaseAction):
         return "Return()"
 
 
-class ObserveAction(BaseAction):
-    """Observe spatial relationships of all objects in view"""
+class ObserveBase(BaseAction):
+    """Base observe implementation (internal)."""
     
     format_desc = "Observe()"
     description = (
@@ -174,30 +174,26 @@ class ObserveAction(BaseAction):
     cost = 1
     directional_template = "{obj_name}: {dir_str}"
     orientation_template = "{obj_name} facing {orientation}"
-    # MODE: 'dir' for direction-only, 'full' for (dir, deg, dist)
-    MODE: str = 'dir'
     
     def __init__(self):
         super().__init__()
-
     
-    def _collect_obj_observations(self, agent, visible_objects, anchor_name: str, mode: str = 'dir', with_orientation: bool = True, discrete: bool = False):
+    
+    def _collect_obj_observations(self, agent, visible_objects, anchor_name: str, discrete: bool = False):
         relationships: List[str] = []
         relation_triples: List[RelationTriple] = []
         for obj in visible_objects:
-            answer_str = ""
             if discrete:
                 rel = PairwiseRelationshipDiscrete.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
             else:
-                rel = PairwiseRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=(mode == 'full'))
+                rel = PairwiseRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
             pairwise_str = rel.to_string()
 
-            # orientation (gate/object) via OrientationRel only
             if isinstance(obj, Gate):
                 rid = agent.room_id
                 if isinstance(rid, (list, tuple)):
                     rid = list(set(agent.room_id) & set(obj.room_id))
-                    assert len(rid) == 1, f"intersection of room ids is not unique: {rid}" # For two rooms, there's only on gate connecting them
+                    assert len(rid) == 1, f"intersection of room ids is not unique: {rid}"
                     rid = rid[0]
                 gate_ori = obj.get_ori_for_room(int(rid)) if rid is not None else obj.ori
                 ori_pair = OrientationRel.get_relative_orientation(tuple(gate_ori), tuple(agent.ori))
@@ -208,7 +204,6 @@ class ObserveAction(BaseAction):
             answer_str = f"{obj.name}: {pairwise_str}, {ori_str}"
             relationships.append(answer_str)
             relation_triples.append(RelationTriple(subject=obj.name, anchor=anchor_name, relation=rel, orientation=tuple(agent.ori)))
-        
         final_answer = "\n" + "\n".join(f"• {rel}" for rel in relationships)
         return final_answer, relationships, relation_triples
     
@@ -217,85 +212,24 @@ class ObserveAction(BaseAction):
     
     def error_message(self, error_type: str) -> str:
         return "Cannot observe: execution failed."
-    
-    def execute(self, room, agent, **kwargs) -> ActionResult:
-        """Execute observe action on room state. NOTE Also neglect same position objects."""
-        
-        # neglect objects in the same position
-        neglect_objects = kwargs.get('neglect_objects', []) + [obj.name for obj in room.all_objects if np.allclose(obj.pos, agent.pos)]
-        with_orientation = kwargs.get('with_orientation', True)
-        visible_objects = [obj for obj in room.all_objects if self._is_visible(agent, obj) and obj.name not in neglect_objects]
-        
-        if not visible_objects:
-            answer = "Nothing in view."
-            return ActionResult(True, self.get_feedback(True, answer=answer), str(self), 'observe', {
-                'answer': answer, 'visible_objects': [], 'relationships': []
-            })
 
-        anchor_name = self.get_anchor_name(room, agent) if not kwargs.get('free_position', False) else 'free_position'
-        final_answer, relationships, relation_triples = self._collect_obj_observations(agent=agent, visible_objects=visible_objects, anchor_name=anchor_name, mode=self.MODE, with_orientation=with_orientation, discrete=False)
-
-        
-        return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe', {
-            'answer': final_answer,
-            'visible_objects': [obj.name for obj in visible_objects],
-            'relationships': relationships,
-            'relation_triples': relation_triples
-        })
     
+
+class ObserveAction(ObserveBase):
+    """Observe with approximate relations and local (near) pair descriptions"""
+    format_desc = "Observe()"
+    description = "Observe with approximate values; also report near pairs (left/right, closer/farther)."
+    example = "Observe()"
+    format_pattern = r"^Observe\(\)$"
+    cost = 1
     @staticmethod
     def is_final() -> bool:
         return True
-    
+
     def __repr__(self):
         return "Observe()"
 
 
-class ObserveRelAction(ObserveAction):
-    """Observe full relationships (dir, degree, distance) of all visible objects"""
-    format_desc = "ObserveRel()"
-    description = "Observe full relationships (direction, signed degree, distance) for all visible objects."
-    example = "ObserveRel()"
-    format_pattern = r"^ObserveRel\(\)$"
-    MODE = 'full'
-    cost = 1
-    @staticmethod
-    def is_final() -> bool:
-        return True
-
-    def __repr__(self):
-        return "ObserveRel()"
-
-class ObserveDirAction(ObserveAction):
-    """Observe direction-only relationships of all visible objects"""
-    format_desc = "ObserveDir()"
-    description = "Observe direction-only relationships for all visible objects."
-    example = "ObserveDir()"
-    format_pattern = r"^ObserveDir\(\)$"
-    MODE = 'dir'
-    cost = 1
-    @staticmethod
-    def is_final() -> bool:
-        return True
-
-    def __repr__(self):
-        return "ObserveDir()"
-
-
-class ObserveApproxAction(ObserveAction):
-    """Observe with approximate relations and local (near) pair descriptions"""
-    format_desc = "ObserveApprox()"
-    description = "Observe with approximate values; also report near pairs (left/right, closer/farther)."
-    example = "ObserveApprox()"
-    format_pattern = r"^ObserveApprox\(\)$"
-    MODE = 'full'
-    cost = 1
-    @staticmethod
-    def is_final() -> bool:
-        return True
-
-    def __repr__(self):
-        return "ObserveApprox()"
     
     def _collect_local_relationships(self, agent, visible_objects, anchor_name: str):
         # proximity-based pair relations using discrete relationship binning
@@ -318,16 +252,16 @@ class ObserveApproxAction(ObserveAction):
         visible_objects = [obj for obj in room.all_objects if self._is_visible(agent, obj) and obj.name not in neglect_objects]
         if not visible_objects:
             answer = "Nothing in view."
-            return ActionResult(True, self.get_feedback(True, answer=answer), str(self), 'observe_approx', {
+            return ActionResult(True, self.get_feedback(True, answer=answer), str(self), 'observe', {
                 'answer': answer, 'visible_objects': [], 'relationships': [], 'local_relationships': []
             })
 
         anchor_name = self.get_anchor_name(room, agent) if not kwargs.get('free_position', False) else 'free_position'
-        pairwise_answer, relationships, pairwise_relation_triples = self._collect_obj_observations(agent=agent, visible_objects=visible_objects, anchor_name=anchor_name, mode='full', with_orientation=with_orientation, discrete=True)
+        pairwise_answer, relationships, pairwise_relation_triples = self._collect_obj_observations(agent=agent, visible_objects=visible_objects, anchor_name=anchor_name, discrete=True)
         local_answer, local_relationships, local_relation_triples = self._collect_local_relationships(agent, visible_objects, anchor_name)
 
         final_answer = f"{pairwise_answer}" + ((f"\nLocal relations:\n{local_answer}") if local_answer else "")
-        return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe_approx', {
+        return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe', {
             'answer': final_answer,
             'visible_objects': [obj.name for obj in visible_objects],
             'relationships': relationships,
@@ -423,7 +357,7 @@ class QueryAction(BaseAction):
 # Expose all observe variants; default flows may still prefer ObserveApprox
 ACTION_CLASSES = [
     MoveAction, RotateAction, ReturnAction,
-    ObserveApproxAction, TermAction, QueryAction
+    ObserveAction, TermAction, QueryAction
 ]
 
 
@@ -530,10 +464,10 @@ if __name__ == "__main__":
     agent = Agent(pos=np.array([1, 1]), ori=np.array([0, 1]), room_id=1, init_room_id=1)
     mgr = ExplorationManager(room, agent)
 
-    # ObserveApprox
-    seq = ActionSequence.parse("Actions: [ObserveApprox()]")
+    # Observe
+    seq = ActionSequence.parse("Actions: [Observe()]")
     info, results = mgr.execute_action_sequence(seq)
-    print('ObserveApprox ->', results[0].message)
+    print('Observe ->', results[0].message)
 
     # Query-only: two queries
     seq = ActionSequence.parse("Actions: [Query(table), Query(lamp)]")
