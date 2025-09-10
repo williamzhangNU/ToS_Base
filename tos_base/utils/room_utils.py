@@ -139,8 +139,9 @@ class RoomGenerator:
         - If fixed_mask is True, uses seed=42 for mask generation while preserving original randomness for object/agent placement.
         """
         eval_tasks = kwargs.get('eval_tasks', [])
-        min_angle_eps = kwargs.get('min_angle_eps', 30.0)
         max_retries = kwargs.get('max_retries', 10)
+        fix_room_size = kwargs.get('fix_room_size', None)
+        same_room_size = kwargs.get('same_room_size', False)
         
         # Store original random state for reproducibility
         original_state = np_random.bit_generator.state
@@ -155,12 +156,8 @@ class RoomGenerator:
                 # Use deterministic sub-seed based on base seed and attempt number
                 sub_seed = (base_seed + attempt * 1000007) % (2**32)  # Use prime number to avoid patterns
                 attempt_random = np.random.default_rng(sub_seed)
-                
                 n = int(max(room_size[0], room_size[1]))
-                
                 # Generate layout - use seed=42 for mask if fixed_mask is True, otherwise use attempt_random
-                fix_room_size = kwargs.get('fix_room_size', None)
-                same_room_size = kwargs.get('same_room_size', False)
                 if fixed_mask:
                     # Use fixed seed=42 for mask generation to get consistent room layout
                     mask_random = np.random.default_rng(42)
@@ -544,11 +541,16 @@ def get_room_description(room: Room, agent: Agent, with_topdown: bool = False) -
 if __name__ == '__main__':
     np_random = np.random.default_rng(42)
     
-    # Test 3 object placement strategies
-    room1, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, np_random=np_random)
-    room2, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, proportional_to_area=True, np_random=np_random)
-    room3, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, fix_object_n=[4, 3, 2], np_random=np_random)
+    # # Test 3 object placement strategies
+    # room1, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, np_random=np_random)
+    # room2, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, proportional_to_area=True, np_random=np_random)
+    # room3, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, fix_object_n=[4, 3, 2], np_random=np_random)
     
-    print(f"Random: {len(room1.objects)} total")
-    print(f"Proportional: {[len([o for o in room2.objects if o.room_id == r]) for r in range(1, 4)]}")
-    print(f"Fixed: {[len([o for o in room3.objects if o.room_id == r]) for r in range(1, 4)]}")
+    # RoomPlotter.plot(room1, None, mode='img', save_path='room1.png')
+    # RoomPlotter.plot(room2, None, mode='img', save_path='room2.png')
+    # RoomPlotter.plot(room3, None, mode='img', save_path='room3.png')
+
+    # Test room layout generation
+    room1, _ = RoomGenerator.generate_room(room_size=[20, 20], level=2, n_objects=9, np_random=np_random, same_room_size=True)
+    
+    RoomPlotter.plot(room1, None, mode='img', save_path='room1.png')

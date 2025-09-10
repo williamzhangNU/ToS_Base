@@ -103,7 +103,6 @@ class ExplorationManager:
         # Log every action result to history immediately
         self.history.append(result)
         if not result.success:
-            result.message += " Movement actions after this action will not be executed as well."
             return result
         
         # Count action, cost, and update coverage
@@ -145,6 +144,7 @@ class ExplorationManager:
             if not result.success:
                 # On failure, perform an observe action and end
                 obs_result = self._execute_and_update(ObserveAction())
+                obs_result.message = f"Subsequent actions are skipped due to failure, instead an observe is executed: {obs_result.message}"
                 action_results.append(obs_result)
                 assert obs_result.success, f"Observe action failed: {obs_result.message}"
                 info.update(obs_result.data)

@@ -146,7 +146,7 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
 
     def _generate_plan(self, steps: int = 2) -> Tuple[List[str], Tuple[int, int]]:
         """Plan by moving agent directly. Bias crossing rooms via gates and prefer objects in the other room after stepping onto a gate.
-        Final orientation guarantees ≥1 object in FOV.
+        Final orientation guarantees >=1 object in FOV.
         """
         a = self._agent_from_init()
         seq: List[str] = []
@@ -180,7 +180,7 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
                 last_was_gate = False
                 other_rooms_after_gate = []
             seq.append(name)
-        # choose final orientation with ≥1 visible object
+        # choose final orientation with >=1 visible object
         valid_oris = []
         for ori in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
             tmp = a.copy(); tmp.ori = np.array(ori)

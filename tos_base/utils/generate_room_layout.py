@@ -1,7 +1,15 @@
 import numpy as np
 from typing import Tuple, List, Optional
 
-def generate_room_layout(n: int, level: int, main: int = None, np_random: np.random.Generator = None, debug: bool = False, fix_room_size: Optional[List[List[int]]] = None, same_room_size: bool = False) -> np.ndarray:
+def generate_room_layout(
+    n: int,
+    level: int,
+    main: int = None,
+    np_random: np.random.Generator = None,
+    debug: bool = False,
+    fix_room_size: Optional[List[List[int]]] = None,
+    same_room_size: bool = False
+) -> np.ndarray:
     """
     Function to generate room layout
 
