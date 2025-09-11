@@ -194,8 +194,8 @@ class BaseEvaluationTask(ABC):
         # Always take 4 views (90° FOV) covering a full 360° turn
         room = self.room.copy()
         agent = self.agent.copy()
-        action_results.append(ObserveApproxAction().execute(room, agent, neglect_objects=neglect_objects or [], free_position=True))
+        action_results.append(ObserveAction().execute(room, agent, neglect_objects=neglect_objects or [], free_position=True))
         for _ in range(3):
             action_results.append(RotateAction(90).execute(room, agent))
-            action_results.append(ObserveApproxAction().execute(room, agent, neglect_objects=neglect_objects or [], free_position=True))
+            action_results.append(ObserveAction().execute(room, agent, neglect_objects=neglect_objects or [], free_position=True))
         return action_results_to_text(action_results)
