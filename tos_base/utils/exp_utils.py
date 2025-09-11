@@ -819,6 +819,8 @@ if __name__ == "__main__":
         level=1, main=5, candidate_objects=candidate_objects
     )
     room.objects = [o for o in room.objects if o.name not in ['printer', 'table']]
+    room.get_object_by_name('floor-lamp').pos = np.array([9, 6])
+    # room.get_object_by_name('backpack').pos = np.array([4, 6])
 
     print(room, agent)
     RoomPlotter.plot(room, agent, save_path='room.png', mode='img')
@@ -828,5 +830,5 @@ if __name__ == "__main__":
     print(proxy.to_text())
     action_results = ReplayHelper.flatten_turns(proxy.turns)
     replay = ReplayHelper(room, agent)
-    replay.plot_observation_heatmaps(action_results, out_dir='heatmaps', fps=1, axes=False, use_icons=True, use_icon_colors=True)
+    replay.plot_observation_heatmaps(action_results, out_dir='heatmaps', fps=1, axes=True, use_icons=True, use_icon_colors=True)
     replay.animate_agent_trajectory(action_results, out_path='trajectory.gif', fps=1)

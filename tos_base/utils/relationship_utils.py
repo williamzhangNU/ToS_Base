@@ -159,70 +159,178 @@ def generate_points_for_relationship(
 
 # ------------ rose glyph for paper plot ------------
 
-def rose_glyph_pretty(
-    pairs,                      # list of (sector_id, ring_id)
-    color="#E6A23C",
-    ring_colors=("#E8F3FF", "#EAF7F0", "#FFF3E0", "#F3E8FF"),
-    tick_colors=("#4C78A8","#8E9ED6","#74C0E3","#BDE0FE","#A8DADC","#95D5B2","#FFD166","#F4A261"),
-    gap=0.92,
-    n_dirs=8,
-    n_rings=4,
-    figsize=(2.4, 2.4),
-    ring_heights=(0.4, 0.25, 0.25, 0.25),
-    bg_band_ratio=1,          # 0..1, portion of eacF4A261h ring colored near the outer edge
-    sector_highlight_color="#FDE68A",
-    sector_highlight_alpha=0.9
+# def rose_glyph_pretty(
+#     pairs,                      # list of (sector_id, ring_id)
+#     color="#E6A23C",
+#     ring_colors=("#E8F3FF", "#EAF7F0", "#FFF3E0", "#F3E8FF"),
+#     tick_colors=("#4C78A8","#8E9ED6","#74C0E3","#BDE0FE","#A8DADC","#95D5B2","#FFD166","#F4A261"),
+#     gap=0.92,
+#     n_dirs=8,
+#     n_rings=4,
+#     figsize=(2.4, 2.4),
+#     ring_heights=(0.4, 0.25, 0.25, 0.25),
+#     bg_band_ratio=1,          # 0..1, portion of eacF4A261h ring colored near the outer edge
+#     sector_highlight_color="#FDE68A",
+#     sector_highlight_alpha=0.9
+# ):
+#     """Rose glyph with (sector, ring) fills; background rings colored on outer band, and selected sectors highlighted."""
+#     fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=figsize)
+#     ax.set_theta_zero_location('N'); ax.set_theta_direction(-1)
+#     ax.set_xticks([]); ax.set_yticks([]); ax.set_rlim(0, 1)
+
+#     # radial boundaries
+#     rh = np.array(ring_heights[:n_rings], dtype=float); rh /= rh.sum()
+#     rb = np.concatenate([[0.0], np.cumsum(rh)])
+
+#     sector_angle = 2*np.pi / n_dirs
+#     width = sector_angle * gap
+#     sectors = {int(s) % n_dirs for s, _ in pairs}
+
+#     # background rings: only outer band portion
+#     for i, c in enumerate(ring_colors[:n_rings]):
+#         h = rb[i+1] - rb[i]
+#         band_h = h * max(0.0, min(1.0, bg_band_ratio))
+#         bottom = rb[i+1] - band_h
+#         ax.bar(0, band_h, width=2*np.pi, bottom=bottom, color=c, alpha=0.5, linewidth=0)
+
+#     # sector highlights (any sector appearing in `pairs`)
+#     for s in sectors:
+#         theta = s * sector_angle
+#         ax.bar(theta, 1.0, width=width, bottom=0.0, color=sector_highlight_color,
+#                linewidth=0, alpha=sector_highlight_alpha, align='center')
+
+#     # target (sector, ring) wedges
+#     theta_map = {s: s * sector_angle for s in sectors}
+#     for s, r in pairs:
+#         s = int(s) % n_dirs; r = int(r)
+#         if 0 <= r < n_rings:
+#             theta = theta_map.get(s, s * sector_angle)
+#             ax.bar(theta, rb[r+1]-rb[r], width=width, bottom=rb[r],
+#                    align='center', linewidth=0, color=color)
+
+#     # ring separators
+#     th = np.linspace(0, 2*np.pi, 361)
+#     for r in rb[1:-1]: ax.plot(th, np.full_like(th, r), lw=1.1, color="white")
+
+#     # ticks
+#     centers = np.arange(n_dirs) * sector_angle
+#     for i, th_c in enumerate(centers):
+#         ax.plot([th_c, th_c], [1.02, 1.08], lw=2.4,
+#                 color=tick_colors[i % len(tick_colors)], solid_capstyle='round')
+
+#     for sp in ax.spines.values(): sp.set_visible(False)
+#     ax.set_rlim(0, 1.10)
+#     return fig, ax
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import to_rgb, to_hex
+import colorsys
+
+def _tonal_shades(base_hex, n, light_low=0.22, light_high=0.82, sat_jitter=0.12):
+    """
+    基于主色生成 n 个同色系色阶，扩大明度跨度并加入轻微饱和度变化，提升区分度。
+    - light_low/high 控制明度范围（越开，色差越大）
+    - sat_jitter 控制饱和度微调幅度（0~0.2 较稳妥）
+    """
+    r, g, b = to_rgb(base_hex)
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    # 使用感知更线性的 gamma 空间生成明度，拉大中间差异
+    t = np.linspace(0, 1, n)
+    gamma = 0.8
+    t = t**gamma
+    lights = light_low + (light_high - light_low) * t
+    # 让靠外圈略更“鲜”，靠内圈更“灰”，增强分层
+    sats = np.clip(s * (1 - sat_jitter/2 + sat_jitter * t), 0, 1)
+    shades = []
+    for li, si in zip(lights, sats):
+        rr, gg, bb = colorsys.hls_to_rgb(h, li, si)
+        shades.append(to_hex((rr, gg, bb)))
+    return shades
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+def rose_glyph_compass_style(
+    pairs,                      # [(sector_id, ring_id)]
+    color="#2563EB",            # still used for selected cells
+    gap=0.92, n_dirs=8, n_rings=4,
+    figsize=(2.6, 2.6),
+    ring_heights=(0.40, 0.25, 0.25, 0.25),
+    sector_highlight_color=None,
+    # --- new styling knobs ---
+    ring_edge_colors=None,      # dopamine palette for ring borders
+    edge_frac_min=0.10,         # thinnest border (as fraction of that ring's thickness)
+    edge_frac_max=0.20,         # thickest border (as fraction of that ring's thickness)
+    edge_alpha=0.10,            # VERY faint when not selected
+    edge_alpha_selected=0.95,   # strong when selected
+    sector_highlight_alpha=0.28 # stronger sector highlight
 ):
-    """Rose glyph with (sector, ring) fills; background rings colored on outer band, and selected sectors highlighted."""
-    fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=figsize)
+    """
+    Compass-styled rose with ring borders as inner-edge bands only.
+    - No background fills.
+    - Sector highlight retained (stronger).
+    - Ring border colors from a dopamine palette; borders sit INSIDE each ring.
+    """
+    if sector_highlight_color is None:
+        sector_highlight_color = color
+
+    # 多巴胺风格的单色系（蓝色）调色盘：高饱和、由浅到深
+    if ring_edge_colors is None:
+        ring_edge_colors = [
+            "#7DD3FC",  # sky blue (light)
+            "#38BDF8",  # vivid sky
+            "#0EA5E9",  # bright azure
+            "#0284C7",  # strong azure
+            "#0369A1",  # deep cyan-blue
+            "#3B82F6",  # bright blue
+            "#2563EB",  # royal blue
+            "#1D4ED8",  # deep royal
+        ]
+
+    fig, ax = plt.subplots(subplot_kw={'projection':'polar'}, figsize=figsize)
     ax.set_theta_zero_location('N'); ax.set_theta_direction(-1)
     ax.set_xticks([]); ax.set_yticks([]); ax.set_rlim(0, 1)
 
-    # radial boundaries
-    rh = np.array(ring_heights[:n_rings], dtype=float); rh /= rh.sum()
-    rb = np.concatenate([[0.0], np.cumsum(rh)])
-
-    sector_angle = 2*np.pi / n_dirs
-    width = sector_angle * gap
+    # geometry
+    rh = np.array(ring_heights[:n_rings], float); rh /= rh.sum()
+    rb = np.r_[0.0, rh.cumsum()]                     # ring boundaries in [0,1]
+    ang = 2*np.pi/n_dirs; width = ang*gap
     sectors = {int(s) % n_dirs for s, _ in pairs}
+    selected_rings = {int(r) for _, r in pairs if 0 <= int(r) < n_rings}
 
-    # background rings: only outer band portion
-    for i, c in enumerate(ring_colors[:n_rings]):
-        h = rb[i+1] - rb[i]
-        band_h = h * max(0.0, min(1.0, bg_band_ratio))
-        bottom = rb[i+1] - band_h
-        ax.bar(0, band_h, width=2*np.pi, bottom=bottom, color=c, alpha=0.5, linewidth=0)
+    # 1) no background bands
 
-    # sector highlights (any sector appearing in `pairs`)
+    # 2) stronger sector highlight
     for s in sectors:
-        theta = s * sector_angle
-        ax.bar(theta, 1.0, width=width, bottom=0.0, color=sector_highlight_color,
-               linewidth=0, alpha=sector_highlight_alpha, align='center')
+        ax.bar(s*ang, 1.0, width=width, bottom=0,
+               color=sector_highlight_color, alpha=sector_highlight_alpha, lw=0, zorder=1)
 
-    # target (sector, ring) wedges
-    theta_map = {s: s * sector_angle for s in sectors}
+    # 3) target cells (unchanged)
     for s, r in pairs:
         s = int(s) % n_dirs; r = int(r)
         if 0 <= r < n_rings:
-            theta = theta_map.get(s, s * sector_angle)
-            ax.bar(theta, rb[r+1]-rb[r], width=width, bottom=rb[r],
-                   align='center', linewidth=0, color=color)
+            ax.bar(s*ang, rb[r+1]-rb[r], width=width, bottom=rb[r],
+                   color=color, edgecolor="white", lw=0.8, align='center', zorder=5)
 
-    # ring separators
-    th = np.linspace(0, 2*np.pi, 361)
-    for r in rb[1:-1]: ax.plot(th, np.full_like(th, r), lw=1.1, color="white")
+    # 4) ring borders: thin bands INSIDE each ring (no outside bleed, no gaps)
+    #    inner ring thinner; outer rings thicker (linear ramp)
+    edge_fracs = np.linspace(edge_frac_min, edge_frac_max, n_rings)
+    for i in range(n_rings):
+        r_in, r_out = rb[i], rb[i+1]
+        h = r_out - r_in
+        band_h = h * float(edge_fracs[i])           # strictly within [r_out - band_h, r_out]
+        band_bottom = r_out - band_h                # e.g., ... 0.8–1.0, 1.8–2.0, ...
+        alpha = edge_alpha_selected if i in selected_rings else edge_alpha
+        c = ring_edge_colors[i % len(ring_edge_colors)]
+        ax.bar(0, band_h, width=2*np.pi, bottom=band_bottom,
+               color=c, alpha=alpha, lw=0, zorder=6)
 
-    # ticks
-    centers = np.arange(n_dirs) * sector_angle
-    for i, th_c in enumerate(centers):
-        ax.plot([th_c, th_c], [1.02, 1.08], lw=2.4,
-                color=tick_colors[i % len(tick_colors)], solid_capstyle='round')
+    # 5) no extra outline strokes (prevents perceived gaps)
 
     for sp in ax.spines.values(): sp.set_visible(False)
-    ax.set_rlim(0, 1.10)
+    ax.set_rlim(0, 1.12)
     return fig, ax
-
-
 
 if __name__ == "__main__":
     # relationship = PairwiseRelationshipDiscrete.relationship((4, 6), (0, 0), anchor_ori=(1, 0), bin_system=CardinalBinsEgo(), distance_bin_system=StandardDistanceBins())
@@ -231,12 +339,22 @@ if __name__ == "__main__":
     #     dist = math.hypot(p[0] - 0.0, p[1] - 0.0)
     #     print(f"Point {p}: distance = {dist:.2f}")
 
-    # 扇区: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
-    # 环:   near=0, mid=1, slightly far=2, far=3
+    # sector: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
+    # ring: near=0, mid=1, slightly far=2, far=3
     # ax = rose_glyph_pretty(pairs=[(7, 1), (6, 1), (7, 2), (6, 2)], color="#E59E1B")
     # ax = rose_glyph_pretty(pairs=[(7, 2), (0, 1), (7, 1)], color="#E59E1B")
     # ax = rose_glyph_pretty(pairs=[(6, 1), (5, 2), (5, 1), (6, 2)], color="#E59E1B")
     # ax = rose_glyph_pretty(pairs=[(6, 3), (7, 2), (6, 2), (7, 3)], color="#E59E1B")
-    ax = rose_glyph_pretty(pairs=[(3, 2)], color="#E59E1B")
+    # ax = rose_glyph_pretty(pairs=[(3, 2)], color="#E59E1B")
+
+
+    # ax = rose_glyph_compass_style(pairs=[(6, 1), (6, 2), (7, 1), (7, 2)])
+    # ax = rose_glyph_compass_style(pairs=[(6, 1), (6, 2), (7, 2)])
+    # ax = rose_glyph_compass_style(pairs=[(5, 1), (4, 0), (4, 1), (3, 1)])
+    # ax = rose_glyph_compass_style(pairs=[(3, 2)])
+    # ax = rose_glyph_compass_style(pairs=[(4, 1)])
+    # ax = rose_glyph_compass_style(pairs=[(5, 1), (5, 2), (6, 2)])
+    # ax = rose_glyph_compass_style(pairs=[(6, 1), (6, 2), (7, 2)])
+    ax = rose_glyph_compass_style(pairs=[(7, 1)])
 
     plt.savefig("rose_glyph_pretty.png", transparent=True)

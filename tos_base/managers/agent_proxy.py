@@ -642,33 +642,45 @@ def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = 
 
 if __name__ == "__main__":
     from ..utils.room_utils import RoomGenerator, RoomPlotter
+    from collections import defaultdict
     from tqdm import tqdm
-    costs = []
-    for seed in tqdm(range(0, 100)):
-        room, agent = RoomGenerator.generate_room(
-            room_size=[15, 15],
-            n_objects=8,
-            np_random=np.random.default_rng(seed),
-            level=2,
-            main=4
-        )
-        # RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
 
-        # proxy = GreedyInquisitorAgentProxy(room, agent) # greedy_edge_seeker
-        # proxy = OracleAgentProxy(room, agent)        # node_seeker (complete nodes)
-        # proxy = StrategistAgentProxy(room, agent)    # node_sweeper
-        # proxy = InquisitorAgentProxy(room, agent)    # edge_seeker (complete edges)
-        # proxy = AnalystAgentProxy(room, agent, delegate='greedy_inquisitor')
-        proxy = AnalystAgentProxy(room, agent, delegate='observer_analyst', observer_delegate='strategist')
-        proxy.run()
-        # print(proxy.to_text())
-        # print(proxy.mgr.get_exp_summary())
-        cost = proxy.mgr.get_exp_summary()['action_cost']
-        costs.append(cost)
 
-        # print(room)
-        # print(room.mask)
-        # print(room.gates)
-        # print(agent)
+    def multiple_runs(n_runs: int, proxy_name: str, **kwargs):
+        action_counts, action_costs = [], []
+        for seed in tqdm(range(n_runs), desc=f'Running experiments for {proxy_name}'):
+            room, agent = RoomGenerator.generate_room(
+                room_size=[15, 15],
+                n_objects=8,
+                np_random=np.random.default_rng(seed),
+                level=2,
+                main=4
+            )
+            RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
+            proxy = eval(proxy_name)(room, agent, **kwargs)
+            proxy.run()
+            print(proxy.to_text())
+            summary = proxy.mgr.get_exp_summary()
+            action_count, action_cost = summary['action_counts'], summary['action_cost']
+        
+            action_counts.append(action_count)
+            action_costs.append(action_cost)
+        return action_counts, action_costs
 
-    print(f"Average Cost: {sum(costs) / len(costs)}")
+
+
+
+    action_counts, action_costs = multiple_runs(1, 'AnalystAgentProxy', delegate='observer_analyst', observer_delegate='strategist')
+    # action_counts, action_costs = multiple_runs(100, 'AnalystAgentProxy', delegate='oracle')
+
+    # Calculate average action counts per action type
+    avg_action_counts = defaultdict(float)
+    for action_count in action_counts:
+        for action_name, count in action_count.items():
+            avg_action_counts[action_name] += count
+    
+    for action_name in avg_action_counts:
+        avg_action_counts[action_name] /= len(action_counts)
+    
+    print(f"Average Action Counts: {avg_action_counts}")
+    print(f"Average Action Cost: {sum(action_costs) / len(action_costs)}")

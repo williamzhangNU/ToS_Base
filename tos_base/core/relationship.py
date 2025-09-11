@@ -509,7 +509,7 @@ class ProximityRelationship:
             return None
             
         # Create pairwise relationship between the two objects using agent's perspective
-        cardinal_bins = CardinalBinsEgo()
+        cardinal_bins = CardinalBinsAllo() # CardinalBinsEgo()
         distance_bins = StandardDistanceBins()
         pairwise_rel = PairwiseRelationshipDiscrete.relationship(a_pos, b_pos, perspective_ori, cardinal_bins, distance_bins)
         
@@ -517,7 +517,7 @@ class ProximityRelationship:
     
     @classmethod
     def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> str:
-        bin_system = bin_system or CardinalBinsEgo()
+        bin_system = bin_system or CardinalBinsAllo() # CardinalBinsEgo()
         distance_bin_system = distance_bin_system or StandardDistanceBins()
         return (
             f"Proximity relationship reporting:\n"
@@ -528,7 +528,7 @@ class ProximityRelationship:
     
     def to_string(self, a_name: str, b_name: str) -> str:
         rel_str = self.pairwise_rel.to_string()
-        return f"from {b_name}'s view, {a_name} is {rel_str}"
+        return f"Suppose agent's orientation is north, {a_name} is {rel_str} to {b_name}"
 
 
 
