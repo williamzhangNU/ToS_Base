@@ -49,19 +49,17 @@ class DistanceBinSystem(Protocol):
 
 
 class EgoFrontBins:
-    """Ego-centric front-focused bins (front is (-1e-3, 1e-3); nodes at ±22.5°, ±45°)."""
+    """Ego-centric front-focused bins (front is (-22.5°, 22.5°); nodes at ±22.5°, ±45°)."""
     EPS: ClassVar[float] = 1e-3
     # open intervals; preserve ±1e-3 slack at the interior edges
     BINS = [
         (-180.0, -45.0 - 1e-3),
         (-45.0 - 1e-3, -22.5 - 1e-3),
-        (-22.5 - 1e-3, -1e-3),
-        (-1e-3, 1e-3),
-        (1e-3, 22.5 + 1e-3),
+        (-22.5 - 1e-3, 22.5 + 1e-3),
         (22.5 + 1e-3, 45.0 + 1e-3),
         (45.0 + 1e-3, 180.0 + 1e-3),
     ]
-    LABELS = ['beyond-fov', 'front-left', 'front-slight-left', 'front', 'front-slight-right', 'front-right', 'beyond-fov']
+    LABELS = ['beyond-fov', 'front-left', 'front', 'front-right', 'beyond-fov']
 
     def bin(self, degree: float):
         v = float(degree)
@@ -73,13 +71,12 @@ class EgoFrontBins:
     @classmethod
     def prompt(cls) -> str:
         parts = [
-            "(-45°,-22.5°)→front-left",
-            "(-22.5°,0°)→front-slight-left",
-            "0°→front",
-            "(0°,22.5°)→front-slight-right",
-            "(22.5°,45°)→front-right",
+            "[-45°,-22.5°)→front-left",
+            "[-22.5°,22.5°]→front",
+            "(22.5°,45°]→front-right",
+            "other → beyond-fov",
         ]
-        return "Bearing bins (egocentric, 0° is front): " + ", ".join(parts) + "."
+        return "Bearing bins (egocentric): " + ", ".join(parts) + "."
 
 
 class _CardinalBinsBase:
@@ -146,12 +143,12 @@ class StandardDistanceBins:
     def prompt(cls) -> str:
         parts = [
             "=0→same distance",
-            "(0,2)→near",
-            "(2,4)→mid distance",
-            "(4,8)→slightly far",
-            "(8,16)→far",
-            "(16,32)→very far",
-            "(32,64)→extremely far",
+            "(0,2]→near",
+            "(2,4]→mid distance",
+            "(4,8]→slightly far",
+            "(8,16]→far",
+            "(16,32]→very far",
+            "(32,64]→extremely far",
         ]
         return "Distance bins (0 means same distance): " + ", ".join(parts) + "."
 

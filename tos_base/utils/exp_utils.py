@@ -506,6 +506,8 @@ class ReplayHelper:
                     rel_sets = solver.get_possible_relations()
                     for (a, b), rels in rel_sets.items():
                         print(a, b, rels)
+                    positions = solver.get_possible_positions()
+                    print(positions)
                     print("-" * 100)
                     snapshots.append(solver.get_possible_positions())
         return snapshots

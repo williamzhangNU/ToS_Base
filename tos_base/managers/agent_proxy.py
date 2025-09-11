@@ -387,7 +387,8 @@ class ObserverAnalystAgentProxy(AgentProxy):
     """Hybrid Agent: (a) observe-all-nodes via oracle/strategist, then (b) pick best observe(anchor,ori) to reduce relations in current room."""
 
     def __init__(self, room: Room, agent: Agent, grid_size: int | None = None,
-                 rel_threshold: int = 0, eval_samples: int = 30, delegate: str = 'oracle', max_observes: int = 16):
+                 rel_threshold: int = 0, eval_samples: int = 30, delegate: str = 'oracle', max_observes: int = 16,
+                 metric: str = 'relations'):
         super().__init__(room, agent)
         g = (max(self.room.mask.shape) if getattr(self.room, 'mask', None) is not None else 10)
         self.grid_size = int(g if grid_size is None else grid_size)
@@ -395,6 +396,7 @@ class ObserverAnalystAgentProxy(AgentProxy):
         self.eval_samples = int(eval_samples)
         self.delegate = (delegate or 'oracle').lower()
         self.max_observes = int(max_observes)
+        self.metric = (metric or 'relations').lower()
         self.solver: SpatialSolver | None = None
 
     # ---- step (a): reuse existing in-room observe logic ----
@@ -424,11 +426,11 @@ class ObserverAnalystAgentProxy(AgentProxy):
                     self.solver.add_observation(filt)
     def _metrics(self) -> int:
         assert self.solver is not None
-        _, _, _, total_rels = self.solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
-        return total_rels
+        _, total_positions, _, total_rels = self.solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
+        return total_rels if self.metric != 'positions' else total_positions
 
     # 1) simulate returns best anchor + absolute orientation (not rotation)
-    def _simulate_observe_gain(self, anchor: str, desired_ori: np.ndarray, baseline_rels: int) -> float:
+    def _simulate_observe_gain(self, anchor: str, desired_ori: np.ndarray, baseline_metric: int) -> float:
         assert self.solver is not None
         if anchor not in self.solver.solver.variables: return 0.0
         sim = self.solver.copy()
@@ -441,11 +443,12 @@ class ObserverAnalystAgentProxy(AgentProxy):
         keep = set(sim.solver.variables.keys())
         filt = [tr for tr in triples if tr.subject in keep and tr.anchor in keep]
         if filt: sim.add_observation(filt)
-        _, _, _, new_rels = sim.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
-        return float(baseline_rels - new_rels)
+        _, new_positions, _, new_rels = sim.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
+        new_metric = new_rels if self.metric != 'positions' else new_positions
+        return float(baseline_metric - new_metric)
 
     # 2) pick best (anchor, absolute orientation)
-    def _best_observe(self, baseline_rels: int) -> tuple[str | None, np.ndarray | None, float]:
+    def _best_observe(self, baseline_metric: int) -> tuple[str | None, np.ndarray | None, float]:
         rid = self._current_room()
         observed = set(self.mgr.observed_items or set())
         assert set(self.nodes_by_room.get(rid, set())).issubset(observed)
@@ -469,7 +472,7 @@ class ObserverAnalystAgentProxy(AgentProxy):
             for d in (0, 90, 180, 270):
                 R = BaseAction._get_rotation_matrix(d)
                 ori = base @ R
-                gain = self._simulate_observe_gain(a, ori, baseline_rels)
+                gain = self._simulate_observe_gain(a, ori, baseline_metric)
                 if gain > best_gain:
                     best_a, best_ori, best_gain = a, ori, gain
         return best_a, best_ori, best_gain
@@ -513,7 +516,7 @@ class AnalystAgentProxy(AgentProxy):
 
     def __init__(self, room: Room, agent: Agent, grid_size: int | None = None,
                  max_queries: int = 16, rel_threshold: int = 0, eval_samples: int = 30,
-                 delegate: str = 'oracle', observer_delegate: str = 'oracle'):
+                 delegate: str = 'oracle', observer_delegate: str = 'oracle', metric: str = 'relations'):
         super().__init__(room, agent)
         g = (max(self.room.mask.shape) if getattr(self.room, 'mask', None) is not None else 10)
         self.solver = SpatialSolver([o.name for o in self.room.all_objects] + ['initial_pos'], grid_size=(g if grid_size is None else grid_size))
@@ -523,6 +526,7 @@ class AnalystAgentProxy(AgentProxy):
         self.eval_samples = int(eval_samples)
         self.delegate = (delegate or 'strategist').lower()
         self.observer_delegate = (observer_delegate or 'strategist').lower()
+        self.metric = (metric or 'relations').lower()
 
     def _ingest_observations(self) -> None:
         for i, t in enumerate(self.turns):
@@ -542,7 +546,7 @@ class AnalystAgentProxy(AgentProxy):
         return self.solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
 
     # ---- Greedy global query with simulation ----
-    def _simulate_query_gain(self, obj: str, baseline_rels: int) -> float:
+    def _simulate_query_gain(self, obj: str, baseline_metric: int) -> float:
         """Simulate query on a solver copy; return reduction in relationship count."""
         if obj != 'initial_pos' and (not self.room.has_object(obj)):
             raise ValueError(f"Object {obj} not found in room")
@@ -551,23 +555,25 @@ class AnalystAgentProxy(AgentProxy):
         triples = res.data.get('relation_triples', [])
         if triples:
             sim_solver.add_observation(triples)
-        _, _, _, new_rels = sim_solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
-        return (baseline_rels - new_rels)
+        _, new_positions, _, new_rels = sim_solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
+        new_metric = new_rels if self.metric != 'positions' else new_positions
+        return (baseline_metric - new_metric)
 
     def _global_query_loop(self) -> None:
         """Greedy selection by max relationship reduction."""
         q = 0
         while q < self.max_queries:
-            _, _, rel_sets, total_rels = self._current_metrics()
-            if total_rels <= self.rel_threshold:
+            _, total_positions, rel_sets, total_rels = self._current_metrics()
+            total_metric = total_rels if self.metric != 'positions' else total_positions
+            if total_metric <= self.rel_threshold:
                 break
-            best_obj, best_gain = self._best_query(rel_sets, total_rels)
+            best_obj, best_gain = self._best_query(rel_sets, total_metric)
             if best_gain <= 1e-9 or best_obj is None:
                 break
             self._query_object(best_obj)
             q += 1
 
-    def _best_query(self, rel_sets: dict, total_rels: int) -> tuple:
+    def _best_query(self, rel_sets: dict, total_metric: int) -> tuple:
         """Pick object with highest simulated relationship gain."""
         names = [o.name for o in self.room.all_objects] + ['initial_pos']
         scores = []
@@ -584,7 +590,7 @@ class AnalystAgentProxy(AgentProxy):
 
         best_obj, best_gain = None, -1.0
         for obj in top_objs:
-            gain = self._simulate_query_gain(obj, total_rels)
+            gain = self._simulate_query_gain(obj, total_metric)
             if gain > best_gain:
                 best_gain, best_obj = gain, obj
         return best_obj, best_gain
@@ -602,7 +608,7 @@ class AnalystAgentProxy(AgentProxy):
         }
         DelegateCls = mapping.get(self.delegate, OracleAgentProxy)
         if DelegateCls is ObserverAnalystAgentProxy:
-            delegate = DelegateCls(self.room, self.agent, delegate=self.observer_delegate)
+            delegate = DelegateCls(self.room, self.agent, delegate=self.observer_delegate, metric=self.metric)
         else:
             delegate = DelegateCls(self.room, self.agent)
         d_turns = delegate.run()
@@ -623,7 +629,7 @@ class AnalystAgentProxy(AgentProxy):
         return self.turns
 
 
-def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = None, observer_delegate: str | None = None) -> AgentProxy:
+def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = None, observer_delegate: str | None = None, metric: str | None = None) -> AgentProxy:
     name = (name or 'oracle').lower()
     mapping = {
         'oracle': OracleAgentProxy,
@@ -634,9 +640,9 @@ def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = 
         'observer_analyst': ObserverAnalystAgentProxy,
     }
     if name == 'analyst':
-        return mapping['analyst'](room, agent, delegate=(delegate or 'oracle'), observer_delegate=(observer_delegate or 'oracle'))
+        return mapping['analyst'](room, agent, delegate=(delegate or 'oracle'), observer_delegate=(observer_delegate or 'oracle'), metric=(metric or 'relations'))
     if name == 'observer_analyst':
-        return mapping['observer_analyst'](room, agent, delegate=(delegate or 'oracle'))
+        return mapping['observer_analyst'](room, agent, delegate=(delegate or 'oracle'), metric=(metric or 'relations'))
     return mapping.get(name, OracleAgentProxy)(room, agent)
 
 
@@ -656,10 +662,10 @@ if __name__ == "__main__":
                 level=2,
                 main=4
             )
-            RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
+            # RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
             proxy = eval(proxy_name)(room, agent, **kwargs)
             proxy.run()
-            print(proxy.to_text())
+            # print(proxy.to_text())
             summary = proxy.mgr.get_exp_summary()
             action_count, action_cost = summary['action_counts'], summary['action_cost']
         
@@ -670,7 +676,7 @@ if __name__ == "__main__":
 
 
 
-    action_counts, action_costs = multiple_runs(1, 'AnalystAgentProxy', delegate='observer_analyst', observer_delegate='strategist')
+    action_counts, action_costs = multiple_runs(100, 'AnalystAgentProxy', delegate='observer_analyst', observer_delegate='strategist')
     # action_counts, action_costs = multiple_runs(100, 'AnalystAgentProxy', delegate='oracle')
 
     # Calculate average action counts per action type
