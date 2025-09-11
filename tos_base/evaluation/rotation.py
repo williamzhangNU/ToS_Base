@@ -15,7 +15,8 @@ class RotEvaluationTask(BaseEvaluationTask):
     QUESTION_TEMPLATE = (
         "You return to your starting position and face north.\n"
         "You will perform a full 360-degree rotation by continuously turning {turn_direction} in place.\n"
-        "Your task is to answer the sequence of objects that will appear in front of you during the rotation.\n"
+        "Assume all walls are removed (you can see through walls), so every object is visible.\n"
+        "Your task is to answer the sequence of objects that will appear directly in front of you during the rotation.\n"
         "If two objects have the exact same bearing, list the nearer first.\n\n"
         "Choose the correct sequence:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
@@ -65,6 +66,7 @@ class RotEvaluationTask(BaseEvaluationTask):
             tries += 1
         # fallback: tighten epsilon and try once more
         cur_eps = min(cur_eps, 1.0)
+        print(f"[Rotation Task] Fallback: tighten epsilon and try once more")
         start = int(self.np_random.integers(0, len(pts)))
         names, angs = self._greedy_from(pts, start, cur_eps)
         assert len(names) >= 3, "Increase object count or decrease angle_eps"
@@ -100,7 +102,7 @@ class RotEvaluationTask(BaseEvaluationTask):
     # ---------- main ----------
     def generate_question(self) -> str:
         self.turn_direction = self.np_random.choice(["clockwise", "counterclockwise"])
-        self.angle_eps = float(self.config.get("angle_eps", 15.0))
+        self.angle_eps = float(self.config.get("angle_eps", 30.0))
 
         correct_seq = self._gen_valid_sequence(self.turn_direction, self.angle_eps)
         choices, idx = self.generate_choices(correct_seq)
