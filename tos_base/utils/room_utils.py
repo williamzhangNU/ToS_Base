@@ -142,6 +142,7 @@ class RoomGenerator:
         max_retries = kwargs.get('max_retries', 10)
         fix_room_size = kwargs.get('fix_room_size', None)
         same_room_size = kwargs.get('same_room_size', False)
+        room_sizes = kwargs.get('room_sizes', None)
         
         # Store original random state for reproducibility
         original_state = np_random.bit_generator.state
@@ -164,14 +165,14 @@ class RoomGenerator:
                     mask = generate_room_layout(
                         n=n, level=int(level), main=main, 
                         np_random=mask_random, fix_room_size=fix_room_size,
-                        same_room_size=same_room_size
+                        same_room_size=same_room_size, room_sizes=room_sizes
                     )
                 else:
                     # Use original random behavior
                     mask = generate_room_layout(
                         n=n, level=int(level), main=main, 
                         np_random=attempt_random, fix_room_size=fix_room_size,
-                        same_room_size=same_room_size
+                        same_room_size=same_room_size, room_sizes=room_sizes
                     )
 
                 gates = RoomGenerator._gen_gates_from_mask(mask)
@@ -511,7 +512,7 @@ def get_topdown_info(room: Room, agent: Agent) -> str:
     return "\n".join(lines)
 
 
-def get_room_description(room: Room, agent: Agent, with_topdown: bool = False) -> str:
+def get_room_description(room: Room, agent: Agent, with_topdown: bool = False, vision_data: dict = None) -> str:
     # Get room information
     if hasattr(room, 'mask') and room.mask is not None:
         room_ids = [int(rid) for rid in np.unique(room.mask) if 1 <= int(rid) < 100]
@@ -525,11 +526,29 @@ def get_room_description(room: Room, agent: Agent, with_topdown: bool = False) -
     assert isinstance(agent.room_id, int), f"Agent room id must be an integer, got {agent.room_id}"
 
     # Separate objects and gates for clearer description
-    objects = [o.name for o in room.all_objects if not isinstance(o, Gate)]
+    objects = [o for o in room.all_objects if not isinstance(o, Gate)]
     gates = [o.name for o in room.all_objects if isinstance(o, Gate)]
 
     desc = f"Imagine {room_type}: {', '.join(room_names)}. You are currently in room {agent.room_id}. You face north."
-    desc += f"\nObjects: {', '.join(objects)}" if objects else ""
+    
+    # Format objects with numbered labels if vision_data is provided
+    if vision_data and 'room_object_assignments' in vision_data:
+        object_labels = {}
+        for room_assignments in vision_data['room_object_assignments'].values():
+            for assignment in room_assignments:
+                object_labels[assignment['name']] = assignment['label']
+        
+        numbered_objects = []
+        for obj in objects:
+            label = object_labels.get(obj.name, "?")
+            numbered_objects.append(f"{label}. {obj.name}")
+        
+        desc += f"\nObjects: {', '.join(numbered_objects)}" if numbered_objects else ""
+        desc += "\nNote: All objects in the images are facing the camera."
+    else:
+        object_names = [o.name for o in objects]
+        desc += f"\nObjects: {', '.join(object_names)}" if object_names else ""
+    
     desc += f"\nGates: {', '.join(gates)}" if gates else ""
 
     if with_topdown:

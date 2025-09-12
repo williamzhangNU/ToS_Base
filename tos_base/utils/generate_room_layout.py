@@ -8,7 +8,8 @@ def generate_room_layout(
     np_random: np.random.Generator = None,
     debug: bool = False,
     fix_room_size: Optional[List[List[int]]] = None,
-    same_room_size: bool = False
+    same_room_size: bool = False,
+    room_sizes: Optional[List[int]] = None
 ) -> np.ndarray:
     """
     Function to generate room layout
@@ -20,6 +21,7 @@ def generate_room_layout(
         np_random: numpy random Generator
         fix_room_size: Optional list of [width, height] for each room (length must be level+1)
         same_room_size: When True, all rooms use the same size as main room (ignored if fix_room_size is provided)
+        room_sizes: Optional list of square room sizes, e.g., [7,6,5] for 7x7, 6x6, 5x5 rooms
 
     Returns:
         n x n numpy array where:
@@ -33,6 +35,12 @@ def generate_room_layout(
 
     num_rooms = level + 1
 
+    # Check if grid is large enough for room_sizes
+    if room_sizes is not None:
+        min_required = _calculate_min_grid_size(room_sizes)
+        if n < min_required:
+            raise ValueError(f"Grid size {n}x{n} too small for room_sizes {room_sizes}. Need at least {min_required}x{min_required}")
+
     # Initialize grid, all as impassable area
     grid = np.full((n, n), -1, dtype=int)
 
@@ -40,13 +48,13 @@ def generate_room_layout(
         return _generate_single_room(grid, n, main)
 
     # Multiple attempts to generate valid room layout
-    max_attempts = 500
+    max_attempts = 10
     for attempt in range(max_attempts):
         # Reset grid
         grid = np.full((n, n), -1, dtype=int)
 
         # Generate room layout
-        rooms = _generate_room_layout(n, num_rooms, main, np_random, fix_room_size, same_room_size)
+        rooms = _generate_room_layout(n, num_rooms, main, np_random, fix_room_size, same_room_size, room_sizes)
         if not rooms or len(rooms) != num_rooms:
             continue
 
@@ -78,8 +86,8 @@ def generate_room_layout(
             if _verify_no_rooms_at_boundary(grid, num_rooms):
                 return grid
 
-    # If multiple attempts fail, return single room
-    return _generate_single_room(grid, n, main)
+    # If multiple attempts fail, raise error
+    raise RuntimeError(f"Failed to generate valid room layout after {max_attempts} attempts")
 
 def _generate_single_room(grid: np.ndarray, n: int, main: Optional[int] = None) -> np.ndarray:
     """Generate single room, occupying center area"""
@@ -128,7 +136,7 @@ def _clamp_room_size(width: int, height: int, n: int, min_size: int) -> Tuple[in
     height = max(min_size, min(height, max_size))
     return width, height
 
-def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np_random: np.random.Generator = None, fix_room_size: Optional[List[List[int]]] = None, same_room_size: bool = False) -> List[Tuple[int, int, int, int]]:
+def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np_random: np.random.Generator = None, fix_room_size: Optional[List[List[int]]] = None, same_room_size: bool = False, room_sizes: Optional[List[int]] = None) -> List[Tuple[int, int, int, int]]:
     """Generate room layout, return list of room coordinates (x1, y1, x2, y2)"""
     rooms = []
 
@@ -156,6 +164,8 @@ def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np
             # Determine room size based on parameters
             if fix_room_size is not None:
                 width, height = fix_room_size[i]
+            elif room_sizes is not None:
+                width = height = room_sizes[i]  # Square rooms
             elif same_room_size and main is not None:
                 width = height = main
             elif i == 0 and main is not None:
@@ -177,8 +187,8 @@ def _generate_room_layout(n: int, num_rooms: int, main: Optional[int] = None, np
                 width = int(np_random.integers(room_min, room_max + 1))
                 height = int(np_random.integers(room_min, room_max + 1))
 
-                # 60% chance for rectangular rooms
-                if float(np_random.random()) < 0.6:
+                # 60% chance for rectangular rooms (only when not using same_room_size or room_sizes)
+                if not same_room_size and room_sizes is None and float(np_random.random()) < 0.6:
                     if float(np_random.random()) < 0.5:
                         width = min(max_size, width + int(np_random.integers(1, 4)))
                     else:
@@ -633,6 +643,20 @@ def _grid_to_emoji(grid: np.ndarray) -> str:
         result.append("".join(emoji_row))
 
     return "\n".join(result)
+
+def _calculate_min_grid_size(room_sizes: List[int]) -> int:
+    """Calculate minimum grid size needed for given room sizes."""
+    if not room_sizes:
+        return 20
+    
+    # Conservative estimate: largest room + walls + space for other rooms
+    max_room = max(room_sizes)
+    total_area = sum(s * s for s in room_sizes)  # Total room area
+    wall_overhead = len(room_sizes) * 4  # Rough wall overhead
+    
+    # Estimate grid size (square root of total area + overhead)
+    estimated_size = int(np.sqrt(total_area + wall_overhead)) + max_room
+    return max(estimated_size, max_room + 6)  # At least max_room + 6 for walls
 
 # Test function
 if __name__ == "__main__":
