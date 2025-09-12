@@ -3,6 +3,7 @@ from copy import deepcopy
 from typing import List, Tuple, Dict, Any, Optional, Set
 import numpy as np
 from dataclasses import dataclass
+from collections import defaultdict
 
 from ..core.object import Agent
 from ..actions import *
@@ -200,18 +201,16 @@ class ExplorationManager:
     def _calculate_infogain_per_turn(env_data_list: List[Dict]) -> List[float]:
         """Calculate average information gain for each turn across all samples."""
         # Collect all turn information gains by turn index
-        turn_infogains = {}  # turn_index -> list of infogain values
+        turn_infogains = defaultdict(list)  # turn_index -> list of infogain values
+        PAD = 0.0
         
         for env_data in env_data_list:
             env_turn_logs = env_data.get('env_turn_logs', [])
             for turn_idx, turn_log in enumerate(env_turn_logs):
                 # Only consider exploration phases
                 if turn_log.get('is_exploration_phase', False):
-                    exploration_log = turn_log.get('exploration_log', {})
-                    infogain = exploration_log.get('information_gain')
+                    infogain = turn_log.get('exploration_log', {}).get('information_gain')
                     if infogain is not None:
-                        if turn_idx not in turn_infogains:
-                            turn_infogains[turn_idx] = []
                         turn_infogains[turn_idx].append(infogain)
         
         # Calculate averages for each turn
@@ -223,7 +222,7 @@ class ExplorationManager:
                 avg_infogain = sum(turn_infogains[turn_idx]) / len(turn_infogains[turn_idx])
                 avg_infogains.append(avg_infogain)
             else:
-                avg_infogains.append(0.0)
+                avg_infogains.append(PAD)
         
         return avg_infogains
     
@@ -274,13 +273,13 @@ class ExplorationManager:
     def _log_exploration(self, action_sequence: ActionSequence, action_results: List['ActionResult']) -> None:
         """Log exploration history and efficiency."""
         # Calculate total information gain ratio for this turn (optional)
-        total_information_gain_ratio = None
+        information_gain_ratio = None
         if self.enable_information_gain:
             for action_result in action_results:
                 if action_result.action_type in ('observe', 'query'):
-                    total_information_gain_ratio = self._calculate_single_action_information_gain(action_result)
+                    information_gain_ratio = self._calculate_single_action_information_gain(action_result)
         else:
-            total_information_gain_ratio = 0.0
+            information_gain_ratio = 0.0
 
         
         # Log current turn with coverage snapshot
@@ -293,7 +292,7 @@ class ExplorationManager:
             action_counts=dict(self.exp_summary.get('action_counts', {})),
             room_state=self.exploration_room.copy(),
             agent_state=self.agent.copy(),
-            information_gain=total_information_gain_ratio if total_information_gain_ratio is not None else (self.turn_logs[-1].information_gain if self.turn_logs else 0.0)
+            information_gain=information_gain_ratio if information_gain_ratio is not None else (self.turn_logs[-1].information_gain if self.turn_logs else 0.0)
         )
         self.turn_logs.append(turn_log)
     

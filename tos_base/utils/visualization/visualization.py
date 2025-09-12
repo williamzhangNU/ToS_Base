@@ -1,18 +1,13 @@
 # visualization.py
 import json
 import os
-import re
 from pathlib import Path
 from html import escape
-from itertools import zip_longest
 from typing import List, Dict, Optional
 import copy
-import base64
-from io import BytesIO
-import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use('Agg')
 from .html_templates import HTML_TEMPLATE, CSS_STYLES, JAVASCRIPT_CODE
+from ragen.env.spatial.Base.tos_base.utils.utils import parse_llm_response
+from .charts import create_infogain_plot, create_cogmap_metrics_plot
 
 
 
@@ -50,42 +45,10 @@ class VisualizationHelper:
     
     @staticmethod
     def extract_think_and_answer(text: str) -> tuple[str, str]:
-        """Extract think and answer content from text using regex patterns"""
-        think_pattern = r'<think>(.*?)</think>'
-        answer_pattern = r'<answer>(.*?)</answer>'
-        
-        think_match = re.search(think_pattern, text, re.DOTALL)
-        answer_match = re.search(answer_pattern, text, re.DOTALL)
-        
-        think_content = think_match.group(1).strip() if think_match else text
-        answer_content = answer_match.group(1).strip() if answer_match else text
-        
-        return think_content, answer_content
+        think, answer, _ = parse_llm_response(text, enable_think=True)
+        return think or text, answer or text
     
-    @staticmethod
-    def create_infogain_plot(infogain_per_turn: List[float], config_name: str) -> str:
-        """Create a line plot for information gain per turn and return as base64 image."""
-
-        fig, ax = plt.subplots(figsize=(8, 4))
-        turns = list(range(1, len(infogain_per_turn) + 1))
-        ax.plot(turns, infogain_per_turn, marker='o', linewidth=2, markersize=4)
-        ax.set_xlabel('Turn')
-        ax.set_ylabel('Average Information Gain')
-        ax.set_title(f'Average Information Gain per Turn - {config_name}')
-        ax.grid(True, alpha=0.3)
-        ax.set_xlim(0.5, len(infogain_per_turn) + 0.5)
-        
-        # Save plot to base64 string
-        buffer = BytesIO()
-        plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
-        buffer.seek(0)
-        plot_data = buffer.getvalue()
-        buffer.close()
-        plt.close(fig)
-        
-        # Convert to base64
-        plot_base64 = base64.b64encode(plot_data).decode('utf-8')
-        return f"data:image/png;base64,{plot_base64}"
+    
 
 
 
@@ -172,7 +135,7 @@ class HTMLGenerator:
                 # Create infogain plot if data is available
                 infogain_per_turn = exp_group.get("infogain_per_turn", [])
                 if infogain_per_turn:
-                    plot_src = VisualizationHelper.create_infogain_plot(infogain_per_turn, gname)
+                    plot_src = create_infogain_plot(infogain_per_turn, gname)
                     if plot_src:
                         f.write("<div class='infogain-plot'>")
                         f.write(f"<img src='{plot_src}' alt='Information Gain per Turn' style='max-width: 100%; height: auto; margin: 10px 0;'>")
@@ -495,6 +458,28 @@ class HTMLGenerator:
                         # else:
                         # obs_number = img_idx + 1 if t_idx > 0 or img_idx > 0 else img_idx + 2
                         f.write(f"<figure><img src='{img_path}' class='room-plot' alt='Environment image {img_idx + 1}'><figcaption>Observation {img_idx + 1}</figcaption></figure>\n")
+            # Cognitive map similarity plot per turn (if available)
+            if env_log.get('cogmap_full_log'):
+                # Build per-turn series up to current turn
+                turns_dir, turns_facing, turns_pos, turns_overall = [], [], [], []
+                for prev in env_turn_logs[:t_idx+1]:
+                    d = prev.get('cogmap_full_log') or {}
+                    turns_dir.append((d.get('global') or {}).get('dir'))
+                    turns_facing.append((d.get('global') or {}).get('facing'))
+                    turns_pos.append((d.get('global') or {}).get('pos'))
+                    turns_overall.append((d.get('global') or {}).get('overall'))
+                plot = create_cogmap_metrics_plot(
+                    {
+                        'dir': turns_dir,
+                        'facing': turns_facing,
+                        'pos': turns_pos,
+                        'overall': turns_overall,
+                    },
+                    title=gname,
+                )
+                if plot:
+                    f.write(f"<figure><img src='{plot}' class='room-plot' alt='Cognitive Map Similarity'><figcaption>Cognitive Map Similarity up to Turn {t_idx+1}</figcaption></figure>\n")
+
             f.write("</div>\n")  # End turn-right
             
             f.write("</div>\n")  # End turn-split
@@ -548,11 +533,3 @@ class Visualization:
         data = self.load_data()
         generator = HTMLGenerator(data, self.output_html, self.show_images)
         return generator.generate_html()
-
-
-def visualize_json(json_path: str, output_html: str, show_images: bool = True) -> str:
-    viz = Visualization(json_path, output_html, show_images)
-    return viz.visualize()
-
-
-		

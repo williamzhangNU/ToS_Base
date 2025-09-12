@@ -58,7 +58,7 @@ class RotEvaluationTask(BaseEvaluationTask):
         pts = self._sorted_pts(turn_dir)
         assert len(pts) >= 3, "Need at least 3 objects"
         tries, cur_eps = 0, float(eps)
-        while tries < 5:
+        while tries < 10:
             start = int(self.np_random.integers(0, len(pts)))
             names, angs = self._greedy_from(pts, start, cur_eps)
             if len(names) >= 3:
@@ -66,7 +66,7 @@ class RotEvaluationTask(BaseEvaluationTask):
             tries += 1
         # fallback: tighten epsilon and try once more
         cur_eps = min(cur_eps, 1.0)
-        print(f"[Rotation Task] Fallback: tighten epsilon and try once more")
+        print(f"[Rotation Task] Fallback: tighten epsilon to {cur_eps}")
         start = int(self.np_random.integers(0, len(pts)))
         names, angs = self._greedy_from(pts, start, cur_eps)
         assert len(names) >= 3, "Increase object count or decrease angle_eps"

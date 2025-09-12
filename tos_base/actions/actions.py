@@ -218,7 +218,7 @@ class ObserveBase(BaseAction):
 class ObserveAction(ObserveBase):
     """Observe with approximate relations and local (near) pair descriptions"""
     format_desc = "Observe()"
-    description = "Observe with approximate values; also report near pairs (left/right, closer/farther)."
+    description = "Report objects (including doors) and their spatial relationships from your current position in your FOV."
     example = "Observe()"
     format_pattern = r"^Observe\(\)$"
     cost = 1
@@ -250,7 +250,7 @@ class ObserveAction(ObserveBase):
         neglect_objects = kwargs.get('neglect_objects', []) + [obj.name for obj in room.all_objects if np.allclose(obj.pos, agent.pos)]
         visible_objects = [obj for obj in room.all_objects if self._is_visible(agent, obj) and obj.name not in neglect_objects]
         if not visible_objects:
-            answer = "Nothing in view."
+            answer = "No objects in field of view."
             return ActionResult(True, self.get_feedback(True, answer=answer), str(self), 'observe', {
                 'answer': answer, 'visible_objects': [], 'relationships': [], 'local_relationships': []
             })
