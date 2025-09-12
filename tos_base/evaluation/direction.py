@@ -3,6 +3,7 @@
 from typing import List, Tuple
 
 from .tasks import BaseEvaluationTask
+from ..actions.base import BaseAction
 from ..core.relationship import (
     PairwiseRelationshipDiscrete,
     CardinalBinsAllo,
@@ -133,13 +134,20 @@ class PovEvaluationTask(DirectionEvaluationTask):
     task_type = "pov"
 
     def generate_question(self) -> str:
+        
         oriented_idxs = [i for i, o in enumerate(self.room.objects) if o.has_orientation]
         assert oriented_idxs, "No oriented objects for POV"
         anchor_idx = int(self.np_random.choice(oriented_idxs))
-        obj_idx = int(self.np_random.choice([i for i in range(len(self.room.objects)) if i != anchor_idx]))
+        anchor = self.room.objects[anchor_idx]
+        
+        # Find objects that are visible from the anchor's perspective
+        visible_obj_idxs = [i for i in range(len(self.room.objects)) 
+                           if i != anchor_idx and BaseAction._is_visible(anchor, self.room.objects[i])]
+        assert visible_obj_idxs, "No visible objects for POV"
+
+        obj_idx = int(self.np_random.choice(visible_obj_idxs))
 
         obj = self.room.objects[obj_idx]
-        anchor = self.room.objects[anchor_idx]
 
         rel = self._compute_discrete_rel(obj.pos, anchor.pos, EgoFrontBins(), anchor_ori=anchor.ori) # TODO change to EgoFrontBin
         choices, idx = self.generate_choices(rel)
