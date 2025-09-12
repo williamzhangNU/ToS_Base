@@ -591,6 +591,29 @@ h3 {
     padding-bottom: 8px;
 }
 
+h4 {
+    color: #495057;
+    margin-top: 20px;
+    font-size: 1.2em;
+    font-weight: 500;
+    border-bottom: 1px solid #dee2e6;
+    padding-bottom: 6px;
+}
+
+h5 {
+    color: #6c757d;
+    margin-top: 15px;
+    font-size: 1.1em;
+    font-weight: 500;
+}
+
+h6 {
+    color: #868e96;
+    margin-top: 10px;
+    font-size: 1.0em;
+    font-weight: 500;
+}
+
 ul {
     list-style: none;
     padding-left: 0;
@@ -792,6 +815,192 @@ a:hover {
     .config-stats {
         flex-direction: column;
     }
+}
+
+/* Cognitive Map Charts Styling */
+.cognitive-map-charts {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 20px 0;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    border: 1px solid #dee2e6;
+}
+
+.cognitive-map-charts h3 {
+    color: #2c3e50;
+    margin: 0 0 20px 0;
+    font-size: 1.4em;
+    font-weight: 600;
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 8px;
+}
+
+.cogmap-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+}
+
+.cogmap-row {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+    border: 1px solid #e9ecef;
+}
+
+.cogmap-row h4 {
+    color: #495057;
+    margin: 0 0 15px 0;
+    font-size: 1.1em;
+    font-weight: 600;
+    text-align: center;
+    padding: 8px;
+    background: rgba(52, 152, 219, 0.1);
+    border-radius: 6px;
+}
+
+.cogmap-columns {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+
+.cogmap-column {
+    background: white;
+    border-radius: 8px;
+    padding: 15px;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border: 1px solid #dee2e6;
+}
+
+.cogmap-column.empty {
+    background: #f8f9fa;
+    border: 1px dashed #dee2e6;
+}
+
+.cogmap-column h5 {
+    color: #495057;
+    margin: 0 0 10px 0;
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.cogmap-plot {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.no-data {
+    color: #6c757d;
+    font-style: italic;
+    margin: 20px 0;
+}
+
+/* Turn averages section */
+.turn-averages-section {
+    margin: 30px 0;
+    padding: 20px;
+    background: linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%);
+    border-radius: 12px;
+    border: 1px solid #b3d9ff;
+}
+
+.turn-averages-section h3 {
+    color: #0d47a1;
+    margin: 0 0 20px 0;
+    font-size: 1.4em;
+    font-weight: 600;
+    border-bottom: 2px solid #1976d2;
+    padding-bottom: 8px;
+    text-align: center;
+}
+
+.turn-averages-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 20px;
+}
+
+.turn-average-plot {
+    background: white;
+    border-radius: 8px;
+    padding: 15px;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    border: 1px solid #cce7ff;
+}
+
+.turn-average-plot h4 {
+    color: #1565c0;
+    margin: 0 0 15px 0;
+    font-size: 1.1em;
+    font-weight: 600;
+}
+
+/* Responsive design for cognitive map charts */
+@media (max-width: 768px) {
+    .cogmap-columns {
+        grid-template-columns: 1fr;
+    }
+    
+    .turn-averages-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .cognitive-map-charts,
+    .turn-averages-section {
+        margin: 15px 0;
+        padding: 15px;
+    }
+    
+    .three-plots-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Separate text and plots sections */
+.text-metrics-section {
+    margin-bottom: 20px;
+}
+
+.plots-section {
+    margin-top: 20px;
+}
+
+.single-plot {
+    margin: 20px 0;
+    text-align: center;
+}
+
+.plots-row {
+    margin: 30px 0;
+}
+
+.three-plots-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-top: 15px;
+}
+
+.plot-item {
+    text-align: center;
+    background: white;
+    border-radius: 8px;
+    padding: 15px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border: 1px solid #dee2e6;
+}
+
+.plot-image {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 """
 

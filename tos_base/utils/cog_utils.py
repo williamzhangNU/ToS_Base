@@ -18,7 +18,10 @@ def _evaluate_and_store_cogmap_logs(turn_log, response, cognitive_map_manager, e
     """Helper function to evaluate cognitive map response and store logs in turn_log"""
     cogmap_log = None
     cogmap_full_log = None
-    
+    if turn_log.get('is_exploration_phase'):
+        mode = "explore"
+    else:
+        mode = "evaluate"
     if response and turn_log.get('room_state') and turn_log.get('agent_state'):
         # Reconstruct Room and Agent states from turn log
         room_state = Room.from_dict(turn_log['room_state'])
@@ -37,7 +40,8 @@ def _evaluate_and_store_cogmap_logs(turn_log, response, cognitive_map_manager, e
             response,
             room_state,
             agent_state,
-            [obj.name for obj in room_state.all_objects]
+            [obj.name for obj in room_state.all_objects],
+            mode=mode
         )
 
     turn_log['cogmap_full_log'] = cogmap_full_log.to_dict() if cogmap_full_log else None
@@ -105,6 +109,12 @@ def evaluate_cognitive_maps_from_turnlogs(
             for turn_idx, turn_log in enumerate(turn_logs):
                 if turn_idx==0 or not turn_logs[turn_idx-1].get('info', {}).get('is_valid_action', False):
                     continue
+                messages = []
+                # Include all messages up to and including current turn
+                max_message_idx = min((turn_idx+1) * 2, len(env_messages))
+                for msg_idx in range(max_message_idx):
+                    msg = env_messages[msg_idx]
+                    messages.append(msg.copy())
                 # Check if cogmap response already exists in history
                 if turn_logs[turn_idx-1]['is_exploration_phase']:
                     target_turn_idx = turn_idx - 1
@@ -114,34 +124,17 @@ def evaluate_cognitive_maps_from_turnlogs(
                         # Also evaluate and store cognitive map logs for cached response
                         _evaluate_and_store_cogmap_logs(turn_logs[target_turn_idx], cached_response, cognitive_map_manager, env_config)
                         continue 
+                    assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
+                    messages[-2]["content"] = turn_log.get('user_message', '') + COGMAP_INSTRUCTION_SHORTER
                 # like false belief task
                 elif not turn_log['is_exploration_phase'] and turn_log.get('evaluation_log') and turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('action'):
                     target_turn_idx = turn_idx
+                    assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
+                    messages[-2]["content"] = re.sub(r'## Evaluation Question.*', '', turn_log.get('user_message', ''), flags=re.DOTALL) \
+                        + turn_log['evaluation_log']['evaluation_data']['action'] + COGMAP_INSTRUCTION_SHORTER
                 else:
                     continue
-                
-                # Build cumulative message history up to this turn from message_lists
-                # Each turn has 2 messages (user + assistant), so turn_idx * 2 gives us the message index
-                messages = []
-                
-                # Include all messages up to and including current turn
-                max_message_idx = min((turn_idx+1) * 2, len(env_messages))
-                for msg_idx in range(max_message_idx):
-                    msg = env_messages[msg_idx]
-                    messages.append(msg.copy())
-                
-                # Add cogmap prompt to the appropriate message
-                if turn_logs[turn_idx-1]['is_exploration_phase']:
-                    # Modify the second-to-last user message to include cogmap instruction
-                    if len(messages) >= 2:
-                        assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
-                        messages[-2]["content"] = turn_log.get('user_message', '') + COGMAP_INSTRUCTION_SHORTER
-                elif not turn_log['is_exploration_phase'] and turn_log.get('evaluation_log') and turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('action'):
-                    if len(messages) >= 2:
-                        assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
-                        messages[-2]["content"] = re.sub(r'## Evaluation Question.*', '', turn_log.get('user_message', ''), flags=re.DOTALL) \
-                            + turn_log['evaluation_log']['evaluation_data']['action'] + COGMAP_INSTRUCTION_SHORTER
-                    # Term action don't need cogmap evaluation
+             
                 messages.pop()
                 
                 # Add to batch

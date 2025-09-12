@@ -78,6 +78,55 @@ def create_cogmap_metrics_plot(
     return _fig_to_data_uri(fig)
 
 
+def create_cognitive_map_sample_plots(
+    cogmap_update_data: Dict[str, List[Optional[float]]], 
+    cogmap_full_data: Dict[str, List[Optional[float]]], 
+    sample_name: str
+) -> Dict[str, Optional[str]]:
+    """
+    Create 6 plots for a single sample: Global, Local, Room metrics for both update and full modes.
+    
+    Args:
+        cogmap_update_data: Dict with 'global', 'local', 'rooms' keys, each containing 
+                           Dict with 'dir', 'facing', 'pos', 'overall' metrics per turn
+        cogmap_full_data: Similar structure for full cognitive map
+        sample_name: Name of the sample for plot titles
+    
+    Returns:
+        Dict with 6 keys: 'global_update', 'local_update', 'rooms_update', 
+                         'global_full', 'local_full', 'rooms_full'
+        Each value is either a data URI string or None if no data available
+    """
+    results = {}
+    
+    # Define the three cognitive map levels
+    levels = ['global', 'local', 'rooms']
+    modes = [('update', cogmap_update_data), ('full', cogmap_full_data)]
+    
+    for level in levels:
+        for mode_name, data in modes:
+            key = f"{level}_{mode_name}"
+            
+            # Extract metrics for this level
+            level_data = data.get(level, {})
+            if not isinstance(level_data, dict):
+                results[key] = None
+                continue
+            
+            # Convert to the format expected by create_cogmap_metrics_plot
+            series = {}
+            for metric in ['dir', 'facing', 'pos', 'overall']:
+                series[metric] = level_data.get(metric, [])
+            
+            # Create the plot
+            title = f"{sample_name} - {level.title()} ({mode_name.title()})"
+            plot_uri = create_cogmap_metrics_plot(series, title)
+            results[key] = plot_uri
+    
+    return results
+
+
+
 def visualize_json(json_path: str, output_html: str, show_images: bool = True) -> str:
     # Local import to avoid circular dependency
     from .visualization import Visualization
