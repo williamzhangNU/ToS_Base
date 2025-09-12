@@ -72,11 +72,12 @@ class HistoryManager:
         return img_path
     
     def save(self) -> None:
-        with open(self.path, "w") as f:
-            json.dump({
-                "responses": self.responses,
-                "images": self.images
-            }, f, ensure_ascii=False, indent=2)
+        if not os.path.exists(self.cogmap_path):
+            with open(self.path, "w") as f:
+                json.dump({
+                    "responses": self.responses,
+                    "images": self.images
+                }, f, ensure_ascii=False, indent=2)
             
     def save_cogmap(self) -> None:
         """Save cognitive map responses to separate file"""

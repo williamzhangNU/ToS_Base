@@ -31,18 +31,19 @@ COGMAP_INSTRUCTION_SHORTER = """\
 
 Keep a concise multi-map JSON. Coordinate frames:
 
-- Global: origin [0,0] which is your initial position; +Y is your initial facing direction.
-- Local: **must include** `"origin":"agent"` and an `"objects"` dict. Each object's
+- global: origin [0,0] is your initial position; +Y is your initial facing direction.
+  should include all observed objects, gates, and `agent` (no `initial_pos`).
+- local: **must include** `"origin":"agent"` and an `"objects"` dict. Each object's
   position and facing are **relative to the agent** at the time of writing.
   Facings use `+x`, `-x`, `+y`, `-y` relative to the local frame.
-  Do **not** include the agent itself here.
-- Rooms: each room entry is keyed by room id and must include `"origin":"<gate_name>"` and an `"objects"` dict. 
+  Include current visible objects only and do **not** include the agent itself here.
+- rooms: each room entry is keyed by room id and must include `"origin":"<gate_name>"` and an `"objects"` dict. 
   The origin gate is the gate you first used to enter the room.
   All positions/facings are **relative to that origin gate**, with +Y pointing into that room. 
   Do **not** include the agent or the origin gate inside the room's `"objects"`.
   Also exclude initial room because it doesn't have an origin gate.
 
-- Gates (global): map `{gate_name: {"connects": [room_id_a, room_id_b]}}`.
+- gates (global): map `{gate_name: {"connects": [room_id_a, room_id_b]}}`.
 
 Fields:
 - `position`: `[x, y]` integers (relative to the section's origin).
@@ -50,12 +51,6 @@ Fields:
   - In `local` and `rooms`: one of `"+x" | "-x" | "+y" | "-y"` (relative facings).
   - In `global`: one of `"north" | "south" | "east" | "west"` (absolute cardinals).
 - `confidence`: `"high" | "medium" | "low"`.
-
-Content rules recap:
-- `global`: include all observed objects, gates, and `agent` (no `initial_pos`).
-- `local`: `origin:"agent"`, current visible objects only, **exclude** agent.
-- `rooms`: `origin:"<entry_gate>"`, objects of that room only, **exclude** agent and origin gate.
-- `gates`: only `"connects"` field.
 
 In your thinking (<think> ... </think>):
 1) Briefly reason about your cognitive map
@@ -200,11 +195,6 @@ class CognitiveMapTurnLog:
     gt_local_cog: Dict[str, Any] = field(default_factory=dict)
     gt_rooms_cog: Dict[str, Any] = field(default_factory=dict)
     gt_gates: Dict[str, Any] = field(default_factory=dict)
-    # Backward-compatible flat fields reflecting global metrics
-    dir_sim: float = 0.0
-    facing_sim: float = 0.0
-    pos_sim: float = 0.0
-    overall_sim: float = 0.0
 
     def to_dict(self):
         return {
@@ -219,11 +209,6 @@ class CognitiveMapTurnLog:
             "gt_local_cog": (self.gt_local_cog or {}),
             "gt_rooms_cog": (self.gt_rooms_cog or {}),
             "gt_gates": (self.gt_gates or {}),
-            # flat for backward-compatibility
-            "dir_sim": self.dir_sim,
-            "facing_sim": self.facing_sim,
-            "pos_sim": self.pos_sim,
-            "overall_sim": self.overall_sim,
             "consistency": self.consistency
         }
 
@@ -261,8 +246,8 @@ def _transform_baseroom(room: BaseRoom, anchor_pos: np.ndarray, anchor_ori: np.n
     for obj in room.objects:
         p = _transform_point(obj.pos, anchor_pos, anchor_ori)
         o = obj.ori
-        if obj.has_orientation:
-            o = _transform_ori(obj.ori, anchor_ori)
+        # if obj.has_orientation:
+        #     o = _transform_ori(obj.ori, anchor_ori)
         objects.append(Object(name=obj.name, pos=p, ori=o, has_orientation=obj.has_orientation))
     return BaseRoom(objects=objects, name=room.name)
 
@@ -427,10 +412,6 @@ class CognitiveMapManager:
             gt_local_cog = gt_local,     
             gt_rooms_cog = gt_rooms,
             gt_gates=gt_gates_dict,
-            dir_sim=global_m.dir,
-            facing_sim=global_m.facing,
-            pos_sim=global_m.pos,
-            overall_sim=global_m.overall,
             consistency=consistency_block
         )
         self.turn_logs.append(turn_log)
@@ -655,8 +636,7 @@ class CognitiveMapManager:
     def _build_gt_global_baseroom(self, gt_room: Room, gt_agent: Agent, observed_set: set[str]) -> BaseRoom:
         raw = self._baseroom_from_gt(gt_room, gt_agent)
         br = _transform_baseroom(raw, gt_agent.init_pos, gt_agent.init_ori)
-        gate_names = {g.name for g in gt_room.gates}
-        keep = set(observed_set) | gate_names | {"agent"}
+        keep = set(observed_set) | {"agent"}
         return self._filter_br_by_names(br, keep)
 
     def _build_gt_local_baseroom(self, gt_room: Room, gt_agent: Agent) -> BaseRoom:
@@ -737,7 +717,7 @@ class CognitiveMapManager:
         gt = {o.name: o for o in gt_room.objects}
         names = sorted(gt.keys())
         if len(names) < 2:
-            return 0.0
+            return 1.0
         bin_system = CardinalBinsAllo()
         tot = cor = 0.0
         for i in range(len(names)):
@@ -765,7 +745,7 @@ class CognitiveMapManager:
             tot += 1.0
             if p is not None and np.array_equal(p.ori, g.ori):
                 cor += 1.0
-        return cor / tot if tot else 0.0
+        return cor / tot if tot else 1.0
 
     def _calculate_pos_sim(self, pred_room: BaseRoom, gt_room: BaseRoom, allow_scale: bool = True) -> float:
         """Position similarity with optional scale alignment and coverage penalty.
@@ -783,7 +763,7 @@ class CognitiveMapManager:
         gt_names = sorted(gt.keys())
         matched = [n for n in gt_names if n in pred]
         if len(matched) == 0 or len(gt_names) == 0:
-            return 0.0
+            return 1.0
         P1 = np.array([pred[n].pos for n in matched], dtype=float)
         P2 = np.array([gt[n].pos for n in matched], dtype=float)
         if allow_scale:

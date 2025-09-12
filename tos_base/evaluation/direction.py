@@ -6,7 +6,7 @@ from .tasks import BaseEvaluationTask
 from ..core.relationship import (
     PairwiseRelationshipDiscrete,
     CardinalBinsAllo,
-    CardinalBinsEgo,
+    EgoFrontBins,
 )
 
 
@@ -141,7 +141,7 @@ class PovEvaluationTask(DirectionEvaluationTask):
         obj = self.room.objects[obj_idx]
         anchor = self.room.objects[anchor_idx]
 
-        rel = self._compute_discrete_rel(obj.pos, anchor.pos, CardinalBinsEgo(), anchor_ori=anchor.ori) # TODO change to EgoFrontBin
+        rel = self._compute_discrete_rel(obj.pos, anchor.pos, EgoFrontBins(), anchor_ori=anchor.ori) # TODO change to EgoFrontBin
         choices, idx = self.generate_choices(rel)
         return self._finalize(self.QUESTION_TEMPLATE_POV, obj.name, anchor.name, choices, idx)
 
