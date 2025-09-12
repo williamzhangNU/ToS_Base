@@ -87,6 +87,9 @@ class BaseAction(ABC):
             - For 90-degree field of view: objects within 45° left and right of orientation
             - For 180-degree field of view: objects within 90° left and right of orientation
         """
+        # same position means not visible
+        if np.allclose(from_obj.pos, to_obj.pos):
+            return False
         if field_of_view is None:
             field_of_view = BaseAction._field_of_view
         

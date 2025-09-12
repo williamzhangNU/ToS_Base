@@ -166,13 +166,10 @@ class SpatialEnvLogger:
         # Initialize result structure
         result = {
             "config_groups": dict(config_groups),
-            "exp_summary": {"overall_performance": {}, "group_performance": {}},
-            "eval_summary": {"overall_performance": {}, "group_performance": {}},
-            "cogmap_summary": {"overall_performance": {}, "group_performance": {}}
+            "exp_summary": {"group_performance": {}},
+            "eval_summary": {"group_performance": {}},
+            "cogmap_summary": {"group_performance": {}}
         }
-        
-        # Calculate performance metrics
-        all_exp_data, all_eval_data, all_cogmap_data = [], [], []
         
         for config_name, env_data_list in config_groups.items():
             result["config_groups"][config_name] = {"env_data": env_data_list}
@@ -183,19 +180,7 @@ class SpatialEnvLogger:
 
             result["exp_summary"]["group_performance"][config_name] = ExplorationManager.aggregate_group_performance(exp_summaries, env_data_list)
             result["eval_summary"]["group_performance"][config_name] = EvaluationManager.aggregate_group_performance(eval_summaries)
-            result["cogmap_summary"]["group_performance"][config_name] = CognitiveMapManager.aggregate_group_performance(cogmap_summaries)
-            
-            all_exp_data.extend(exp_summaries)
-            all_eval_data.extend(eval_summaries)
-            all_cogmap_data.extend(cogmap_summaries)
-
-        # Calculate overall performance
-        if all_exp_data:
-            result["exp_summary"]["overall_performance"] = ExplorationManager.aggregate_group_performance(all_exp_data)
-        if all_eval_data:
-            result["eval_summary"]["overall_performance"] = EvaluationManager.aggregate_group_performance(all_eval_data)
-        if all_cogmap_data:
-            result["cogmap_summary"]["overall_performance"] = CognitiveMapManager.aggregate_group_performance(all_cogmap_data)
+            result["cogmap_summary"]["group_performance"][config_name] = CognitiveMapManager.aggregate_group_performance(cogmap_summaries, env_data_list)
 
         return result
 
