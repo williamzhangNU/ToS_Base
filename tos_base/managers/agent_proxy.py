@@ -388,7 +388,7 @@ class ObserverAnalystAgentProxy(AgentProxy):
 
     def __init__(self, room: Room, agent: Agent, grid_size: int | None = None,
                  rel_threshold: int = 0, eval_samples: int = 30, delegate: str = 'oracle', max_observes: int = 16,
-                 metric: str = 'relations'):
+                 metric: str = 'positions'):
         super().__init__(room, agent)
         g = (max(self.room.mask.shape) if getattr(self.room, 'mask', None) is not None else 10)
         self.grid_size = int(g if grid_size is None else grid_size)
@@ -396,7 +396,7 @@ class ObserverAnalystAgentProxy(AgentProxy):
         self.eval_samples = int(eval_samples)
         self.delegate = (delegate or 'oracle').lower()
         self.max_observes = int(max_observes)
-        self.metric = (metric or 'relations').lower()
+        self.metric = (metric or 'positions').lower()
         self.solver: SpatialSolver | None = None
 
     # ---- step (a): reuse existing in-room observe logic ----
@@ -453,16 +453,20 @@ class ObserverAnalystAgentProxy(AgentProxy):
         observed = set(self.mgr.observed_items or set())
         assert set(self.nodes_by_room.get(rid, set())).issubset(observed)
         assert self.solver is not None
-        _, _, rel_sets, _ = self.solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
+        domain_sizes, _, rel_sets, _ = self.solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
         names = sorted(self.solver.solver.variables.keys())
         scores = []
-        for obj in names:
-            best = 0
-            for other in names:
-                if other == obj: continue
-                key = (obj, other) if (obj, other) in rel_sets else (other, obj)
-                best = max(best, len(rel_sets.get(key, set())))
-            scores.append((obj, best))
+        if self.metric == 'positions':
+            for obj in names:
+                scores.append((obj, int(domain_sizes.get(obj, 0))))
+        else:
+            for obj in names:
+                best = 0
+                for other in names:
+                    if other == obj: continue
+                    key = (obj, other) if (obj, other) in rel_sets else (other, obj)
+                    best = max(best, len(rel_sets.get(key, set())))
+                scores.append((obj, best))
         top_anchors = [o for o, _ in sorted(scores, key=lambda x: x[1], reverse=True)[:5]]
         anchors = [a for a in top_anchors if a in self.nodes_by_room.get(rid, set()) and a in observed]
 
@@ -516,7 +520,7 @@ class AnalystAgentProxy(AgentProxy):
 
     def __init__(self, room: Room, agent: Agent, grid_size: int | None = None,
                  max_queries: int = 16, rel_threshold: int = 0, eval_samples: int = 30,
-                 delegate: str = 'oracle', observer_delegate: str = 'oracle', metric: str = 'relations'):
+                 delegate: str = 'oracle', observer_delegate: str = 'oracle', metric: str = 'positions'):
         super().__init__(room, agent)
         g = (max(self.room.mask.shape) if getattr(self.room, 'mask', None) is not None else 10)
         self.solver = SpatialSolver([o.name for o in self.room.all_objects] + ['initial_pos'], grid_size=(g if grid_size is None else grid_size))
@@ -526,7 +530,7 @@ class AnalystAgentProxy(AgentProxy):
         self.eval_samples = int(eval_samples)
         self.delegate = (delegate or 'strategist').lower()
         self.observer_delegate = (observer_delegate or 'strategist').lower()
-        self.metric = (metric or 'relations').lower()
+        self.metric = (metric or 'positions').lower()
 
     def _ingest_observations(self) -> None:
         for i, t in enumerate(self.turns):
@@ -564,6 +568,7 @@ class AnalystAgentProxy(AgentProxy):
         q = 0
         while q < self.max_queries:
             _, total_positions, rel_sets, total_rels = self._current_metrics()
+            # print(f"total_rels: {total_rels}, total_positions: {total_positions}")
             total_metric = total_rels if self.metric != 'positions' else total_positions
             if total_metric <= self.rel_threshold:
                 break
@@ -572,6 +577,7 @@ class AnalystAgentProxy(AgentProxy):
                 break
             self._query_object(best_obj)
             q += 1
+        # print("finish global query loop")
 
     def _best_query(self, rel_sets: dict, total_metric: int) -> tuple:
         """Pick object with highest simulated relationship gain."""
@@ -640,9 +646,9 @@ def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = 
         'observer_analyst': ObserverAnalystAgentProxy,
     }
     if name == 'analyst':
-        return mapping['analyst'](room, agent, delegate=(delegate or 'oracle'), observer_delegate=(observer_delegate or 'oracle'), metric=(metric or 'relations'))
+        return mapping['analyst'](room, agent, delegate=(delegate or 'oracle'), observer_delegate=(observer_delegate or 'oracle'), metric=(metric or 'positions'))
     if name == 'observer_analyst':
-        return mapping['observer_analyst'](room, agent, delegate=(delegate or 'oracle'), metric=(metric or 'relations'))
+        return mapping['observer_analyst'](room, agent, delegate=(delegate or 'oracle'), metric=(metric or 'positions'))
     return mapping.get(name, OracleAgentProxy)(room, agent)
 
 
@@ -663,7 +669,7 @@ if __name__ == "__main__":
                 main=4
             )
             # RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
-            proxy = eval(proxy_name)(room, agent, **kwargs)
+            proxy = get_agent_proxy(proxy_name, room, agent, metric='relations', **kwargs)
             proxy.run()
             # print(proxy.to_text())
             summary = proxy.mgr.get_exp_summary()
@@ -676,7 +682,7 @@ if __name__ == "__main__":
 
 
 
-    action_counts, action_costs = multiple_runs(100, 'AnalystAgentProxy', delegate='observer_analyst', observer_delegate='strategist')
+    action_counts, action_costs = multiple_runs(100, proxy_name='analyst', delegate='observer_analyst', observer_delegate='strategist')
     # action_counts, action_costs = multiple_runs(100, 'AnalystAgentProxy', delegate='oracle')
 
     # Calculate average action counts per action type

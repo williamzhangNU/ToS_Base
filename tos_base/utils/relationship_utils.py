@@ -341,6 +341,7 @@ if __name__ == "__main__":
 
     # sector: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
     # ring: near=0, mid=1, slightly far=2, far=3
+    all_pairs = [(i, j) for i in range(8) for j in range(4)]
     # ax = rose_glyph_pretty(pairs=[(7, 1), (6, 1), (7, 2), (6, 2)], color="#E59E1B")
     # ax = rose_glyph_pretty(pairs=[(7, 2), (0, 1), (7, 1)], color="#E59E1B")
     # ax = rose_glyph_pretty(pairs=[(6, 1), (5, 2), (5, 1), (6, 2)], color="#E59E1B")
@@ -355,6 +356,6 @@ if __name__ == "__main__":
     # ax = rose_glyph_compass_style(pairs=[(4, 1)])
     # ax = rose_glyph_compass_style(pairs=[(5, 1), (5, 2), (6, 2)])
     # ax = rose_glyph_compass_style(pairs=[(6, 1), (6, 2), (7, 2)])
-    ax = rose_glyph_compass_style(pairs=[(7, 1)])
+    ax = rose_glyph_compass_style(pairs=all_pairs)
 
     plt.savefig("rose_glyph_pretty.png", transparent=True)

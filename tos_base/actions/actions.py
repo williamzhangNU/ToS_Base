@@ -460,7 +460,6 @@ class ActionSequence:
             f"2: Actions: [Observe()]\n" +
             f"3: Actions: [Move(table), Rotate(90), Query(table)]\n" +
             f"4: Actions: [Query(table)]\n" +
-            f"5: Actions: [QueryRel(table)]\n\n" +
             f"Invalid Examples:\n" +
             f"1 (no final action): Actions: [Move(table)]\n" +
             f"2 (more than one final action): Actions: [Observe(), Rotate(90), Observe()]\n" +
