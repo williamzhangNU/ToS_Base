@@ -21,6 +21,7 @@ class EvalTaskType(Enum):
     FALSE_BELIEF = ("false_belief", "FalseBeliefEvaluationTask")
     FWD_FOV = ("fwd_fov", "ForwardFOVEvaluationTask")
     BWD_NAV = ("bwd_nav", "BackwardNavEvaluationTask")
+    BWD_POV = ("bwd_pov", "BackwardPovEvaluationTask")
     
     def __init__(self, short_name: str, class_name: str):
         self.short_name = short_name
@@ -40,7 +41,7 @@ class EvalTaskType(Enum):
     def get_task_map(cls) -> Dict[str, 'Type[BaseEvaluationTask]']:
         """Get mapping from short names to task classes."""
         # Import here to avoid circular imports
-        from .direction import DirectionEvaluationTask, PovEvaluationTask
+        from .direction import DirectionEvaluationTask, PovEvaluationTask, BackwardPovEvaluationTask
         from .rotation import RotEvaluationTask, RotDualEvaluationTask
         from .e2a import E2AEvaluationTask
         from .localization import ForwardLocEvaluationTask, BackwardLocEvaluationTask
@@ -58,6 +59,7 @@ class EvalTaskType(Enum):
             cls.FALSE_BELIEF.short_name: FalseBeliefEvaluationTask,
             cls.FWD_FOV.short_name: ForwardFOVEvaluationTask,
             cls.BWD_NAV.short_name: BackwardNavEvaluationTask,
+            cls.BWD_POV.short_name: BackwardPovEvaluationTask,
         }
         return task_map
     
