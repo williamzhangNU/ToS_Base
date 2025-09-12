@@ -1,6 +1,6 @@
 """Localization task: infer your 2D coordinate from a new view."""
 
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Any
 import numpy as np
 
 from .tasks import BaseEvaluationTask
@@ -55,14 +55,14 @@ class BaseLocEvaluationTask(BaseEvaluationTask):
 
 
 class BackwardLocEvaluationTask(BaseLocEvaluationTask):
-    """Localize your own coordinate (x, y). TODO treat ... as origin, including orientation?"""
+    """Localize your own coordinate (x, y) and orientation."""
     ACTION_TEMPLATE = (
         "You change to a new location and facing direction, you observed:\n"
         "{observations}\n"
     )
     QUESTION_TEMPLATE = (
         "Treat {origin_name} as the origin (0, 0), and your starting facing direction is north.\n"
-        "What is your current 2D coordinate (x, y)?\n\n"
+        "What is your current 2D coordinate (x, y) and facing direction?\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
@@ -73,9 +73,11 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
         origin_obj = self.np_random.choice(hidden_objs)
         observations = self._take_observations()
 
-        # correct answer: your coord relative to origin
+        # correct answer: your coord relative to origin and orientation
         origin_pos = tuple(origin_obj.pos)
         correct_coord = (int(self.agent.pos[0]) - origin_pos[0], int(self.agent.pos[1]) - origin_pos[1])
+        correct_orientation = _ori_to_name(tuple(self.agent.ori))
+        correct_answer = (correct_coord, correct_orientation)
         # store ctx for choices
         self._ctx = {
             'rid': int(rid),
@@ -83,7 +85,7 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
             'visible_names': [o.name for o in visible_objs],
             'agent_ori': tuple(self.agent.ori),
         }
-        choices, correct_idx = self.generate_choices(correct_coord)
+        choices, correct_idx = self.generate_choices(correct_answer)
         choices_text, correct_label = self.format_choices(choices, correct_idx)
         self.eval_data.action = self.ACTION_TEMPLATE.format(
             observations=observations
@@ -97,12 +99,14 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
         self.eval_data.reasoning = self._generate_reasoning()
         return self.eval_data.question
 
-    def generate_choices(self, correct_coord: Tuple[int, int]) -> Tuple[List[str], int]:
+    def generate_choices(self, correct_answer: Tuple[Tuple[int, int], str]) -> Tuple[List[str], int]:
         rid = int(self._ctx['rid'])
         origin_pos = tuple(self._ctx['origin_pos'])
         agent_ori = tuple(self._ctx['agent_ori'])
         visible_names = list(self._ctx['visible_names'])
 
+        correct_coord, correct_ori_name = correct_answer
+        
         # true discrete rels: object -> agent (from agent orientation)
         true_rels = {}
         for name in visible_names:
@@ -110,16 +114,23 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
             rel = PairwiseRelationshipDiscrete.relationship(tuple(obj.pos), tuple(self.agent.pos), anchor_ori=agent_ori)
             true_rels[name] = (int(rel.direction.bin_id), int(rel.dist.bin_id))
 
-        def fmt(p: Tuple[int, int]) -> str:
-            return f"({int(p[0] - origin_pos[0])}, {int(p[1] - origin_pos[1])})"
+        def fmt_choice(coord: Tuple[int, int], ori_name: str) -> str:
+            return f"({int(coord[0])}, {int(coord[1])}) facing {ori_name}"
 
-        correct_text = f"({int(correct_coord[0])}, {int(correct_coord[1])})"
+        correct_text = fmt_choice(correct_coord, correct_ori_name)
         out, seen = [correct_text], {correct_text}
+        
+        orientations = ["north", "east", "south", "west"]
+        ori_vectors = [(0, 1), (1, 0), (0, -1), (-1, 0)]
 
-        # sample wrong points inside the room until 3 satisfy the mismatch criterion
+        # Random candidate selection with shuffled coordinates and orientations
         xmin, xmax, ymin, ymax = self.room.get_boundary(room_id=rid)
         candidates = [(x, y) for x in range(xmin, xmax + 1) for y in range(ymin, ymax + 1)]
         self.np_random.shuffle(candidates)
+        self.np_random.shuffle(orientations)  # Also shuffle orientations
+        
+        used_coords = set()  # Track used coordinates to ensure diversity
+        
         for x, y in candidates:
             if len(out) >= 4:
                 break
@@ -127,30 +138,48 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
                 continue
             if self.room.get_cell_info(x, y)['object_name']:
                 continue
-            # compare discrete rels
+                
+            wrong_coord = (int(x - origin_pos[0]), int(y - origin_pos[1]))
+            
+            # Skip if we already used this coordinate
+            if wrong_coord in used_coords or wrong_coord == correct_coord:
+                continue
+            
+            # Pick a random orientation for this position
+            ori_idx = self.np_random.integers(0, 4)
+            ori_vec, ori_name = ori_vectors[ori_idx], orientations[ori_idx]
+            
+            # Skip if this matches the correct answer
+            if wrong_coord == correct_coord and ori_name == correct_ori_name:
+                continue
+            
+            # Check if relationships would mismatch with this wrong pose (inconsistent observations)
             mismatch = False
             for name in visible_names:
                 obj = self.room.get_object_by_name(name)
-                rel = PairwiseRelationshipDiscrete.relationship(tuple(obj.pos), (int(x), int(y)), anchor_ori=agent_ori)
+                rel = PairwiseRelationshipDiscrete.relationship(tuple(obj.pos), (int(x), int(y)), anchor_ori=ori_vec)
                 pair = (int(rel.direction.bin_id), int(rel.dist.bin_id))
                 if pair != true_rels[name]:
                     mismatch = True
                     break
+            
+            # Only add if observations would be inconsistent (wrong choice)
             if mismatch:
-                s = fmt((x, y))
-                if s not in seen:
-                    out.append(s); seen.add(s)
+                choice_text = fmt_choice(wrong_coord, ori_name)
+                if choice_text not in seen:
+                    out.append(choice_text); seen.add(choice_text)
+                    used_coords.add(wrong_coord)  # Mark this coordinate as used
 
-        # if still not enough (degenerate rooms), fill random unique points
+        # If still not enough choices, add some with correct position but wrong orientation
         if len(out) < 4:
-            for x, y in candidates:
+            for ori_name in orientations:
                 if len(out) >= 4:
                     break
-                s = fmt((x, y))
-                if s not in seen and (x, y) != tuple(self.agent.pos):
-                    out.append(s); seen.add(s)
+                if ori_name != correct_ori_name:
+                    choice_text = fmt_choice(correct_coord, ori_name)
+                    if choice_text not in seen:
+                        out.append(choice_text); seen.add(choice_text)
 
-        self.np_random.shuffle(out)
         return out, out.index(correct_text)
 
 
