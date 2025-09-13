@@ -165,7 +165,7 @@ class PovEvaluationTask(DirectionEvaluationTask):
             anchor, target_obj = self.room.objects[anchor_idx], self.room.objects[target_idx]
             return target_obj, anchor, None, self.QUESTION_TEMPLATE_POV, True
 
-    def generate_choices_pov_fallback(self):
+    def generate_choices(self):
         """Generate choices for POV fallback case (beyond-fov)."""
         dir_labels = EgoFrontBins().LABELS
         beyond_fov_label = 'beyond-fov'
@@ -190,7 +190,7 @@ class PovEvaluationTask(DirectionEvaluationTask):
         target_obj, anchor, rel, template, is_fallback = self.generate_question_data()
         
         if is_fallback:
-            choices, idx = self.generate_choices_pov_fallback()
+            choices, idx = self.generate_choices()
         else:
             choices, idx = self.generate_choices(rel)
         
