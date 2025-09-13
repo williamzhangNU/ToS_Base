@@ -43,32 +43,41 @@ class DirectionEvaluationTask(BaseEvaluationTask):
             bin_system=bin_system
         )
 
+    def _build_anchor_visible_dict(self):
+        """Build dict mapping each oriented object to its visible objects."""
+        anchor_visible = {}
+        for i, anchor in enumerate(self.room.objects):
+            if anchor.has_orientation:
+                visible_objects = []
+                for j, target in enumerate(self.room.objects):
+                    if i != j and BaseAction._is_visible(anchor, target):
+                        visible_objects.append((j, target))
+                if visible_objects:
+                    anchor_visible[i] = visible_objects
+        return anchor_visible
+
     # ---------- wrong-option generators ----------
-    def _gen_hard_options(self, rel) -> List[str]:
-        """Small, single-axis mistakes (adjacent dir or adjacent distance)."""
+    def _gen_wrong_options(self, rel) -> List[str]:
+        """Generate wrong options: single-axis mistakes and coupled errors."""
         dir_labels, dist_labels, d_idx, s_idx = self._labels(rel)
         out = []
-        # same dir, adjacent distance
+        
+        # Single-axis mistakes: same dir, adjacent distance
         for sk in [-2, -2]:
             s = self._fmt(dir_labels[d_idx], dist_labels[self._clamp(s_idx + sk, len(dist_labels))])
             out.append(s)
-        # same distance, adjacent dir
+        
+        # Single-axis mistakes: same distance, adjacent dir
         for dk in [2, -2]:
             new_d_idx = self._wrap(d_idx + dk, len(dir_labels))
-            # POV tasks avoid beyond-fov (first and last indices)
             if self.task_type != "pov" or new_d_idx not in (0, len(dir_labels) - 1):
                 s = self._fmt(dir_labels[new_d_idx], dist_labels[s_idx])
                 out.append(s)
-        return out
-
-    def _gen_challenging_options(self, rel) -> List[str]:
-        """Coupled small errors (dir ±2 and dist ±2)."""
-        dir_labels, dist_labels, d_idx, s_idx = self._labels(rel)
-        out = []
-        for dk in [2, -2]:
-            for sk in [-2, -2]:
+        
+        # Coupled errors: dir ±1 and dist ±1
+        for dk in [1, -1]:
+            for sk in [1, -1]:
                 new_d_idx = self._wrap(d_idx + dk, len(dir_labels))
-                # POV tasks avoid beyond-fov (first and last indices)
                 if self.task_type != "pov" or new_d_idx not in (0, len(dir_labels) - 1):
                     s = self._fmt(dir_labels[new_d_idx],
                                   dist_labels[self._clamp(s_idx + sk, len(dist_labels))])
@@ -84,7 +93,7 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         choices, seen = [correct], {correct}
 
         # curated candidates
-        wrong_options = self._gen_hard_options(rel) + self._gen_challenging_options(rel)
+        wrong_options = self._gen_wrong_options(rel)
         self.np_random.shuffle(wrong_options)
         for s in wrong_options:
             if len(choices) == 4: break
@@ -114,13 +123,18 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         return self.eval_data.question
 
     # ---------- allocentric ----------
-    def generate_question(self) -> str:
+    def generate_question_data(self):
+        """Generate question setup data (objects, relationship, etc.)."""
         n = len(self.room.objects)
         i, j = self.np_random.choice(n, size=2, replace=False)
         obj1, obj2 = self.room.objects[i], self.room.objects[j]
         rel = self._compute_discrete_rel(obj1.pos, obj2.pos, CardinalBinsAllo())
+        return obj1, obj2, rel, self.QUESTION_TEMPLATE_DIR
+
+    def generate_question(self) -> str:
+        obj1, obj2, rel, template = self.generate_question_data()
         choices, idx = self.generate_choices(rel)
-        return self._finalize(self.QUESTION_TEMPLATE_DIR, obj1.name, obj2.name, choices, idx)
+        return self._finalize(template, obj1.name, obj2.name, choices, idx)
 
 
 class PovEvaluationTask(DirectionEvaluationTask):
@@ -133,30 +147,54 @@ class PovEvaluationTask(DirectionEvaluationTask):
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
+    def generate_question_data(self):
+        """Generate POV question setup data."""
+        anchor_visible = self._build_anchor_visible_dict()
+        
+        if anchor_visible:
+            # Normal case: select from anchors that have visible objects
+            anchor_idx = int(self.np_random.choice(list(anchor_visible.keys())))
+            anchor = self.room.objects[anchor_idx]
+            target_idx, target_obj = self.np_random.choice(anchor_visible[anchor_idx])
+            rel = self._compute_discrete_rel(target_obj.pos, anchor.pos, EgoFrontBins(), anchor_ori=anchor.ori)
+            return target_obj, anchor, rel, self.QUESTION_TEMPLATE_POV, False
+        else:
+            # Fallback: no objects have visible targets, use beyond-fov
+            n = len(self.room.objects)
+            anchor_idx, target_idx = self.np_random.choice(n, size=2, replace=False)
+            anchor, target_obj = self.room.objects[anchor_idx], self.room.objects[target_idx]
+            return target_obj, anchor, None, self.QUESTION_TEMPLATE_POV, True
+
+    def generate_choices_pov_fallback(self):
+        """Generate choices for POV fallback case (beyond-fov)."""
+        dir_labels = EgoFrontBins().LABELS
+        beyond_fov_label = 'beyond-fov'
+        dist_labels = ['near']  # Use any distance label
+        correct = self._fmt(beyond_fov_label, dist_labels[0])
+        
+        # Generate choices with beyond-fov as correct, others not beyond-fov
+        choices = [correct]
+        seen = {correct}
+        for label in dir_labels:
+            if len(choices) == 4: break
+            if label != beyond_fov_label:
+                choice = self._fmt(label, dist_labels[0])
+                if choice not in seen:
+                    choices.append(choice)
+                    seen.add(choice)
+        
+        self.np_random.shuffle(choices)
+        return choices, choices.index(correct)
+
     def generate_question(self) -> str:
-        oriented_idxs = [i for i, o in enumerate(self.room.objects) if o.has_orientation]
-        assert oriented_idxs, "No oriented objects for POV"
+        target_obj, anchor, rel, template, is_fallback = self.generate_question_data()
         
-        # Select an anchor object (the perspective we're taking)
-        anchor_idx = int(self.np_random.choice(oriented_idxs))
-        anchor = self.room.objects[anchor_idx]
+        if is_fallback:
+            choices, idx = self.generate_choices_pov_fallback()
+        else:
+            choices, idx = self.generate_choices(rel)
         
-        # Find target objects that are visible from the anchor's perspective
-        visible_target_idxs = [i for i in range(len(self.room.objects)) 
-                              if i != anchor_idx and BaseAction._is_visible(anchor, self.room.objects[i])]
-        assert visible_target_idxs, "No objects visible from anchor for POV"
-
-        # Select a target object from those visible to the anchor
-        target_idx = int(self.np_random.choice(visible_target_idxs))
-        target_obj = self.room.objects[target_idx]
-
-        rel = self._compute_discrete_rel(target_obj.pos, anchor.pos, EgoFrontBins(), anchor_ori=anchor.ori) # TODO change to EgoFrontBin
-        choices, idx = self.generate_choices(rel)
-        return self._finalize(self.QUESTION_TEMPLATE_POV, target_obj.name, anchor.name, choices, idx)
-
-    def _generate_ego_choices(self, rel) -> Tuple[List[str], int]:
-        # Deprecated numeric POV generator. Use discrete bins instead.
-        return self.generate_choices(rel)
+        return self._finalize(template, target_obj.name, anchor.name, choices, idx)
 
 
 class BackwardPovEvaluationTask(DirectionEvaluationTask):
@@ -170,75 +208,69 @@ class BackwardPovEvaluationTask(DirectionEvaluationTask):
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
 
-    def generate_question(self) -> str:
-        oriented_idxs = [i for i, o in enumerate(self.room.objects) if o.has_orientation]
-        assert oriented_idxs, "No oriented objects for backward POV"
+    def generate_question_data(self):
+        """Generate backward POV question setup data."""
+        anchor_visible = self._build_anchor_visible_dict()
         
-        # Find target objects that are visible from at least one oriented object
-        valid_target_idxs = []
-        for target_idx in range(len(self.room.objects)):
-            # Check if any oriented object can see this target
-            visible_from_oriented = any(
-                oriented_idx != target_idx and 
-                BaseAction._is_visible(self.room.objects[oriented_idx], self.room.objects[target_idx])
-                for oriented_idx in oriented_idxs
-            )
-            if visible_from_oriented:
-                valid_target_idxs.append(target_idx)
+        if anchor_visible:
+            # Normal case: select a target that's visible from some anchor
+            anchor_idx = int(self.np_random.choice(list(anchor_visible.keys())))
+            correct_anchor = self.room.objects[anchor_idx]
+            target_idx, target_obj = self.np_random.choice(anchor_visible[anchor_idx])
+            
+            # Compute spatial relationship from correct anchor's perspective
+            rel = self._compute_discrete_rel(target_obj.pos, correct_anchor.pos, EgoFrontBins(), anchor_ori=correct_anchor.ori)
+            spatial_relationship = self._fmt(rel.direction.bin_label, rel.dist.bin_label)
+            
+            return target_obj, correct_anchor, spatial_relationship, anchor_idx, False
+        else:
+            # Fallback: no visible pairs, generate random relationship with "none" as correct answer
+            n = len(self.room.objects)
+            target_idx, dummy_anchor_idx = self.np_random.choice(n, size=2, replace=False)
+            target_obj = self.room.objects[target_idx]
+            spatial_relationship = "front, near"  # Random relationship
+            
+            return target_obj, None, spatial_relationship, -1, True
+
+    def generate_choices(self, target_obj, correct_anchor, anchor_idx, is_fallback):
+        """Generate choices for backward POV task."""
+        if is_fallback:
+            # Correct answer is "none" since no object can see the target
+            choices = ["none"]
+            seen = {"none"}
+            
+            # Add some object names as wrong choices
+            for obj in self.room.objects:
+                if len(choices) == 4: break
+                if obj.name not in seen and obj.name != target_obj.name:
+                    choices.append(obj.name)
+                    seen.add(obj.name)
+        else:
+            # Generate choices: correct anchor + wrong anchors (that can't see target)
+            choices = [correct_anchor.name]
+            seen = {correct_anchor.name}
+            
+            # Add oriented objects that cannot see the target as wrong choices
+            for i, obj in enumerate(self.room.objects):
+                if len(choices) == 4: break
+                if (obj.has_orientation and i != anchor_idx and obj.name not in seen and
+                    not BaseAction._is_visible(obj, target_obj)):
+                    choices.append(obj.name)
+                    seen.add(obj.name)
         
-        assert valid_target_idxs, "No target objects are visible from any oriented objects"
-        
-        # Select a target object that has at least one oriented object that can see it
-        target_idx = int(self.np_random.choice(valid_target_idxs))
-        target_obj = self.room.objects[target_idx]
-        
-        # Find oriented objects that can see the target object (potential anchors)
-        visible_anchor_idxs = [i for i in oriented_idxs 
-                              if i != target_idx and BaseAction._is_visible(self.room.objects[i], target_obj)]
-        
-        assert visible_anchor_idxs, "No oriented objects can see the target for backward POV"
-        
-        # Select the actual anchor (correct answer)
-        correct_anchor_idx = int(self.np_random.choice(visible_anchor_idxs))
-        correct_anchor = self.room.objects[correct_anchor_idx]
-        
-        # Compute the spatial relationship from the correct anchor's perspective
-        rel = self._compute_discrete_rel(target_obj.pos, correct_anchor.pos, EgoFrontBins(), anchor_ori=correct_anchor.ori)
-        spatial_relationship = self._fmt(rel.direction.bin_label, rel.dist.bin_label)
-        
-        # Generate choices (potential anchor objects)
-        choices = [correct_anchor.name]
-        seen = {correct_anchor.name}
-        
-        # Add wrong choices from other oriented objects
-        wrong_candidates = [self.room.objects[i].name for i in oriented_idxs 
-                           if i != correct_anchor_idx and self.room.objects[i].name not in seen]
-        self.np_random.shuffle(wrong_candidates)
-        
-        for name in wrong_candidates:
-            if len(choices) == 4:
-                break
-            if name not in seen:
-                choices.append(name)
-                seen.add(name)
-        
-        # Pad with any remaining objects if needed
-        remaining_objects = [obj.name for obj in self.room.objects 
-                           if obj.name not in seen and obj.name != target_obj.name]
-        self.np_random.shuffle(remaining_objects)
-        
-        for name in remaining_objects:
-            if len(choices) == 4:
-                break
-            choices.append(name)
-            seen.add(name)
-        
-        # Ensure we have at least 2 choices
+        # Pad with dummy names if needed
         while len(choices) < 2:
             choices.append(f"object_{len(choices)}")
         
         self.np_random.shuffle(choices)
-        correct_idx = choices.index(correct_anchor.name)
+        correct_name = correct_anchor.name if not is_fallback else "none"
+        correct_idx = choices.index(correct_name)
+        
+        return choices, correct_idx
+
+    def generate_question(self) -> str:
+        target_obj, correct_anchor, spatial_relationship, anchor_idx, is_fallback = self.generate_question_data()
+        choices, correct_idx = self.generate_choices(target_obj, correct_anchor, anchor_idx, is_fallback)
         
         # Format the question
         choices_text, correct_label = self.format_choices(choices, correct_idx)

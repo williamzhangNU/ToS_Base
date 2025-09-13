@@ -49,6 +49,10 @@ class BaseLocEvaluationTask(BaseEvaluationTask):
                 in_room = [o for o in self.room.objects if int(o.room_id) == rid]
                 vis = [o for o in in_room if BaseAction._is_visible(tmp, o) and not np.allclose(o.pos, tmp.pos)]
                 hid = [o for o in in_room if o not in vis and not np.allclose(o.pos, tmp.pos)]
+                # Filter to objects within distance 5 of tmp position
+                nearby_hid = [o for o in hid if np.linalg.norm(o.pos - tmp.pos) <= 5]
+                if nearby_hid:
+                    hid = nearby_hid
                 if len(vis) >= 1 and hid:
                     return pos, ori, rid, vis, hid
         raise ValueError("No valid pose found")
@@ -57,7 +61,7 @@ class BaseLocEvaluationTask(BaseEvaluationTask):
 class BackwardLocEvaluationTask(BaseLocEvaluationTask):
     """Localize your own coordinate (x, y) and orientation."""
     ACTION_TEMPLATE = (
-        "You change to a new location and facing direction, you observed:\n"
+        "You change to a new location and facing direction\n"
         "{observations}\n"
     )
     QUESTION_TEMPLATE = (
