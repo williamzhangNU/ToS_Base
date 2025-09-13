@@ -102,8 +102,8 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
 
-    task_name = 'rot'
-    for seed in tqdm(range(0, 2000)):
+    task_name = 'bwd_pov'
+    for seed in tqdm(range(1, 2)):
         np_random = np.random.default_rng(seed)
         room, agent = RoomGenerator.generate_room(
             room_size=(15, 15),
@@ -113,8 +113,8 @@ if __name__ == "__main__":
             level=0,
             main=12,
         )
+        print(f'room: {room}')
+        print(f'agent: {agent}')
+        RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
         task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
-        # print(f'room: {room}')
-        # print(f'agent: {agent}')
-        # print(task.generate_question(), task.answer)
-        # RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
+        print(task.generate_question(), task.answer)
