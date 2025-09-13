@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 import copy
 from .html_templates import HTML_TEMPLATE, CSS_STYLES, JAVASCRIPT_CODE
 from ragen.env.spatial.Base.tos_base.utils.utils import parse_llm_response
-from .charts import create_infogain_plot, create_cogmap_metrics_plot, create_cognitive_map_sample_plots
+from .charts import create_infogain_plot, create_cogmap_metrics_plot
 
 
 
@@ -139,61 +139,58 @@ class HTMLGenerator:
             
             # Plots section (separate from text)
             f.write("<div class='plots-section'>\n")
-            
+
+            # Get plot data
+            infogain_plot = None
+            cogmap_update_plot = None
+            cogmap_full_plot = None
+
             # Exploration infogain plot
             if self.exp_summary.get("group_performance", {}).get(gname):
                 exp_group = self.exp_summary["group_performance"][gname]
                 infogain_per_turn = exp_group.get("infogain_per_turn", [])
                 if infogain_per_turn:
-                    plot_src = create_infogain_plot(infogain_per_turn, gname)
-                    if plot_src:
-                        f.write("<div class='single-plot'>")
-                        f.write("<h5>Information Gain per Turn</h5>")
-                        f.write(f"<img src='{plot_src}' alt='Information Gain per Turn' class='plot-image'>")
-                        f.write("</div>")
-            
-            # Cognitive map plots
+                    infogain_plot = create_infogain_plot(infogain_per_turn, gname)
+
+            # Cognitive map plots (only global now)
             if self.cogmap_summary.get("group_performance", {}).get(gname):
                 cogmap_group = self.cogmap_summary["group_performance"][gname]
                 update_data = cogmap_group.get("cogmap_update_per_turn", {})
                 full_data = cogmap_group.get("cogmap_full_per_turn", {})
-                
-                # Update mode plots - three in a row
-                if update_data and any(any(level_data.values()) for level_data in update_data.values()):
-                    f.write("<div class='plots-row'>")
-                    f.write("<h5>Cognitive Map (Update) - Turn Averages</h5>")
-                    f.write("<div class='three-plots-grid'>")
-                    for level in ['global', 'local', 'rooms']:
-                        level_data = update_data.get(level, {})
-                        if level_data and any(level_data.values()):
-                            title = f"{gname} - {level.title()} (Update)"
-                            plot_uri = create_cogmap_metrics_plot(level_data, title)
-                            if plot_uri:
-                                f.write(f"<div class='plot-item'>")
-                                f.write(f"<h6>{level.title()}</h6>")
-                                f.write(f"<img src='{plot_uri}' alt='{level.title()} Update Turn Averages' class='plot-image'>")
-                                f.write("</div>")
+
+                # Update mode plot (global only)
+                if update_data and update_data.get("global") and any(update_data["global"].values()):
+                    global_data = update_data.get("global", {})
+                    title = f"{gname} - Global (Update)"
+                    cogmap_update_plot = create_cogmap_metrics_plot(global_data, title)
+
+                # Full mode plot (global only)
+                if full_data and full_data.get("global") and any(full_data["global"].values()):
+                    global_data = full_data.get("global", {})
+                    title = f"{gname} - Global (Full)"
+                    cogmap_full_plot = create_cogmap_metrics_plot(global_data, title)
+
+            # Display plots in a single row (up to 3 plots)
+            available_plots = []
+            if infogain_plot:
+                available_plots.append(("Information Gain per Turn", infogain_plot, "Information Gain per Turn"))
+            if cogmap_update_plot:
+                available_plots.append(("Cognitive Map (Update)", cogmap_update_plot, "Cognitive Map Update Turn Averages"))
+            if cogmap_full_plot:
+                available_plots.append(("Cognitive Map (Full)", cogmap_full_plot, "Cognitive Map Full Turn Averages"))
+
+            if available_plots:
+                f.write("<div class='plots-row'>")
+                f.write("<h5>Performance Charts</h5>")
+                f.write("<div class='three-plots-grid'>")
+                for title, plot_uri, alt_text in available_plots:
+                    f.write(f"<div class='plot-item'>")
+                    f.write(f"<h6>{title}</h6>")
+                    f.write(f"<img src='{plot_uri}' alt='{alt_text}' class='plot-image'>")
                     f.write("</div>")
-                    f.write("</div>")
-                
-                # Full mode plots - three in a row
-                if full_data and any(any(level_data.values()) for level_data in full_data.values()):
-                    f.write("<div class='plots-row'>")
-                    f.write("<h5>Cognitive Map (Full) - Turn Averages</h5>")
-                    f.write("<div class='three-plots-grid'>")
-                    for level in ['global', 'local', 'rooms']:
-                        level_data = full_data.get(level, {})
-                        if level_data and any(level_data.values()):
-                            title = f"{gname} - {level.title()} (Full)"
-                            plot_uri = create_cogmap_metrics_plot(level_data, title)
-                            if plot_uri:
-                                f.write(f"<div class='plot-item'>")
-                                f.write(f"<h6>{level.title()}</h6>")
-                                f.write(f"<img src='{plot_uri}' alt='{level.title()} Full Turn Averages' class='plot-image'>")
-                                f.write("</div>")
-                    f.write("</div>")
-                    f.write("</div>")
-            
+                f.write("</div>")
+                f.write("</div>")
+
             f.write("</div>\n")  # End plots-section
             f.write("</div>\n")  # End config-summary
         
@@ -225,100 +222,74 @@ class HTMLGenerator:
         f.write("</ul>\n</section>\n")
 
     def generate_cognitive_map_charts(self, f, entry: Dict, sample_name: str) -> None:
-        """Generate cognitive map charts for a sample"""
+        """Generate cognitive map charts for a sample - only global level"""
         # Extract cognitive map data from environment turn logs
         env_turn_logs = entry.get("env_turn_logs", [])
-        
-        # Prepare data structures for update and full cognitive maps
-        cogmap_update_data = {"global": {"dir": [], "facing": [], "pos": [], "overall": []},
-                             "local": {"dir": [], "facing": [], "pos": [], "overall": []},
-                             "rooms": {"dir": [], "facing": [], "pos": [], "overall": []}}
-        
-        cogmap_full_data = {"global": {"dir": [], "facing": [], "pos": [], "overall": []},
-                           "local": {"dir": [], "facing": [], "pos": [], "overall": []},
-                           "rooms": {"dir": [], "facing": [], "pos": [], "overall": []}}
-        
-        # Extract metrics from each turn
+
+        # Prepare data structures for global cognitive maps only
+        cogmap_update_data = {"dir": [], "facing": [], "pos": [], "overall": []}
+        cogmap_full_data = {"dir": [], "facing": [], "pos": [], "overall": []}
+
+        # Extract metrics from each turn (global only)
         for turn_log in env_turn_logs:
             if turn_log['is_exploration_phase']:
-                # Extract update (cogmap_log) data
+                # Extract update (cogmap_log) data - global only
                 cogmap_log = turn_log.get('cogmap_log', {})
-                for level in ['global', 'local', 'rooms']:
-                    if cogmap_log:
-                        level_data = cogmap_log.get(level, {})
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            value = level_data.get(metric)
-                            # If value is None or missing, set to 0
-                            cogmap_update_data[level][metric].append(0.0 if value is None else value)
-                    else:
-                        # If no cogmap_log, fill with zeros
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            cogmap_update_data[level][metric].append(0.0)
-                
-                # Extract full (cogmap_full_log) data
+                if cogmap_log:
+                    global_data = cogmap_log.get('global', {})
+                    for metric in ['dir', 'facing', 'pos', 'overall']:
+                        value = global_data.get(metric)
+                        cogmap_update_data[metric].append(0.0 if value is None else value)
+                else:
+                    # If no cogmap_log, fill with zeros
+                    for metric in ['dir', 'facing', 'pos', 'overall']:
+                        cogmap_update_data[metric].append(0.0)
+
+                # Extract full (cogmap_full_log) data - global only
                 cogmap_full_log = turn_log.get('cogmap_full_log', {})
-                for level in ['global', 'local', 'rooms']:
-                    if cogmap_full_log:
-                        level_data = cogmap_full_log.get(level, {})
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            value = level_data.get(metric)
-                            # If value is None or missing, set to 0
-                            cogmap_full_data[level][metric].append(0.0 if value is None else value)
-                    else:
-                        # If no cogmap_full_log, fill with zeros
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            cogmap_full_data[level][metric].append(0.0)
-        
-        # Generate plots using the chart function
-        plots = create_cognitive_map_sample_plots(cogmap_update_data, cogmap_full_data, sample_name)
-        
-        # Display the plots in a grid layout
-        if any(plots.values()):
+                if cogmap_full_log:
+                    global_data = cogmap_full_log.get('global', {})
+                    for metric in ['dir', 'facing', 'pos', 'overall']:
+                        value = global_data.get(metric)
+                        cogmap_full_data[metric].append(0.0 if value is None else value)
+                else:
+                    # If no cogmap_full_log, fill with zeros
+                    for metric in ['dir', 'facing', 'pos', 'overall']:
+                        cogmap_full_data[metric].append(0.0)
+
+        # Generate plots for global level only
+        update_plot = None
+        full_plot = None
+
+        if any(cogmap_update_data.values()):
+            title = f"{sample_name} - Global (Update)"
+            update_plot = create_cogmap_metrics_plot(cogmap_update_data, title)
+
+        if any(cogmap_full_data.values()):
+            title = f"{sample_name} - Global (Full)"
+            full_plot = create_cogmap_metrics_plot(cogmap_full_data, title)
+
+        # Display the plots in horizontal layout
+        if update_plot or full_plot:
             f.write("<div class='cognitive-map-charts'>\n")
-            f.write("<h3>🧠 Cognitive Map Metrics</h3>\n")
-            f.write("<div class='cogmap-grid'>\n")
-            
-            # Row 1: Update mode
-            f.write("<div class='cogmap-row'>\n")
-            f.write("<h4>Cognitive Map (Update)</h4>\n")
-            f.write("<div class='cogmap-columns'>\n")
-            for level in ['global', 'local', 'rooms']:
-                key = f"{level}_update"
-                plot_uri = plots.get(key)
-                if plot_uri:
-                    f.write(f"<div class='cogmap-column'>\n")
-                    f.write(f"<h5>{level.title()}</h5>\n")
-                    f.write(f"<img src='{plot_uri}' alt='{level.title()} Update Metrics' class='cogmap-plot'>\n")
-                    f.write("</div>\n")
-                else:
-                    f.write(f"<div class='cogmap-column empty'>\n")
-                    f.write(f"<h5>{level.title()}</h5>\n")
-                    f.write("<p class='no-data'>No data available</p>\n")
-                    f.write("</div>\n")
-            f.write("</div>\n")  # End cogmap-columns
-            f.write("</div>\n")  # End cogmap-row
-            
-            # Row 2: Full mode
-            f.write("<div class='cogmap-row'>\n")
-            f.write("<h4>Cognitive Map (Full)</h4>\n")
-            f.write("<div class='cogmap-columns'>\n")
-            for level in ['global', 'local', 'rooms']:
-                key = f"{level}_full"
-                plot_uri = plots.get(key)
-                if plot_uri:
-                    f.write(f"<div class='cogmap-column'>\n")
-                    f.write(f"<h5>{level.title()}</h5>\n")
-                    f.write(f"<img src='{plot_uri}' alt='{level.title()} Full Metrics' class='cogmap-plot'>\n")
-                    f.write("</div>\n")
-                else:
-                    f.write(f"<div class='cogmap-column empty'>\n")
-                    f.write(f"<h5>{level.title()}</h5>\n")
-                    f.write("<p class='no-data'>No data available</p>\n")
-                    f.write("</div>\n")
-            f.write("</div>\n")  # End cogmap-columns
-            f.write("</div>\n")  # End cogmap-row
-            
-            f.write("</div>\n")  # End cogmap-grid
+            f.write("<h3>🧠 Cognitive Map Metrics (Global)</h3>\n")
+            f.write("<div class='plots-row'>\n")
+            f.write("<div class='three-plots-grid'>\n")
+
+            if update_plot:
+                f.write("<div class='plot-item'>\n")
+                f.write("<h6>Cognitive Map (Update)</h6>\n")
+                f.write(f"<img src='{update_plot}' alt='Global Update Metrics' class='plot-image'>\n")
+                f.write("</div>\n")
+
+            if full_plot:
+                f.write("<div class='plot-item'>\n")
+                f.write("<h6>Cognitive Map (Full)</h6>\n")
+                f.write(f"<img src='{full_plot}' alt='Global Full Metrics' class='plot-image'>\n")
+                f.write("</div>\n")
+
+            f.write("</div>\n")  # End three-plots-grid
+            f.write("</div>\n")  # End plots-row
             f.write("</div>\n")  # End cognitive-map-charts
 
     def generate_sample_page(self, f, page_idx: int, gname: str, sidx: int, entry: Dict) -> None:
@@ -513,7 +484,7 @@ class HTMLGenerator:
                 f.write("</div>")
 
                 # RIGHT: Ground Truth
-                gt_id = f"gt_{page_idx}_{t_idx}"
+                gt_id = f"gt_{title}_{page_idx}_{t_idx}"
                 f.write("<div class='cogmap-box side groundtruth-box framed'>")
                 f.write(f"<div class='cogmap-box-title expandable' onclick='toggleGroundTruth(\"{gt_id}\")'>Ground Truth <span class='expand-hint'>(click to toggle)</span></div>")
 

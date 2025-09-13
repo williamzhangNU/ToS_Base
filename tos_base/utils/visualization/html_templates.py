@@ -1163,7 +1163,11 @@ function toggleCogmapResponse(cogmapId) {
 function toggleGroundTruth(gtId) {
     const content = document.getElementById(gtId);
     if (content) {
-        if (content.style.display === 'none') {
+        // Check both style.display and computed style to handle initial inline styles
+        const isHidden = content.style.display === 'none' || 
+                        getComputedStyle(content).display === 'none';
+        
+        if (isHidden) {
             content.style.display = 'block';
         } else {
             content.style.display = 'none';

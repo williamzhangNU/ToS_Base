@@ -287,8 +287,6 @@ class CognitiveMapManager:
     
     DEFAULT_COGMAP_SUMMARY = {
         "global": {"dir": 0.0, "facing": 0.0, "pos": 0.0, "overall": 0.0},
-        "local": {"dir": 0.0, "facing": 0.0, "pos": 0.0, "overall": 0.0},
-        "rooms": {"dir": 0.0, "facing": 0.0, "pos": 0.0, "overall": 0.0},
         "gates": {"conn_acc": 0.0},
         "extraction_success_rate": 0.0,
         "n_successful": 0,
@@ -417,7 +415,6 @@ class CognitiveMapManager:
         )
         
         # Also save to specific mode log
-        assert mode in ("explore", "evaluate"), f"Invalid mode: {mode}"
         if mode == "explore":
             self.explore_logs.append(turn_log)
         elif mode == "evaluate":
@@ -428,22 +425,21 @@ class CognitiveMapManager:
     
     def get_cogmap_summary(self) -> Dict[str, Any]:
         """Get cognitive map summary statistics for both explore and evaluate modes."""
-        
+
         def _get_log_metrics(log: Optional[CognitiveMapTurnLog]) -> Dict[str, Any]:
-            """Extract global, local, rooms metrics from a single log."""
+            """Extract only global metrics from a single log."""
             if log is None or not log.extraction_success:
-                return {k: self.DEFAULT_COGMAP_SUMMARY[k] for k in ["global", "local", "rooms"]}
-            
+                return {"global": self.DEFAULT_COGMAP_SUMMARY["global"]}
+
             return {
-                level: getattr(log, f"{level}_metrics").to_dict() if getattr(log, f"{level}_metrics").valid 
-                       else self.DEFAULT_COGMAP_SUMMARY[level]
-                for level in ["global", "local", "rooms"]
+                "global": log.global_metrics.to_dict() if log.global_metrics.valid
+                         else self.DEFAULT_COGMAP_SUMMARY["global"]
             }
-        
+
         # Get metrics from both explore and evaluate logs
-        explore_metrics = _get_log_metrics(self.explore_logs[-1])
+        explore_metrics = _get_log_metrics(self.explore_logs[-1] if self.explore_logs else None)
         evaluate_metrics = _get_log_metrics(self.evaluate_log)
-        
+
         return {
             "explore": explore_metrics,
             "evaluate": evaluate_metrics
@@ -452,24 +448,22 @@ class CognitiveMapManager:
     @staticmethod
     def _calculate_cogmap_per_turn(env_data_list: List[Dict], mode: str = "update") -> Dict[str, List[float]]:
         """Calculate average cognitive map metrics for each turn across all samples.
-        
+
         Args:
             env_data_list: List of environment data dictionaries
             mode: Either "update" or "full" to specify which cognitive map mode to use
-            
+
         Returns:
-            Dict with keys 'global', 'local', 'rooms', each containing dict of metric lists
+            Dict with only 'global' key containing dict of metric lists
         """
         from collections import defaultdict
-        
-        # Collect all turn metrics by turn index and level
+
+        # Collect all turn metrics by turn index for global level only
         turn_metrics = {
-            'global': defaultdict(lambda: defaultdict(list)),  # turn_idx -> metric -> values
-            'local': defaultdict(lambda: defaultdict(list)),
-            'rooms': defaultdict(lambda: defaultdict(list))
+            'global': defaultdict(lambda: defaultdict(list))  # turn_idx -> metric -> values
         }
         PAD = 0.0
-        
+
         for env_data in env_data_list:
             env_turn_logs = env_data.get('env_turn_logs', [])
             for turn_idx, turn_log in enumerate(env_turn_logs):
@@ -477,44 +471,45 @@ class CognitiveMapManager:
                     continue
                 # Select the appropriate log based on mode
                 cogmap_log = turn_log.get(f'cogmap_{mode}_log' if mode == "full" else 'cogmap_log', {})
-                
-                for level in ['global', 'local', 'rooms']:
-                    level_data = cogmap_log.get(level, {}) if cogmap_log else {}
-                    for metric in ['dir', 'facing', 'pos', 'overall']:
-                        value = level_data.get(metric)
-                        if value is not None and isinstance(value, (int, float)):
-                            turn_metrics[level][turn_idx][metric].append(float(value))
-        
-        # Calculate averages for each turn and level
-        result = {'global': {}, 'local': {}, 'rooms': {}}
-        
-        for level in ['global', 'local', 'rooms']:
-            level_turn_metrics = turn_metrics[level]
-            max_turns = max(level_turn_metrics.keys()) if level_turn_metrics else -1
-            
-            for metric in ['dir', 'facing', 'pos', 'overall']:
-                avg_values = []
-                
-                for turn_idx in range(max_turns + 1):
-                    if (turn_idx in level_turn_metrics and metric in level_turn_metrics[turn_idx] and level_turn_metrics[turn_idx][metric]):
-                        values = level_turn_metrics[turn_idx][metric]
-                        avg_value = sum(values) / len(values)
-                        avg_values.append(avg_value)
-                    else:
-                        avg_values.append(PAD)
-                
-                result[level][metric] = avg_values
-        
+
+                # Only process global level
+                level_data = cogmap_log.get('global', {}) if cogmap_log else {}
+                for metric in ['dir', 'facing', 'pos', 'overall']:
+                    value = level_data.get(metric)
+                    # Only append values from samples that have actual logs for this turn
+                    # Samples without logs for this turn are excluded from the average calculation
+                    if value is not None and isinstance(value, (int, float)):
+                        turn_metrics['global'][turn_idx][metric].append(float(value))
+
+        # Calculate averages for each turn and global level only
+        result = {'global': {}}
+
+        level_turn_metrics = turn_metrics['global']
+        max_turns = max(level_turn_metrics.keys()) if level_turn_metrics else -1
+
+        for metric in ['dir', 'facing', 'pos', 'overall']:
+            avg_values = []
+
+            for turn_idx in range(max_turns + 1):
+                if (turn_idx in level_turn_metrics and metric in level_turn_metrics[turn_idx] and level_turn_metrics[turn_idx][metric]):
+                    values = level_turn_metrics[turn_idx][metric]
+                    avg_value = sum(values) / len(values)
+                    avg_values.append(avg_value)
+                else:
+                    avg_values.append(PAD)
+
+            result['global'][metric] = avg_values
+
         return result
 
     @staticmethod
     def aggregate_group_performance(cogmap_summaries: List[Dict], env_data_list: List[Dict] = None) -> Dict[str, float]:
-        """Average hierarchical metrics across summaries for both explore and evaluate modes."""
+        """Average global metrics across summaries for both explore and evaluate modes."""
         if not cogmap_summaries:
             empty_metrics = {"dir": 0.0, "facing": 0.0, "pos": 0.0, "overall": 0.0}
             return {
-                "explore": {"global": empty_metrics.copy(), "local": empty_metrics.copy(), "rooms": empty_metrics.copy()},
-                "evaluate": {"global": empty_metrics.copy(), "local": empty_metrics.copy(), "rooms": empty_metrics.copy()}
+                "explore": {"global": empty_metrics.copy()},
+                "evaluate": {"global": empty_metrics.copy()}
             }
 
         def avg_key(path: List[str], default: float = 0.0) -> float:
@@ -532,27 +527,23 @@ class CognitiveMapManager:
                     vals.append(float(cur))
             return float(np.mean(vals)) if vals else default
 
-        # Aggregate metrics for both explore and evaluate modes
+        # Aggregate global metrics only for both explore and evaluate modes
         out = {
             "explore": {
-                "global": {m: avg_key(["explore", "global", m]) for m in ("dir", "facing", "pos", "overall")},
-                "local": {m: avg_key(["explore", "local", m]) for m in ("dir", "facing", "pos", "overall")},
-                "rooms": {m: avg_key(["explore", "rooms", m]) for m in ("dir", "facing", "pos", "overall")},
+                "global": {m: avg_key(["explore", "global", m]) for m in ("dir", "facing", "pos", "overall")}
             },
             "evaluate": {
-                "global": {m: avg_key(["evaluate", "global", m]) for m in ("dir", "facing", "pos", "overall")},
-                "local": {m: avg_key(["evaluate", "local", m]) for m in ("dir", "facing", "pos", "overall")},
-                "rooms": {m: avg_key(["evaluate", "rooms", m]) for m in ("dir", "facing", "pos", "overall")},
+                "global": {m: avg_key(["evaluate", "global", m]) for m in ("dir", "facing", "pos", "overall")}
             }
         }
-        
+
         # Calculate average cogmap per turn across all samples (similar to infogain_per_turn)
         if env_data_list:
             cogmap_update_per_turn = CognitiveMapManager._calculate_cogmap_per_turn(env_data_list, mode="update")
             cogmap_full_per_turn = CognitiveMapManager._calculate_cogmap_per_turn(env_data_list, mode="full")
             out["cogmap_update_per_turn"] = cogmap_update_per_turn
             out["cogmap_full_per_turn"] = cogmap_full_per_turn
-        
+
         return out
     
     # register entry gates for active exploratoin
