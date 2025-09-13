@@ -18,7 +18,7 @@ def _evaluate_and_store_cogmap_logs(turn_log, response, cognitive_map_manager, e
     """Helper function to evaluate cognitive map response and store logs in turn_log"""
     cogmap_log = None
     cogmap_full_log = None
-    if turn_log.get('is_exploration_phase'):
+    if env_config.get('exp_type') == 'passive' or turn_log.get('is_exploration_phase'):
         mode = "explore"
     else:
         mode = "evaluate"
