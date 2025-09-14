@@ -6,7 +6,7 @@ from html import escape
 from typing import List, Dict, Optional
 import copy
 from .html_templates import HTML_TEMPLATE, CSS_STYLES, JAVASCRIPT_CODE
-from ragen.env.spatial.Base.tos_base.utils.utils import parse_llm_response
+from vagen.env.spatial.Base.tos_base.utils.utils import parse_llm_response
 from .charts import create_infogain_plot, create_cogmap_metrics_plot
 
 
