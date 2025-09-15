@@ -554,7 +554,7 @@ class ProximityRelationship:
     
     def to_string(self, a_name: str, b_name: str) -> str:
         rel_str = self.pairwise_rel.to_string()
-        return f"Suppose agent's orientation is north, {a_name} is {rel_str} to {b_name}"
+        return f"{a_name} is {rel_str} to {b_name}"
 
 
 
