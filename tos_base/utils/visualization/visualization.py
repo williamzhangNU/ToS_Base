@@ -577,8 +577,7 @@ class HTMLGenerator:
                 _render_cogmap_metrics_vs_gt(f, env_log['cogmap_log'], "update")
             # Display cognitive map information if available
                 
-            if env_log.get('cogmap_full_log'):
-                _render_cogmap_metrics_vs_gt(f, env_log['cogmap_full_log'], "full")
+            # Removed full-log rendering (single aggregated per-type log is used)
 
 
             # Display turn metrics from env log
