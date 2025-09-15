@@ -393,6 +393,7 @@ class HTMLGenerator:
                 f.write("</div>\n")
 
             # Display cognitive map response if available
+            # TODO
             if env_log.get('cognitive_map_response'):
                 response_content = env_log['cognitive_map_response']
                 response_short = escape(response_content[:300]).replace("\n", "<br>")
@@ -541,8 +542,7 @@ class HTMLGenerator:
                 _render_cogmap_metrics_vs_gt(f, env_log['cogmap_log'], "update")
             # Display cognitive map information if available
                 
-            if env_log.get('cogmap_full_log'):
-                _render_cogmap_metrics_vs_gt(f, env_log['cogmap_full_log'], "full")
+            # Removed full-log rendering (single aggregated per-type log is used)
 
 
             # Display turn metrics from env log
