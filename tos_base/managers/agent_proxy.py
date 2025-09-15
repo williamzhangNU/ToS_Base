@@ -1,4 +1,5 @@
 import copy
+import random
 from dataclasses import dataclass
 from typing import List, Dict, Set
 
@@ -66,7 +67,7 @@ class AgentProxy:
         self.known_edges_by_room: Dict[int, Set[frozenset]] = {int(rid): set() for rid in self.all_edges_by_room}
 
         # add edges from initial position to objects in the starting room
-        self.initial_anchor: str = "__start__"
+        self.initial_anchor: str = "initial_pos"
         start_rid = self._current_room()
         for obj_name in self.nodes_by_room.get(start_rid, set()):
             self.all_edges_by_room[start_rid].add(frozenset({self.initial_anchor, obj_name}))
@@ -81,6 +82,9 @@ class AgentProxy:
     # --- helpers ---
     def _current_room(self) -> int:
         return int(self.room_focus)
+
+    def _entry_anchor_name(self, is_initial: bool) -> str | None:
+        return self.initial_anchor if is_initial else self.current_gate
 
     def _add_turn(self, actions: List) -> None:
         self.turns.append(
@@ -102,6 +106,16 @@ class AgentProxy:
             for n in vis:
                 if n != self.anchor:
                     known.add(frozenset({self.anchor, n}))
+
+    def _adopt_state_from(self, other: 'AgentProxy') -> None:
+        """Adopt exploration knowledge/state from another proxy instance."""
+        fields = [
+            'gates_by_room', 'object_nodes_by_room', 'nodes_by_room',
+            'known_nodes_by_room', 'all_edges_by_room', 'known_edges_by_room',
+            'visited', 'current_gate', 'anchor', 'room_focus', 'total_nodes'
+        ]
+        for f in fields:
+            setattr(self, f, copy.deepcopy(getattr(other, f)))
 
     def _rotate_by(self, delta: int) -> List:
         assert delta is not None, "Invalid rotation delta"
@@ -130,6 +144,58 @@ class AgentProxy:
         acts += self._rotate_to_face(target.pos)
         acts.append(self.mgr.execute_success_action(MoveAction(name)))
         return acts
+
+    def _move_to_visible(self, name: str) -> List:
+        """Rotate up to 4 orientations to make target visible, then move. Returns action list (rotations + move if any)."""
+        target = self.room.get_object_by_name(name)
+        acts: List = []
+        base = _closest_cardinal(target.pos - self.agent.pos)
+        for d in (0, 90, 180, 270):
+            R = BaseAction._get_rotation_matrix(d)
+            desired = base @ R
+            acts += self._rotate_to_ori(desired)
+            if BaseAction._is_visible(self.agent, target):
+                # Only move if not already at the target
+                if not np.allclose(self.agent.pos, target.pos):
+                    acts.append(self.mgr.execute_success_action(MoveAction(name)))
+                return acts
+        # Fallback: if still not visible, do not attempt move
+        return acts
+
+    def _observe_at_anchor(self, anchor: str, desired_ori: np.ndarray) -> None:
+        """Observe at anchor with minimal actions: move only if needed, rotate only if needed."""
+        self.anchor = anchor
+        at = self.room.get_object_by_name(anchor)
+        if np.allclose(self.agent.pos, at.pos):
+            self._observe(self._rotate_to_ori(desired_ori))
+        else:
+            acts = self._move_to_visible(anchor)
+            assert np.allclose(self.agent.pos, at.pos), f"Agent pos {self.agent.pos} is not same as anchor pos {at.pos}"
+            self._observe(acts + self._rotate_to_ori(desired_ori))
+        self.anchor = None
+
+    def _room_object_names(self) -> List[str]:
+        rid = self._current_room()
+        return sorted(self.object_nodes_by_room.get(rid, set()))
+
+    def _room_node_names(self) -> List[str]:
+        rid = self._current_room()
+        return sorted(self.nodes_by_room.get(rid, set()))
+
+    def _update_solver_from_last(self) -> None:
+        self._ingest_last_into_solver(getattr(self, 'solver', None))
+
+    def _ingest_last_into_solver(self, solver) -> None:
+        if solver is None or not self.turns or not self.turns[-1].actions:
+            return
+        last = self.turns[-1].actions[-1]
+        triples = last.data.get('relation_triples', []) if hasattr(last, 'data') else []
+        if not triples:
+            return
+        keep = set(solver.solver.variables.keys())
+        filt = [tr for tr in triples if tr.subject in keep and tr.anchor in keep]
+        if filt:
+            solver.add_observation(filt)
 
     def _observe(self, prefix_actions: List = None) -> None:
         acts = list(prefix_actions or [])
@@ -278,15 +344,16 @@ class OracleAgentProxy(AgentProxy):
     def _on_entry_observe(self, is_initial: bool, prefix_actions: List = None) -> None:
         rid = self._current_room()
         allowed = self._allowed_rotations(is_initial, continuous_rotation=False)
+        self.anchor = self._entry_anchor_name(is_initial)
         while self._unknown_nodes_in_room(rid):
             targets = self._unknown_nodes_in_room(rid)
             scores = {d: self._score_rotation_nodes(d, targets) for d in allowed}
             best, best_score = max(scores.items(), key=lambda kv: kv[1]) if scores else (0, 0)
-            
             if best_score == 0:
                 break
             self._observe((prefix_actions or []) + self._rotate_by(best))
             prefix_actions = []
+        self.anchor = None
 
     def _prune_dfs(self, rid: int):
         return not self._subtree_has_nodes(rid)
@@ -297,19 +364,21 @@ class StrategistAgentProxy(AgentProxy):
     """NodeSweeper: simple sweep rotations; may not be optimal or complete."""
 
     def _on_entry_observe(self, is_initial: bool, prefix_actions: List = None) -> None:
+        self.anchor = self._entry_anchor_name(is_initial)
         for d in self._allowed_rotations(is_initial):
             if self._all_nodes_known_globally():
                 break
             self._observe((prefix_actions or []) + self._rotate_by(d))
             prefix_actions = []
+        self.anchor = None
 
 
 class InquisitorAgentProxy(AgentProxy):
     """Inquisitor Agent: visit/confirm all edges between nodes (know nothing in prior)"""
 
     def _on_entry_observe(self, is_initial: bool, prefix_actions: List = None) -> None:
-        # treat entry gate as anchor; at start, use initial anchor
-        self.anchor = self.initial_anchor if is_initial else self.current_gate
+        # treat entry (initial or gate) as anchor so edges are recorded
+        self.anchor = self._entry_anchor_name(is_initial)
         for d in self._allowed_rotations(is_initial):
             if self._all_nodes_known_globally(): # early stop if see all objects at entry
                 break
@@ -349,7 +418,7 @@ class GreedyInquisitorAgentProxy(InquisitorAgentProxy):
     """Greedy Inquisitor Agent: pick best rotation each step."""
 
     def _on_entry_observe(self, is_initial: bool, prefix_actions: List = None) -> None:
-        self.anchor = self.initial_anchor if is_initial else self.current_gate
+        self.anchor = self._entry_anchor_name(is_initial)
         rid = self._current_room()
         while any(self.anchor in p for p in self._unknown_edges_in_room(rid)):
             scores = {d: self._score_rotation(d) for d in (0, 90, 180, 270)}
@@ -387,7 +456,7 @@ class ObserverAnalystAgentProxy(AgentProxy):
     """Hybrid Agent: (a) observe-all-nodes via oracle/strategist, then (b) pick best observe(anchor,ori) to reduce relations in current room."""
 
     def __init__(self, room: Room, agent: Agent, grid_size: int | None = None,
-                 rel_threshold: int = 0, eval_samples: int = 30, delegate: str = 'oracle', max_observes: int = 16,
+                 rel_threshold: int = 0, eval_samples: int = 30, delegate: str = 'oracle', max_observes: int = 100,
                  metric: str = 'positions'):
         super().__init__(room, agent)
         g = (max(self.room.mask.shape) if getattr(self.room, 'mask', None) is not None else 10)
@@ -397,7 +466,11 @@ class ObserverAnalystAgentProxy(AgentProxy):
         self.delegate = (delegate or 'oracle').lower()
         self.max_observes = int(max_observes)
         self.metric = (metric or 'positions').lower()
-        self.solver: SpatialSolver | None = None
+        # Global solver: all scene nodes + initial_pos
+        self.solver: SpatialSolver = SpatialSolver([o.name for o in self.room.all_objects] + ['initial_pos'], grid_size=self.grid_size)
+        self.solver.set_initial_position('initial_pos', (0, 0))
+        # Room-local solver used only for per-room planning
+        self.room_solver: SpatialSolver | None = None
 
     # ---- step (a): reuse existing in-room observe logic ----
     def _entry_observe_delegate(self, is_initial: bool, prefix_actions: List = None) -> None:
@@ -410,30 +483,30 @@ class ObserverAnalystAgentProxy(AgentProxy):
     def _build_room_solver(self, anchor_name: str = 'initial_pos') -> None:
         rid = self._current_room()
         names = sorted(self.nodes_by_room.get(rid, set()))
-        self.solver = SpatialSolver(names, grid_size=self.grid_size)
-        self.solver.set_initial_position(anchor_name, (0, 0))
+        self.room_solver = SpatialSolver(names, grid_size=self.grid_size)
+        self.room_solver.set_initial_position(anchor_name, (0, 0))
 
     def _ingest_recent_observations(self, start_idx: int) -> None:
-        assert self.solver is not None
+        assert self.room_solver is not None
         for t in self.turns[start_idx:]:
             obs = t.actions[-1] if t.actions else None
             triples = obs.data.get('relation_triples', []) if hasattr(obs, 'data') else []
             if triples:
                 # keep only triples within solver variables
-                keep = {n for n in self.solver.solver.variables.keys()}
+                keep = {n for n in self.room_solver.solver.variables.keys()}
                 filt = [tr for tr in triples if tr.subject in keep and tr.anchor in keep]
                 if filt:
-                    self.solver.add_observation(filt)
+                    self.room_solver.add_observation(filt)
     def _metrics(self) -> int:
-        assert self.solver is not None
-        _, total_positions, _, total_rels = self.solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
+        assert self.room_solver is not None
+        _, total_positions, _, total_rels = self.room_solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
         return total_rels if self.metric != 'positions' else total_positions
 
     # 1) simulate returns best anchor + absolute orientation (not rotation)
     def _simulate_observe_gain(self, anchor: str, desired_ori: np.ndarray, baseline_metric: int) -> float:
-        assert self.solver is not None
-        if anchor not in self.solver.solver.variables: return 0.0
-        sim = self.solver.copy()
+        assert self.room_solver is not None
+        if anchor not in self.room_solver.solver.variables: return 0.0
+        sim = self.room_solver.copy()
         tmp = self.agent.copy()
         obj = self.room.get_object_by_name(anchor)
         tmp.pos, tmp.room_id, tmp.ori = obj.pos.copy(), obj.room_id, desired_ori.copy()
@@ -449,33 +522,29 @@ class ObserverAnalystAgentProxy(AgentProxy):
 
     # 2) pick best (anchor, absolute orientation)
     def _best_observe(self, baseline_metric: int) -> tuple[str | None, np.ndarray | None, float]:
-        rid = self._current_room()
         observed = set(self.mgr.observed_items or set())
-        assert set(self.nodes_by_room.get(rid, set())).issubset(observed)
-        assert self.solver is not None
-        domain_sizes, _, rel_sets, _ = self.solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
-        names = sorted(self.solver.solver.variables.keys())
+        # anchor must be a node in current room and already observed
+        candidate_anchors = observed & set(self._room_node_names())
+        assert self.room_solver is not None
+        domain_sizes, _, rel_sets, _ = self.room_solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
         scores = []
         if self.metric == 'positions':
-            for obj in names:
+            for obj in candidate_anchors:
                 scores.append((obj, int(domain_sizes.get(obj, 0))))
         else:
-            for obj in names:
+            for obj in candidate_anchors:
                 best = 0
-                for other in names:
+                for other in candidate_anchors:
                     if other == obj: continue
                     key = (obj, other) if (obj, other) in rel_sets else (other, obj)
                     best = max(best, len(rel_sets.get(key, set())))
                 scores.append((obj, best))
-        top_anchors = [o for o, _ in sorted(scores, key=lambda x: x[1], reverse=True)[:5]]
-        anchors = [a for a in top_anchors if a in self.nodes_by_room.get(rid, set()) and a in observed]
+        top_anchors = [o for o, _ in sorted(scores, key=lambda x: x[1], reverse=True)[:10]]
 
         best_a, best_ori, best_gain = None, None, -1.0
-        for a in anchors:
-            base = _closest_cardinal(self.room.get_object_by_name(a).pos - self.agent.pos)
-            for d in (0, 90, 180, 270):
-                R = BaseAction._get_rotation_matrix(d)
-                ori = base @ R
+        for a in top_anchors:
+            # Try the 4 absolute cardinals at the anchor
+            for ori in (np.array([0, 1]), np.array([1, 0]), np.array([0, -1]), np.array([-1, 0])):
                 gain = self._simulate_observe_gain(a, ori, baseline_metric)
                 if gain > best_gain:
                     best_a, best_ori, best_gain = a, ori, gain
@@ -483,14 +552,8 @@ class ObserverAnalystAgentProxy(AgentProxy):
 
     # 3) observe_at now rotates to a target absolute orientation AFTER move_to
     def _observe_at(self, anchor: str, desired_ori: np.ndarray) -> None:
-        self._observe(self._move_to(anchor) + self._rotate_to_ori(desired_ori))
-        if self.solver is None: return
-        last = self.turns[-1].actions[-1]
-        triples = last.data.get('relation_triples', []) if hasattr(last, 'data') else []
-        if triples:
-            keep = set(self.solver.solver.variables.keys())
-            filt = [tr for tr in triples if tr.subject in keep and tr.anchor in keep]
-            if filt: self.solver.add_observation(filt)
+        self._observe_at_anchor(anchor, desired_ori)
+        self._ingest_last_into_solver(self.room_solver)
 
     # 4) loop uses (anchor, orientation) instead of (anchor, rotation)
     def _explore_room(self, is_initial: bool, prefix_actions: List = None) -> None:
@@ -498,14 +561,12 @@ class ObserverAnalystAgentProxy(AgentProxy):
         self._entry_observe_delegate(is_initial=is_initial, prefix_actions=prefix_actions)
         self._build_room_solver(anchor_name='initial_pos' if is_initial else (self.current_gate or 'initial_pos'))
         self._ingest_recent_observations(start_idx)
-        it = 0
-        while it < self.max_observes:
+        while True:
             total = self._metrics()
-            if total <= self.rel_threshold: break
             a, ori, gain = self._best_observe(total)
-            if (gain is None) or (gain <= 1e-9) or (a is None) or (ori is None): break
+            if (gain is None) or (gain <= 1e-9) or (a is None) or (ori is None):
+                break
             self._observe_at(a, ori)
-            it += 1
 
     # No custom run; used as delegate in AnalystAgentProxy
 
@@ -514,6 +575,147 @@ class ObserverAnalystAgentProxy(AgentProxy):
         return OracleAgentProxy._prune_dfs(self, rid) if self.delegate == 'oracle' else False
 
 
+
+class CandidatePlannerAgentProxy(ObserverAnalystAgentProxy):
+    """Plan via candidate domains: move to the most ambiguous node, then observe facing the direction that covers most candidate pairs. Early stop when all candidates are singletons or all edges are covered."""
+
+    def _all_singleton_room(self) -> bool:
+        assert self.room_solver is not None
+        domain_sizes, _, _, _ = self.room_solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
+        names = list(set(self._room_node_names()) & set(domain_sizes.keys()))
+        if not names:
+            return True
+        return all(int(domain_sizes.get(n, 0)) == 1 for n in names)
+
+    def _room_edges_done(self) -> bool:
+        return not self._unknown_edges_in_room(self._current_room())
+
+    def _edges_from_anchor_remaining(self, anchor: str) -> bool:
+        return any(anchor in e for e in self._unknown_edges_in_room(self._current_room()))
+
+    # uses base _room_node_names
+
+    def _nodes_with_unknown_edges(self) -> Set[str]:
+        unknown = self._unknown_edges_in_room(self._current_room())
+        nodes = set(self._room_node_names())
+        return {
+            a for a in nodes
+            if any((a in e) and (next(iter(e - {a})) in nodes) for e in unknown)
+        }
+
+    def _choose_anchor_with_most_candidates(self, moved: Set[str]) -> str | None:
+        assert self.room_solver is not None
+        names = sorted(self._nodes_with_unknown_edges() - set(moved))
+        if not names:
+            return None
+        domain_sizes, _, _, _ = self.room_solver.compute_metrics(max_samples_per_var=self.eval_samples, bin_system=CardinalBinsAllo())
+        return max(names, key=lambda n: domain_sizes.get(n, 0), default=None)
+
+    def _sample(self, dom: Set[tuple]) -> List[tuple]:
+        k = int(self.eval_samples)
+        if len(dom) <= k:
+            return list(dom)
+        return random.sample(list(dom), k)
+
+    def _best_direction_for_anchor(self, anchor: str, exclude_others: Set[str], exclude_dirs: Set[tuple] | None = None) -> tuple[np.ndarray | None, str | None]:
+        assert self.room_solver is not None
+        pos = self.room_solver.get_possible_positions()
+        if anchor not in pos or not pos[anchor]:
+            return None, None
+        # consider only others with unknown edges to anchor
+        rid = self._current_room()
+        unknown = self._unknown_edges_in_room(rid)
+        allowed_others = {o for o in self._room_node_names() if o != anchor and frozenset({anchor, o}) in unknown}
+        dirs = [np.array([0, 1]), np.array([1, 0]), np.array([0, -1]), np.array([-1, 0])]
+        allowed_dirs = [d for d in dirs if not (exclude_dirs and tuple(d.tolist()) in exclude_dirs)]
+        if not allowed_dirs:
+            return None, None
+        totals: Dict[tuple, int] = {tuple(d.tolist()): 0 for d in allowed_dirs}
+        per_dir_target: Dict[tuple, tuple[str | None, int]] = {tuple(d.tolist()): (None, -1) for d in allowed_dirs}
+
+        anchor_pts = self._sample(pos[anchor])
+        for other in allowed_others:
+            if other in exclude_others:
+                continue
+            if other not in pos or not pos[other]:
+                continue
+            other_pts = self._sample(pos[other])
+            dir_count: Dict[tuple, int] = {tuple(d.tolist()): 0 for d in allowed_dirs}
+            for pa in anchor_pts:
+                for pb in other_pts:
+                    key = tuple(_closest_cardinal(np.array(pb) - np.array(pa)).tolist())
+                    if key in dir_count:
+                        dir_count[key] += 1
+            for key, cnt in dir_count.items():
+                totals[key] += cnt
+                _, best = per_dir_target[key]
+                if cnt > best:
+                    per_dir_target[key] = (other, cnt)
+
+        if max(totals.values(), default=0) <= 0:
+            return None, None
+        best_key, _ = max(totals.items(), key=lambda kv: kv[1])
+        target_obj, _ = per_dir_target[best_key]
+        return np.array(best_key), target_obj
+
+    def _observe_facing(self, anchor: str, desired_ori: np.ndarray) -> None:
+        self._observe_at_anchor(anchor, desired_ori)
+        self._ingest_last_into_solver(self.room_solver)
+
+    def _update_solver_from_last(self) -> None:
+        self._ingest_last_into_solver(self.room_solver)
+
+    def _explore_room(self, is_initial: bool, prefix_actions: List = None) -> None:
+        start_idx = len(self.turns)
+        self._entry_observe_delegate(is_initial=is_initial, prefix_actions=prefix_actions)
+        self._build_room_solver(anchor_name='initial_pos' if is_initial else (self.current_gate or 'initial_pos'))
+        self._ingest_recent_observations(start_idx)
+        if self._all_singleton_room() or self._room_edges_done():
+            return
+        budget = int(self.max_observes)
+        moved: Set[str] = set()
+        while budget > 0 and not self._all_singleton_room() and not self._room_edges_done():
+            anchor = self._choose_anchor_with_most_candidates(moved)
+            if anchor is None:
+                break
+            # Step 1: choose best ori BEFORE moving, then move+rotate+observe
+            used_dirs: Set[tuple] = set()
+            ori0, _ = self._best_direction_for_anchor(anchor, exclude_others=moved, exclude_dirs=used_dirs)
+            if ori0 is None:
+                moved.add(anchor)
+                continue
+            before = len(self.turns)
+            self._observe_facing(anchor, ori0)
+            used_dirs.add(tuple(ori0.tolist()))
+            if len(self.turns) > before:
+                budget -= 1
+            if self._all_singleton_room() or self._room_edges_done():
+                moved.add(anchor)
+                break
+            # Step 2: local loop at anchor
+            seen: Set[str] = set(self._visible_others_from_last(anchor))
+            while budget > 0 and self._edges_from_anchor_remaining(anchor) and not (self._all_singleton_room() or self._room_edges_done()):
+                exclude = set(seen) | set(moved)
+                ori, _ = self._best_direction_for_anchor(anchor, exclude, exclude_dirs=used_dirs)
+                if ori is None:
+                    break
+                self._observe_facing(anchor, ori)
+                used_dirs.add(tuple(ori.tolist()))
+                budget -= 1
+                if self._all_singleton_room() or self._room_edges_done():
+                    break
+                seen |= self._visible_others_from_last(anchor)
+            moved.add(anchor)
+        
+
+    # uses base _move_to_visible
+
+    def _visible_others_from_last(self, anchor: str) -> Set[str]:
+        if not self.turns or not self.turns[-1].actions:
+            return set()
+        last = self.turns[-1].actions[-1]
+        vis = set(last.data.get('visible_objects', []) if hasattr(last, 'data') else [])
+        return {n for n in vis if n != anchor}
 
 class AnalystAgentProxy(AgentProxy):
     """Analyst Agent: observe, then greedily query to reduce discrete (cardinal-bin) relationships."""
@@ -568,16 +770,14 @@ class AnalystAgentProxy(AgentProxy):
         q = 0
         while q < self.max_queries:
             _, total_positions, rel_sets, total_rels = self._current_metrics()
-            # print(f"total_rels: {total_rels}, total_positions: {total_positions}")
             total_metric = total_rels if self.metric != 'positions' else total_positions
-            if total_metric <= self.rel_threshold:
+            if total_metric <= (self.rel_threshold if self.metric != 'positions' else len(self.solver.solver.variables)):
                 break
             best_obj, best_gain = self._best_query(rel_sets, total_metric)
             if best_gain <= 1e-9 or best_obj is None:
                 break
             self._query_object(best_obj)
             q += 1
-        # print("finish global query loop")
 
     def _best_query(self, rel_sets: dict, total_metric: int) -> tuple:
         """Pick object with highest simulated relationship gain."""
@@ -611,15 +811,20 @@ class AnalystAgentProxy(AgentProxy):
             'greedy_inquisitor': GreedyInquisitorAgentProxy,
             'greedy': GreedyInquisitorAgentProxy,
             'observer_analyst': ObserverAnalystAgentProxy,
+            'candidate_planner': CandidatePlannerAgentProxy,
         }
         DelegateCls = mapping.get(self.delegate, OracleAgentProxy)
         if DelegateCls is ObserverAnalystAgentProxy:
+            delegate = DelegateCls(self.room, self.agent, delegate=self.observer_delegate, metric=self.metric)
+        elif DelegateCls is CandidatePlannerAgentProxy:
             delegate = DelegateCls(self.room, self.agent, delegate=self.observer_delegate, metric=self.metric)
         else:
             delegate = DelegateCls(self.room, self.agent)
         d_turns = delegate.run()
         self.mgr, self.room, self.agent = delegate.mgr, delegate.mgr.exploration_room, delegate.mgr.agent
         self.turns = list(d_turns[:-1]) if d_turns else [] # drop final Term()
+        # adopt exploration knowledge/state from delegate
+        self._adopt_state_from(delegate)
 
         # Ingest all observed relation triples into solver
         self._ingest_observations()
@@ -644,6 +849,7 @@ def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = 
         'greedy_inquisitor': GreedyInquisitorAgentProxy,
         'analyst': AnalystAgentProxy,
         'observer_analyst': ObserverAnalystAgentProxy,
+        'candidate_planner': CandidatePlannerAgentProxy,
     }
     if name == 'analyst':
         return mapping['analyst'](room, agent, delegate=(delegate or 'oracle'), observer_delegate=(observer_delegate or 'oracle'), metric=(metric or 'positions'))
@@ -659,8 +865,8 @@ if __name__ == "__main__":
 
 
     def multiple_runs(n_runs: int, proxy_name: str, **kwargs):
-        action_counts, action_costs = [], []
-        for seed in tqdm(range(n_runs), desc=f'Running experiments for {proxy_name}'):
+        action_counts, action_costs, edge_coverages, node_coverages = [], [], [], []
+        for seed in tqdm(range(10, 10 + n_runs), desc=f'Running experiments for {proxy_name}'):
             room, agent = RoomGenerator.generate_room(
                 room_size=[15, 15],
                 n_objects=8,
@@ -668,22 +874,25 @@ if __name__ == "__main__":
                 level=2,
                 main=4
             )
-            # RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
+            RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
             proxy = get_agent_proxy(proxy_name, room, agent, metric='relations', **kwargs)
             proxy.run()
-            # print(proxy.to_text())
+            print(proxy.to_text())
             summary = proxy.mgr.get_exp_summary()
-            action_count, action_cost = summary['action_counts'], summary['action_cost']
+            action_count, action_cost, edge_coverage, node_coverage = summary['action_counts'], summary['action_cost'], summary['edge_coverage'], summary['node_coverage']
         
             action_counts.append(action_count)
             action_costs.append(action_cost)
-        return action_counts, action_costs
+            edge_coverages.append(edge_coverage)
+            node_coverages.append(node_coverage)
+        return action_counts, action_costs, edge_coverages, node_coverages
 
 
 
 
-    action_counts, action_costs = multiple_runs(100, proxy_name='analyst', delegate='observer_analyst', observer_delegate='strategist')
-    # action_counts, action_costs = multiple_runs(100, 'AnalystAgentProxy', delegate='oracle')
+    # action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(10, 'inquisitor')
+    # action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(1, proxy_name='analyst', delegate='observer_analyst', observer_delegate='strategist')
+    action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(1, proxy_name='analyst', delegate='candidate_planner', observer_delegate='strategist')
 
     # Calculate average action counts per action type
     avg_action_counts = defaultdict(float)
@@ -696,3 +905,5 @@ if __name__ == "__main__":
     
     print(f"Average Action Counts: {avg_action_counts}")
     print(f"Average Action Cost: {sum(action_costs) / len(action_costs)}")
+    print(f"Average Edge Coverage: {sum(edge_coverages) / len(edge_coverages)}")
+    print(f"Average Node Coverage: {sum(node_coverages) / len(node_coverages)}")
