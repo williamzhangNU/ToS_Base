@@ -22,31 +22,7 @@ def _evaluate_and_store_cogmap_logs(turn_log, response, cognitive_map_manager, e
         mode = "explore"
     else:
         mode = "evaluate"
-    if response and turn_log.get('room_state') and turn_log.get('agent_state'):
-        # Reconstruct Room and Agent states from turn log
-        room_state = Room.from_dict(turn_log['room_state'])
-        agent_state = Agent.from_dict(turn_log['agent_state'])
-        
-        # Get observed items
-        observed_items = turn_log['observed_items']
-        if env_config.get('exp_type') == 'active':
-            cogmap_log = cognitive_map_manager.evaluate_cognitive_map(
-                response,
-                room_state,
-                agent_state,
-                observed_items
-            )
-        cogmap_full_log = cognitive_map_manager.evaluate_cognitive_map(
-            response,
-            room_state,
-            agent_state,
-            [obj.name for obj in room_state.all_objects],
-            mode=mode
-        )
-
-    turn_log['cogmap_full_log'] = cogmap_full_log.to_dict() if cogmap_full_log else None
-    turn_log['cogmap_log'] = cogmap_log.to_dict() if cogmap_log else None
-
+    
 
 def evaluate_cognitive_maps_from_turnlogs(
     env_summarys: List[Dict[str, Any]],  # List of env summaries from get_env_summary()
@@ -99,7 +75,7 @@ def evaluate_cognitive_maps_from_turnlogs(
         )
         env_cogmap_managers[env_idx] = cognitive_map_manager
 
-        history_manager = HistoryManager(env_config, room_config, agent_config, override_cogmap=override_cogmap)
+        history_manager = HistoryManager(env_config['observation_config'], room_config, agent_config)
         env_history_managers[env_idx] = history_manager
         
         turn_logs = env_summary['env_turn_logs']
@@ -116,14 +92,10 @@ def evaluate_cognitive_maps_from_turnlogs(
                     msg = env_messages[msg_idx]
                     messages.append(msg.copy())
                 # Check if cogmap response already exists in history
-                if turn_logs[turn_idx-1]['is_exploration_phase']:
+                if turn_log['is_exploration_phase']:
                     target_turn_idx = turn_idx - 1
-                    cached_response = history_manager.get_cogmap_response(target_turn_idx)
-                    if cached_response:
-                        turn_logs[target_turn_idx]['cognitive_map_response'] = cached_response
-                        # Also evaluate and store cognitive map logs for cached response
-                        _evaluate_and_store_cogmap_logs(turn_logs[target_turn_idx], cached_response, cognitive_map_manager, env_config)
-                        continue 
+                    if history_manager.has_cogmap_response(target_turn_idx) and not override_cogmap:
+                        continue
                     assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
                     messages[-2]["content"] = turn_log.get('user_message', '') + COGMAP_INSTRUCTION_SHORTER
                 # like false belief task
@@ -145,22 +117,22 @@ def evaluate_cognitive_maps_from_turnlogs(
 
         elif env_config.get('exp_type') == 'passive':
             # Check if cogmap response already exists in history
-            cached_response = history_manager.get_cogmap_response(0)  # 0-indexed, turn 0
-            
-            if cached_response:
-                # Use cached response directly
-                turn_logs[0]['cognitive_map_response'] = cached_response
-                # Also evaluate and store cognitive map logs for cached response
-                _evaluate_and_store_cogmap_logs(turn_logs[0], cached_response, cognitive_map_manager, env_config)
-            else:
-                assert env_messages[0]["role"] == "user", f"Expected user message but got {env_messages[0]['role']}"
-                messages = [env_messages[0].copy()]
-                messages[0]["content"] = re.sub(r'## Evaluation Question.*', '', turn_logs[0].get('user_message', ''), flags=re.DOTALL) + COGMAP_INSTRUCTION_SHORTER
-                
-                all_messages_list.append(messages)
-                all_env_ids.append(env_id_counter)
-                env_id_to_location[env_id_counter] = (env_idx, 0)
-                env_id_counter += 1
+            if history_manager.has_cogmap_response(0) and not override_cogmap:
+                continue
+
+            assert env_messages[0]["role"] == "user", f"Expected user message but got {env_messages[0]['role']}"
+            messages = [env_messages[0].copy()]
+            messages[0]["content"] = re.sub(r'## Evaluation Question.*', '', turn_logs[0].get('user_message', ''), flags=re.DOTALL) + COGMAP_INSTRUCTION_SHORTER
+
+            turn_log = {'turn_number': 1 ,"user_message": messages[0]["content"], "is_exploration_phase": True, "room_state": room_config, "agent_state": agent_config}
+            turn_logs[0] = turn_log
+            if not history_manager.is_history_exist():
+                history_manager.update_turn_log(turn_log)
+
+            all_messages_list.append(messages)
+            all_env_ids.append(env_id_counter)
+            env_id_to_location[env_id_counter] = (env_idx, 0)
+            env_id_counter += 1
 
     
     if all_messages_list:
@@ -176,34 +148,35 @@ def evaluate_cognitive_maps_from_turnlogs(
             history_manager = env_history_managers[env_idx]
             
             # Store the cognitive map response in the turn log dictionary
-            turn_log['cognitive_map_response'] = response
-            
-            # Evaluate and store cognitive map logs
-            _evaluate_and_store_cogmap_logs(turn_log, response, cognitive_map_manager, env_summary['env_info']['config'])
-    
-    # After processing all cognitive maps, generate cogmap_summary for each environment
-    for env_idx, cognitive_map_manager in env_cogmap_managers.items():
-        env_summary = env_summarys[env_idx]
-        
-        # Generate cogmap summary using the manager
-        cogmap_summary = cognitive_map_manager.get_cogmap_summary()
-     
-        env_summary['summary']['cogmap_summary'] = cogmap_summary
+            turn_log['cogmap_response'] = response
+            cogmap_log, cogmap_full_log = None, None
+            if response and turn_log.get('room_state') and turn_log.get('agent_state'):
+                # Reconstruct Room and Agent states from turn log
+                room_state = Room.from_dict(turn_log['room_state'])
+                agent_state = Agent.from_dict(turn_log['agent_state'])
+                
+                # Get observed items
+                if turn_log.get('exploration_log'):
+                    cogmap_log = cognitive_map_manager.evaluate_cognitive_map(
+                        response,
+                        room_state,
+                        agent_state,
+                        turn_log['observed_items']
+                    )
+                cogmap_full_log = cognitive_map_manager.evaluate_cognitive_map(
+                    response,
+                    room_state,
+                    agent_state,
+                    [obj.name for obj in room_state.all_objects]
+                )
+
+            turn_log['cogmap_full_log'] = cogmap_full_log.to_dict() if cogmap_full_log else None
+            turn_log['cogmap_log'] = cogmap_log.to_dict() if cogmap_log else None
+            history_manager.update_cogmap(turn_log)
     
     # Save all history managers to persist cached cognitive map responses
     for env_idx, history_manager in env_history_managers.items():
-        # Save cogmap responses from turn logs to history manager
-        env_summary = env_summarys[env_idx]
-        turn_logs = env_summary['env_turn_logs']
-        
-        for turn_idx, turn_log in enumerate(turn_logs):
-            if turn_log['is_exploration_phase'] and 'cognitive_map_response' in turn_log and turn_log['cognitive_map_response']:
-                # Ensure the cogmap_responses list has enough space
-                while len(history_manager.cogmap_responses) <= turn_idx:
-                    history_manager.cogmap_responses.append(None)
-                history_manager.cogmap_responses[turn_idx] = turn_log['cognitive_map_response']
-        
-        history_manager.save_cogmap()  # Save cognitive map responses separately
+        history_manager.save()  # Save cognitive map responses separately
         
     return env_summarys
 

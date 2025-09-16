@@ -135,25 +135,51 @@ class EvaluationManager:
         }
     
     @staticmethod
-    def aggregate_group_performance(eval_summaries: List[Dict]) -> Dict[str, float]:
-        """Calculate evaluation performance for a group."""
-        if not eval_summaries:
+    def aggregate_group_performance(env_data_list: List[Dict] = None) -> Dict[str, Any]:
+        """Calculate evaluation performance for a group from env_data_list."""
+        if not env_data_list:
             return {"avg_accuracy": 0.0, "avg_correct_rate": 0.0, "avg_incorrect_rate": 0.0, "avg_unanswered_rate": 0.0}
-        
-        total_tasks = sum(m.get('total_tasks', 0) for m in eval_summaries)
+
+        # Calculate metrics from evaluation tasks of each sample
+        task_metrics = {}  # task_type -> {"total": count, "correct": count}
+
+        for env_data in env_data_list:
+            evaluation_tasks = env_data.get('evaluation_tasks', {})
+
+            for task_type, task_data in evaluation_tasks.items():
+                if task_type not in task_metrics:
+                    task_metrics[task_type] = {"total": 0, "correct": 0}
+
+                task_metrics[task_type]["total"] += 1
+                # Check if the evaluation task was answered correctly
+                if task_data['evaluation_log']['is_correct']:
+                    task_metrics[task_type]["correct"] += 1
+
+        # Calculate overall metrics
+        total_tasks = sum(metrics["total"] for metrics in task_metrics.values())
+        total_correct = sum(metrics["correct"] for metrics in task_metrics.values())
+
         if total_tasks == 0:
-            return {"avg_accuracy": 0.0, "avg_correct_rate": 0.0, "avg_incorrect_rate": 0.0, "avg_unanswered_rate": 0.0}
-        
-        total_correct = sum(m.get('correct_count', 0) for m in eval_summaries)
-        total_incorrect = sum(m.get('incorrect_count', 0) for m in eval_summaries)
-        total_unanswered = sum(m.get('unanswered_count', 0) for m in eval_summaries)
-        
-        return {
-            "avg_accuracy": sum(m.get('accuracy', 0) for m in eval_summaries) / len(eval_summaries),
+            return {"avg_accuracy": 0.0, "avg_correct_rate": 0.0, "avg_incorrect_rate": 0.0, "avg_unanswered_rate": 0.0, "task_metrics": {}}
+
+        total_incorrect = total_tasks - total_correct
+
+        result = {
+            "avg_accuracy": total_correct / total_tasks,
             "avg_correct_rate": total_correct / total_tasks,
             "avg_incorrect_rate": total_incorrect / total_tasks,
-            "avg_unanswered_rate": total_unanswered / total_tasks
+            "task_metrics": {}
         }
+
+        # Add per-task metrics
+        for task_type, metrics in task_metrics.items():
+            result["task_metrics"][task_type] = {
+                "accuracy": metrics["correct"] / metrics["total"] if metrics["total"] > 0 else 0.0,
+                "total_count": metrics["total"],
+                "correct_count": metrics["correct"]
+            }
+
+        return result
     
     def reset(self):
         """Reset to start."""

@@ -43,9 +43,7 @@ class EvaluationData:
         return {
             'question': self.question,
             'answer': self.answer,
-            'reasoning': self.reasoning,
             'task_type': self.task_type,
-            'action': self.action,
             'choices': self.choices,
         }
 

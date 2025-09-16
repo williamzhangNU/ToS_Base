@@ -503,46 +503,80 @@ class CognitiveMapManager:
         return result
 
     @staticmethod
-    def aggregate_group_performance(cogmap_summaries: List[Dict], env_data_list: List[Dict] = None) -> Dict[str, float]:
-        """Average global metrics across summaries for both explore and evaluate modes."""
-        if not cogmap_summaries:
-            empty_metrics = {"dir": 0.0, "facing": 0.0, "pos": 0.0, "overall": 0.0}
-            return {
-                "explore": {"global": empty_metrics.copy()},
-                "evaluate": {"global": empty_metrics.copy()}
-            }
+    def aggregate_group_performance(env_data_list: List[Dict] = None) -> Dict[str, Any]:
+        """Calculate cognitive map performance from env_data_list."""
+        assert isinstance(env_data_list, list) and len(env_data_list) > 0, "env_data_list must be a non-empty list"
 
-        def avg_key(path: List[str], default: float = 0.0) -> float:
-            vals = []
-            for s in cogmap_summaries:
-                cur = s
-                ok = True
-                for k in path:
-                    if isinstance(cur, dict) and k in cur:
-                        cur = cur[k]
-                    else:
-                        ok = False
+        metrics = ["dir", "facing", "pos", "overall"]
+
+        # Calculate metrics from cogmap logs of each sample
+        explore_metrics = {m: [] for m in metrics}
+        evaluate_metrics_by_task = {}  # task_type -> {metric -> []}
+
+        for env_data in env_data_list:
+            env_turn_logs = env_data.get('env_turn_logs', [])
+
+            # Find the last exploration turn with cogmap_full_log
+            last_explore_cogmap = None
+            for turn_log in reversed(env_turn_logs):
+                if turn_log.get('is_exploration_phase', False):
+                    cogmap_full_log = turn_log.get('cogmap_full_log', {})
+                    if cogmap_full_log:
+                        last_explore_cogmap = cogmap_full_log.get('global', {})
+                        for metric in metrics:
+                            value = last_explore_cogmap.get(metric)
+                            if value is not None:
+                                explore_metrics[metric].append(value)
                         break
-                if ok and isinstance(cur, (int, float)):
-                    vals.append(float(cur))
-            return float(np.mean(vals)) if vals else default
 
-        # Aggregate global metrics only for both explore and evaluate modes
-        out = {
-            "explore": {
-                "global": {m: avg_key(["explore", "global", m]) for m in ("dir", "facing", "pos", "overall")}
-            },
-            "evaluate": {
-                "global": {m: avg_key(["evaluate", "global", m]) for m in ("dir", "facing", "pos", "overall")}
-            }
-        }
+            # Get evaluation task cogmap metrics - store separately for each task
+            evaluation_tasks = env_data.get('evaluation_tasks', {})
+            for task_type, task_data in evaluation_tasks.items():
+                if task_type not in evaluate_metrics_by_task:
+                    evaluate_metrics_by_task[task_type] = {m: [] for m in metrics}
 
-        # Calculate average cogmap per turn across all samples (similar to infogain_per_turn)
-        if env_data_list:
-            cogmap_update_per_turn = CognitiveMapManager._calculate_cogmap_per_turn(env_data_list, mode="update")
-            cogmap_full_per_turn = CognitiveMapManager._calculate_cogmap_per_turn(env_data_list, mode="full")
-            out["cogmap_update_per_turn"] = cogmap_update_per_turn
-            out["cogmap_full_per_turn"] = cogmap_full_per_turn
+                cogmap_full_log = task_data.get('cogmap_full_log', {})
+                if cogmap_full_log:
+                    global_metrics = cogmap_full_log.get('global', {})
+                    for metric in metrics:
+                        value = global_metrics.get(metric)
+                        if value is not None:
+                            evaluate_metrics_by_task[task_type][metric].append(value)
+
+        # Calculate averages, excluding None values
+        explore_avg = {}
+        evaluate_avg_by_task = {}
+
+        for metric in metrics:
+            if explore_metrics[metric]:  # Only add if there are values
+                explore_avg[metric] = sum(explore_metrics[metric]) / len(explore_metrics[metric])
+
+        # Calculate averages for each evaluation task separately
+        for task_type, task_metrics in evaluate_metrics_by_task.items():
+            task_avg = {}
+            for metric in metrics:
+                if task_metrics[metric]:  # Only add if there are values
+                    task_avg[metric] = sum(task_metrics[metric]) / len(task_metrics[metric])
+
+            # Only add task if it has any metrics
+            if task_avg:
+                evaluate_avg_by_task[task_type] = task_avg
+
+        out = {}
+
+        # Only add explore section if it has metrics
+        if explore_avg:
+            out["explore"] = {"global": explore_avg}
+
+        # Only add evaluate section if it has task metrics
+        if evaluate_avg_by_task:
+            out["evaluate"] = {"global": evaluate_avg_by_task}
+
+        # Calculate average cogmap per turn across all samples
+        cogmap_update_per_turn = CognitiveMapManager._calculate_cogmap_per_turn(env_data_list, mode="update")
+        cogmap_full_per_turn = CognitiveMapManager._calculate_cogmap_per_turn(env_data_list, mode="full")
+        out["cogmap_update_per_turn"] = cogmap_update_per_turn
+        out["cogmap_full_per_turn"] = cogmap_full_per_turn
 
         return out
     

@@ -6,13 +6,11 @@ from omegaconf import DictConfig, ListConfig, OmegaConf
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field
 from .. import (
+    HistoryManager,
     EvaluationTurnLog,
-    EvaluationManager,
     Room,
     ExplorationTurnLog,
-    ExplorationManager,
     CognitiveMapTurnLog,
-    CognitiveMapManager,
     Agent,
     RoomPlotter
 )
@@ -36,7 +34,7 @@ class EnvTurnLog:
     room_image: Optional[str] = None
     message_images: List[str] = field(default_factory=list)
     observed_items: List[str] = field(default_factory=list)
-    cognitive_map_response: Optional[str] = None
+    cogmap_response: Optional[str] = None
     info: Dict[str, Any] = field(default_factory=dict)
 
     
@@ -47,6 +45,7 @@ class EnvTurnLog:
             "assistant_raw_message": self.assistant_raw_message,
             "assistant_think_message": self.assistant_think_message,
             "assistant_parsed_message": self.assistant_parsed_message,
+            "cogmap_response": self.cogmap_response,
             "is_exploration_phase": self.is_exploration_phase,
             "exploration_log": self.exploration_log.to_dict() if self.exploration_log else {},
             "evaluation_log": self.evaluation_log.to_dict() if self.evaluation_log else {},
@@ -55,7 +54,6 @@ class EnvTurnLog:
             "room_state": self.room_state.to_dict() if self.room_state else {},
             "agent_state": self.agent_state.to_dict() if self.agent_state else {},
             "observed_items": self.observed_items,
-            "cognitive_map_response": self.cognitive_map_response,
             "room_image": self.room_image,
             "message_images": self.message_images,
             "info": self.info
@@ -112,85 +110,80 @@ class SpatialEnvLogger:
         
         return True
 
-    @staticmethod
-    def _aggregate_env_data(env_summaries: List[Dict], messages: List[List[Dict]], output_dir: str, save_images: bool = True, **kwargs) -> Dict:
-        """
-        Aggregate environment data and create visualization.
+    # @staticmethod
+    # def _aggregate_env_data(env_summaries: List[Dict], messages: List[List[Dict]], output_dir: str, save_images: bool = True, **kwargs) -> Dict:
+    #     """
+    #     Aggregate environment data and create visualization.
         
-        Args:
-            env_summaries: List of environment summary dictionaries
-            messages: List of message conversations for each environment
-            output_dir: Output directory for saving results
-            **kwargs: Additional arguments including model_name
+    #     Args:
+    #         env_summaries: List of environment summary dictionaries
+    #         messages: List of message conversations for each environment
+    #         output_dir: Output directory for saving results
+    #         **kwargs: Additional arguments including model_name
         
-        Returns:
-            Aggregated data dictionary
-        """
-        # Group environments by config name
-        config_groups = defaultdict(list)
+    #     Returns:
+    #         Aggregated data dictionary
+    #     """
+    #     # Group environments by config name
+    #     config_groups = defaultdict(list)
         
-        for env_summary, message in zip(env_summaries, messages):
-            config_name = env_summary['env_info']['config']['name']
+    #     for env_summary, message in zip(env_summaries, messages):
+    #         config_name = env_summary['env_info']['config']['name']
             
-            # Validate and assign raw messages
-            turn_logs = [turn_log for turn_log in env_summary.get('env_turn_logs', [])]
-            if not SpatialEnvLogger._validate_and_assign_messages(message, turn_logs):
-                continue
+    #         # Validate and assign raw messages
+    #         turn_logs = [turn_log for turn_log in env_summary.get('env_turn_logs', [])]
+    #         if not SpatialEnvLogger._validate_and_assign_messages(message, turn_logs):
+    #             continue
             
-            env_data = {**env_summary, "message": message}
-            config_groups[config_name].append(env_data)
+    #         env_data = {**env_summary, "message": message}
+    #         config_groups[config_name].append(env_data)
         
-        # Plot rooms and add image paths if requested
-        if save_images:
-            for config_name, group in config_groups.items():
-                for sample_idx, env_data in enumerate(group):
-                    img_folder = os.path.join(output_dir, "images", config_name, f"sample_{sample_idx+1}")
-                    os.makedirs(img_folder, exist_ok=True)
-                    # Plot room for each turn
-                    for turn_log in env_data["env_turn_logs"]:
-                        if turn_log["room_image"]:
-                            turn_log['room_image'] = os.path.relpath(turn_log['room_image'], output_dir)
-                        else:
-                            turn_idx = turn_log["turn_number"]
-                            img_path = SpatialEnvLogger._plot_room(turn_log["room_state"], turn_log["agent_state"], img_folder, config_name, sample_idx, turn_idx)
-                            turn_log["room_image"] = img_path
-                            turn_log.pop("room_state")
-                            turn_log.pop("agent_state")
-                        if turn_log['message_images']:
-                            turn_log['message_images'] = [os.path.relpath(img_path, output_dir) for img_path in turn_log['message_images']]
-                            continue
+    #     # Plot rooms and add image paths if requested
+    #     if save_images:
+    #         for config_name, group in config_groups.items():
+    #             for sample_idx, env_data in enumerate(group):
+    #                 img_folder = os.path.join(output_dir, "images", config_name, f"sample_{sample_idx+1}")
+    #                 os.makedirs(img_folder, exist_ok=True)
+    #                 # Plot room for each turn
+    #                 for turn_log in env_data["env_turn_logs"]:
+    #                     if turn_log["room_image"]:
+    #                         turn_log['room_image'] = os.path.relpath(turn_log['room_image'], output_dir)
+
+    #                     if turn_log['message_images']:
+    #                         turn_log['message_images'] = [os.path.relpath(img_path, output_dir) for img_path in turn_log['message_images']]
+    #                         continue
                             
                         
-                    env_data["message"] = [{k: v for k, v in msg.items() if k != 'multi_modal_data'} for msg in env_data["message"]]
+    #                 env_data["message"] = [{k: v for k, v in msg.items() if k != 'multi_modal_data'} for msg in env_data["message"]]
 
-        # Initialize result structure
-        result = {
-            "config_groups": dict(config_groups),
-            "exp_summary": {"group_performance": {}},
-            "eval_summary": {"group_performance": {}},
-            "cogmap_summary": {"group_performance": {}}
-        }
+    #     # Initialize result structure
+    #     result = {
+    #         "config_groups": dict(config_groups),
+    #         "exp_summary": {"group_performance": {}},
+    #         "eval_summary": {"group_performance": {}},
+    #         "cogmap_summary": {"group_performance": {}}
+    #     }
         
-        for config_name, env_data_list in config_groups.items():
-            result["config_groups"][config_name] = {"env_data": env_data_list}
+    #     for config_name, env_data_list in config_groups.items():
+    #         result["config_groups"][config_name] = {"env_data": env_data_list}
             
-            exp_summaries = [d['summary']['exp_summary'] for d in env_data_list]
-            eval_summaries = [d['summary']['eval_summary'] for d in env_data_list]
-            cogmap_summaries = [d['summary']['cogmap_summary'] for d in env_data_list]
+    #         exp_summaries = [d['summary']['exp_summary'] for d in env_data_list]
+    #         eval_summaries = [d['summary']['eval_summary'] for d in env_data_list]
+    #         cogmap_summaries = [d['summary']['cogmap_summary'] for d in env_data_list]
 
-            result["exp_summary"]["group_performance"][config_name] = ExplorationManager.aggregate_group_performance(exp_summaries, env_data_list)
-            result["eval_summary"]["group_performance"][config_name] = EvaluationManager.aggregate_group_performance(eval_summaries)
-            result["cogmap_summary"]["group_performance"][config_name] = CognitiveMapManager.aggregate_group_performance(cogmap_summaries, env_data_list)
+    #         result["exp_summary"]["group_performance"][config_name] = ExplorationManager.aggregate_group_performance(exp_summaries, env_data_list)
+    #         result["eval_summary"]["group_performance"][config_name] = EvaluationManager.aggregate_group_performance(eval_summaries)
+    #         result["cogmap_summary"]["group_performance"][config_name] = CognitiveMapManager.aggregate_group_performance(cogmap_summaries, env_data_list)
 
-        return result
+    #     return result
 
     @staticmethod
-    def _save_data(aggregated_data: Dict, output_dir: str, **kwargs):
+    def _save_data(aggregated_data: Dict, output_dir: str, model_name: str):
         """Save aggregated data to JSON and generate HTML dashboard."""
         saved_data = {
             'meta_info': {
-                'model_name': kwargs.get('model_name', 'unknown'),
-                'n_envs': sum(len(group['env_data']) for group in aggregated_data['config_groups'].values()),
+                'model_name': model_name,
+                'n_envs': len(aggregated_data.get('samples', {})),
             },
             **aggregated_data,
         }
@@ -198,13 +191,13 @@ class SpatialEnvLogger:
         # Convert OmegaConf objects to standard Python types
         saved_data = SpatialEnvLogger._convert_omegaconf_to_python(saved_data)
         
-        os.makedirs(os.path.dirname(output_dir), exist_ok=True)
+        # os.makedirs(os.path.dirname(output_dir), exist_ok=True)
         with open(os.path.join(output_dir, "env_data.json"), "w") as f:
             json.dump(saved_data, f, indent=2)
 
         # Generate HTML dashboard
         html_path = os.path.join(output_dir, "env_data.html")
-        dashboard_path = visualize_json(os.path.join(output_dir, "env_data.json"), html_path, True)
+        dashboard_path = visualize_json(saved_data, html_path, True)
         
         print(f"Environment data logged to {output_dir}")
         print(f"Dashboard written to {dashboard_path}")
@@ -213,16 +206,22 @@ class SpatialEnvLogger:
 
 
     @staticmethod
-    def log_each_env_info(env_summaries: List[Dict], messages: List[Dict], output_dir: str, save_images: bool = True, **kwargs):
-        """Logs detailed information for each environment and overall performance metrics."""
+    def log_each_env_info(output_dir: str, model_name, save_images: bool = True):
+        """Logs detailed information for each environment and overall performance metrics.
 
-        # Aggregate data using the logger
-        aggregated_data = SpatialEnvLogger._aggregate_env_data(
-            env_summaries=env_summaries,
-            messages=messages,
-            output_dir=output_dir,
+        New implementation that reads from directory structure:
+        model_name/hash_value/vision_or_text/active_or_passive/
+
+        Note: env_summaries and messages parameters are no longer used in this implementation,
+        but kept for backwards compatibility.
+        """
+
+        # Use new directory-based aggregation instead of env_summaries
+        # output_dir is results/debug, model_name from kwargs
+        model_dir = os.path.join(output_dir, model_name)
+        aggregated_data = HistoryManager._aggregate_from_directories(
+            model_dir=model_dir,
             save_images=save_images,
         )
-        
-        # Save aggregated data
-        return SpatialEnvLogger._save_data(aggregated_data, output_dir, **kwargs)
+
+        return SpatialEnvLogger._save_data(aggregated_data, model_dir, model_name=model_name)

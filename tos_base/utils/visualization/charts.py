@@ -51,6 +51,15 @@ def create_cogmap_metrics_plot(
     if not any_data:
         return None
 
+    # Check if there's only one turn - if so, skip drawing
+    max_turns = max(
+        len(series.get(k, [])) for k, include, _ in keys
+        if include and isinstance(series.get(k), list)
+    ) if any_data else 0
+
+    if max_turns <= 1:
+        return None
+
     fig, ax = plt.subplots(figsize=(8, 4))
     turns = None
     for k, include, label in keys:
@@ -117,10 +126,10 @@ def create_cognitive_map_sample_plots(
 
 
 
-def visualize_json(json_path: str, output_html: str, show_images: bool = True) -> str:
+def visualize_json(json_data: dict, output_html: str, show_images: bool = True) -> str:
     # Local import to avoid circular dependency
     from .visualization import Visualization
-    viz = Visualization(json_path, output_html, show_images)
+    viz = Visualization(json_data, output_html, show_images)
     return viz.visualize()
 
 

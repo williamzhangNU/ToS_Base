@@ -17,6 +17,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <input id="goto" type="number" min="1" max="{total_pages}" placeholder="page" onkeydown="if(event.key==='Enter') gotoPage({total_pages});">
         <button onclick="gotoPage({total_pages})">Go</button>
         <span id='counter'></span>
+        <div id='eval-task-selector' style='display:none; margin-left: 20px;'>
+            <label for='task-select'>Evaluation Task:</label>
+            <select id='task-select' onchange="switchEvaluationTask()">
+            </select>
+        </div>
     </div>
     
     <h1>Model: {model_name}</h1>
@@ -298,6 +303,13 @@ body {
     display: flex;
     flex-direction: column;
     min-height: 350px;
+}
+
+.turn-split .turn-content {
+    display: flex;
+    flex-direction: row;
+    gap: 20px;
+    margin-top: 15px;
 }
 
 .turn-split:hover {
@@ -790,6 +802,16 @@ a:hover {
         padding: 80px 16px 16px 16px;
         margin: 10px;
     }
+
+    .combo-container {
+        /* Mobile styling matching sample-page */
+        padding: 15px;
+        margin: 10px;
+    }
+
+    .combo-content-inner {
+        /* Mobile inner content */
+    }
     
     h1 {
         font-size: 2em;
@@ -1002,6 +1024,85 @@ a:hover {
     border-radius: 4px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
+
+/* Combination Selector Styles */
+.combination-selector {
+    background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%);
+    padding: 20px;
+    margin: 20px 0;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.combination-selector h3 {
+    color: white;
+    margin: 0 0 15px 0;
+    font-size: 1.2em;
+    font-weight: 600;
+}
+
+.combo-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.combo-btn {
+    padding: 10px 20px;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 0.9em;
+}
+
+.combo-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+}
+
+.combo-btn.active {
+    background: white;
+    color: #0984e3;
+    border-color: white;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+}
+
+.combo-container {
+    /* Single container with consistent background for all configs */
+    padding: 20px;
+    max-width: 1400px;
+    margin: 20px auto;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+    backdrop-filter: blur(10px);
+}
+
+.combo-content-inner {
+    /* Inner content that gets replaced, no background changes */
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+/* Single combination info styles */
+.single-combo-info {
+    background: linear-gradient(135deg, #00cec9 0%, #00b894 100%);
+    padding: 15px;
+    margin: 20px 0;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.single-combo-info h3 {
+    color: white;
+    margin: 0;
+    font-size: 1.1em;
+    font-weight: 600;
+}
 """
 
 JAVASCRIPT_CODE = """
@@ -1016,12 +1117,21 @@ function showPage(n, total) {
     document.getElementById('counter').innerText = (currentPage+1) + ' / ' + total;
     document.getElementById('goto').value = currentPage+1;
     location.hash = '#p' + (currentPage+1);
-    
+
     // Smooth scroll to top
     window.scrollTo({
         top: 0,
         behavior: 'smooth'
     });
+
+    // CRITICAL: Force reset all combo states on ALL pages before initializing
+    resetAllComboStates();
+
+    // Initialize combination display for current page
+    setTimeout(() => {
+        initCombinationDisplay();
+        initEvaluationTaskSelector();
+    }, 50);
 }
 
 function nextPage(total) {
@@ -1065,7 +1175,7 @@ window.addEventListener('load', () => {
     }
 });
 
-// Add smooth transitions
+// Add smooth transitions and initialize on load
 document.addEventListener('DOMContentLoaded', () => {
     const style = document.createElement('style');
     style.textContent = `
@@ -1074,6 +1184,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     `;
     document.head.appendChild(style);
+
+    // CRITICAL: Global reset then initialize
+    setTimeout(() => {
+        resetAllComboStates();
+        setTimeout(() => {
+            initCombinationDisplay();
+            initEvaluationTaskSelector();
+        }, 50);
+    }, 100);
 });
 
 // Toggle observation functionality
@@ -1164,14 +1283,182 @@ function toggleGroundTruth(gtId) {
     const content = document.getElementById(gtId);
     if (content) {
         // Check both style.display and computed style to handle initial inline styles
-        const isHidden = content.style.display === 'none' || 
+        const isHidden = content.style.display === 'none' ||
                         getComputedStyle(content).display === 'none';
-        
+
         if (isHidden) {
             content.style.display = 'block';
         } else {
             content.style.display = 'none';
         }
     }
+}
+
+// Reset all combo states across ALL pages
+function resetAllComboStates() {
+    console.log('Resetting all combo states globally');
+
+    // Reset ALL combo buttons across all pages
+    const allComboButtons = document.querySelectorAll('.combo-btn');
+    allComboButtons.forEach(btn => {
+        btn.classList.remove('active');
+    });
+
+    console.log('Global combo reset complete:', allComboButtons.length, 'buttons reset');
+}
+
+// Initialize combination display for current page
+function initCombinationDisplay() {
+    const currentPageDiv = document.querySelector('.sample-page.active');
+    if (!currentPageDiv) {
+        console.log('No active page found for initialization');
+        return;
+    }
+
+    // Find combo buttons on this page
+    const comboButtons = currentPageDiv.querySelectorAll('.combo-btn');
+    if (comboButtons.length === 0) {
+        console.log('No combo buttons found on this page');
+        return;
+    }
+
+    console.log('Initializing combo display for page:', currentPageDiv.id || 'unknown');
+
+    // Initialize with first combo
+    const firstButton = comboButtons[0];
+    const sampleId = firstButton.dataset.sample;
+    const firstCombo = firstButton.dataset.combo;
+
+    if (sampleId && firstCombo) {
+        // Switch to the first combination
+        switchCombination(firstCombo, sampleId);
+        console.log('Initialized with first combination:', firstCombo);
+    }
+}
+
+// Initialize evaluation task selector
+function initEvaluationTaskSelector() {
+    const currentPageDiv = document.querySelector('.sample-page.active');
+    if (!currentPageDiv) return;
+
+    const taskSelector = document.getElementById('eval-task-selector');
+    const taskSelect = document.getElementById('task-select');
+
+    // Look for evaluation tasks in the current page's active content
+    const activeContent = currentPageDiv.querySelector('.combo-content-inner');
+    let evalSections = [];
+
+    if (activeContent) {
+        // Look for eval tasks in the active combo content
+        evalSections = activeContent.querySelectorAll('.eval-task');
+    } else {
+        // Fallback: look in the entire page
+        evalSections = currentPageDiv.querySelectorAll('.eval-task');
+    }
+
+    if (evalSections.length > 1) {
+        // Show selector and populate options
+        taskSelector.style.display = 'inline-block';
+        taskSelect.innerHTML = '';
+
+        evalSections.forEach((section, index) => {
+            const taskName = section.getAttribute('data-task-name');
+            const option = document.createElement('option');
+            option.value = taskName;
+            option.textContent = taskName;
+            if (index === 0) option.selected = true;
+            taskSelect.appendChild(option);
+        });
+
+        // Show first task by default
+        switchEvaluationTask();
+    } else {
+        taskSelector.style.display = 'none';
+    }
+}
+
+// Switch evaluation task display
+function switchEvaluationTask() {
+    const taskSelect = document.getElementById('task-select');
+    const selectedTask = taskSelect.value;
+    const currentPageDiv = document.querySelector('.sample-page.active');
+
+    if (!currentPageDiv) return;
+
+    // Look for evaluation tasks in the current page's active content
+    const activeContent = currentPageDiv.querySelector('.combo-content-inner');
+    let evalSections = [];
+
+    if (activeContent) {
+        // Look for eval tasks in the active combo content
+        evalSections = activeContent.querySelectorAll('.eval-task');
+    } else {
+        // Fallback: look in the entire page
+        evalSections = currentPageDiv.querySelectorAll('.eval-task');
+    }
+
+    // Hide all evaluation tasks
+    evalSections.forEach(section => {
+        section.style.display = 'none';
+    });
+
+    // Show selected task
+    const selectedSection = activeContent ?
+        activeContent.querySelector(`.eval-task[data-task-name="${selectedTask}"]`) :
+        currentPageDiv.querySelector(`.eval-task[data-task-name="${selectedTask}"]`);
+
+    if (selectedSection) {
+        selectedSection.style.display = 'block';
+    }
+}
+
+// Switch combination for a sample
+function switchCombination(selectedCombo, sampleId) {
+    // Get current active page only
+    const currentPage = document.querySelector('.sample-page.active');
+    if (!currentPage) return;
+
+    console.log('Switching to combo:', selectedCombo, 'for sample:', sampleId);
+
+    // Get the data script containing all combo HTML
+    const dataScript = document.getElementById(`${sampleId}-data`);
+    if (!dataScript) {
+        console.error('No data found for sample:', sampleId);
+        return;
+    }
+
+    let comboData;
+    try {
+        comboData = JSON.parse(dataScript.textContent);
+    } catch (e) {
+        console.error('Failed to parse combo data:', e);
+        return;
+    }
+
+    // Get the content container
+    const contentContainer = document.getElementById(`${sampleId}-content`);
+    if (!contentContainer || !comboData[selectedCombo]) {
+        console.error('Content container or combo data not found');
+        return;
+    }
+
+    // Seamlessly replace the inner content without changing the container
+    contentContainer.innerHTML = comboData[selectedCombo].html;
+    console.log('Seamlessly switched content to:', selectedCombo);
+
+    // Update button states for this sample in current page only
+    const comboButtons = currentPage.querySelectorAll('.combo-btn');
+    comboButtons.forEach(btn => {
+        if (btn.dataset.sample === sampleId) {
+            if (btn.dataset.combo === selectedCombo) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        }
+    });
+
+    // Reinitialize evaluation task selector for the new combination
+    initEvaluationTaskSelector();
 }
 """

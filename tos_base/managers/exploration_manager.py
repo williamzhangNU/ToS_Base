@@ -177,24 +177,49 @@ class ExplorationManager:
         return dict(self._update_exp_summary())
     
     @staticmethod
-    def aggregate_group_performance(exp_summaries: List[Dict], env_data_list: List[Dict] = None) -> Dict[str, Any]:
-        """Calculate exploration performance for a group."""
-        if not exp_summaries:
+    def aggregate_group_performance(env_data_list: List[Dict] = None) -> Dict[str, Any]:
+        """Calculate exploration performance for a group from env_data_list."""
+        if not env_data_list:
             return {"avg_coverage": 0.0, "avg_exploration_steps": 0.0, "avg_node_coverage": 0.0, "avg_edge_coverage": 0.0}
-        
-        n = len(exp_summaries)
-        result = {
-            "avg_coverage": sum(m.get('coverage', 0.0) for m in exp_summaries) / n,
-            "avg_exploration_steps": sum(m.get('n_exploration_steps', 0) for m in exp_summaries) / n,
-            "avg_node_coverage": sum(m.get('node_coverage', m.get('coverage', 0.0)) for m in exp_summaries) / n,
-            "avg_edge_coverage": sum(m.get('edge_coverage', 0.0) for m in exp_summaries) / n,
-        }
-        
+
+        # Calculate metrics from last exploration log of each sample
+        node_coverages = []
+        edge_coverages = []
+        exploration_steps = []
+
+        for env_data in env_data_list:
+            env_turn_logs = env_data.get('env_turn_logs', [])
+
+            # Find the last exploration turn that has actual exploration log data
+            last_exploration_log = None
+            for turn_log in reversed(env_turn_logs):
+                if turn_log.get('is_exploration_phase', False):
+                    exploration_log = turn_log.get('exploration_log', {})
+                    if exploration_log:  # Only use if exploration_log is not empty
+                        last_exploration_log = exploration_log
+                        break
+
+            if last_exploration_log:
+                node_coverages.append(last_exploration_log.get('node_coverage', 0.0))
+                edge_coverages.append(last_exploration_log.get('edge_coverage', 0.0))
+                exploration_steps.append(last_exploration_log.get('step', 0))
+
+        n = len(node_coverages) if node_coverages else 1
+        result = {}
+
+        # Only add metrics to result if they have valid data
+        if exploration_steps:
+            result["avg_exploration_steps"] = sum(exploration_steps) / n
+        if node_coverages:
+            result["avg_node_coverage"] = sum(node_coverages) / n
+        if edge_coverages:
+            result["avg_edge_coverage"] = sum(edge_coverages) / n
+
         # Calculate average infogain per turn across all samples
-        if env_data_list:
-            infogain_per_turn = ExplorationManager._calculate_infogain_per_turn(env_data_list)
+        infogain_per_turn = ExplorationManager._calculate_infogain_per_turn(env_data_list)
+        if infogain_per_turn is not None:
             result["infogain_per_turn"] = infogain_per_turn
-        
+
         return result
     
     @staticmethod
