@@ -250,23 +250,32 @@ class HTMLGenerator:
                 cogmap_log = turn_log.get('cogmap_log', {})
                 if cogmap_log:
                     global_data = cogmap_log.get('global', {})
-                    for metric in ['dir', 'facing', 'pos', 'overall']:
-                        value = global_data.get(metric)
-                        cogmap_update_data[metric].append(value)
+                    if global_data:
+                        update_metrics = global_data.get('metrics', {})
+                        for metric in ['dir', 'facing', 'pos', 'overall']:
+                            value = update_metrics.get(metric)
+                            cogmap_update_data[metric].append(value)
+                    else:
+                        for metric in ['dir', 'facing', 'pos', 'overall']:
+                            cogmap_update_data[metric].append(None)
                 else:
                     # If no cogmap_log, fill with None
                     for metric in ['dir', 'facing', 'pos', 'overall']:
                         cogmap_update_data[metric].append(None)
 
-                # Extract full (cogmap_full_log) data - global only
-                cogmap_full_log = turn_log.get('cogmap_full_log', {})
-                if cogmap_full_log:
-                    global_data = cogmap_full_log.get('global', {})
-                    for metric in ['dir', 'facing', 'pos', 'overall']:
-                        value = global_data.get(metric)
-                        cogmap_full_data[metric].append(value)
+                # Extract full data - global only (using metrics_full from same cogmap_log)
+                if cogmap_log:
+                    global_data = cogmap_log.get('global', {})
+                    if global_data:
+                        full_metrics = global_data.get('metrics_full', {})
+                        for metric in ['dir', 'facing', 'pos', 'overall']:
+                            value = full_metrics.get(metric)
+                            cogmap_full_data[metric].append(value)
+                    else:
+                        for metric in ['dir', 'facing', 'pos', 'overall']:
+                            cogmap_full_data[metric].append(None)
                 else:
-                    # If no cogmap_full_log, fill with None
+                    # If no cogmap_log, fill with None
                     for metric in ['dir', 'facing', 'pos', 'overall']:
                         cogmap_full_data[metric].append(None)
 
@@ -486,10 +495,16 @@ class HTMLGenerator:
                 """
                 Build a tidy metrics dict with hierarchical + flat fields + consistency.
                 """
+                # Extract metrics from new structure
+                global_log = log.get("global", {})
+                local_log = log.get("local", {})
+                rooms_log = log.get("rooms", {})
+
                 out = {
-                    "Global": log.get("global", {}),
-                    "Local": log.get("local", {}),
-                    "Rooms": log.get("rooms", {}),
+                    "Global": global_log.get("metrics", {}) if global_log else {},
+                    "Global (Full)": global_log.get("metrics_full", {}) if global_log else {},
+                    "Local": local_log.get("metrics", {}) if local_log else {},
+                    "Rooms": rooms_log.get("metrics", {}) if rooms_log else {},
                     "Gates": (log.get("gates") or {}),
                 }
 
@@ -734,10 +749,16 @@ class HTMLGenerator:
                     return "<br>".join(lines) if lines else "(none)"
 
                 def _metrics_dict_from_log(log: Dict) -> Dict[str, Dict]:
+                    # Extract metrics from new structure
+                    global_log = log.get("global", {})
+                    local_log = log.get("local", {})
+                    rooms_log = log.get("rooms", {})
+
                     out = {
-                        "Global": log.get("global", {}),
-                        "Local": log.get("local", {}),
-                        "Rooms": log.get("rooms", {}),
+                        "Global": global_log.get("metrics", {}) if global_log else {},
+                        "Global (Full)": global_log.get("metrics_full", {}) if global_log else {},
+                        "Local": local_log.get("metrics", {}) if local_log else {},
+                        "Rooms": rooms_log.get("metrics", {}) if rooms_log else {},
                         "Gates": (log.get("gates") or {}),
                     }
                     flat = {
@@ -796,8 +817,6 @@ class HTMLGenerator:
                 # Display cognitive map logs (same as exploration)
                 if eval_log.get('cogmap_log'):
                     _render_cogmap_metrics_vs_gt(f, eval_log['cogmap_log'], "update")
-                if eval_log.get('cogmap_full_log'):
-                    _render_cogmap_metrics_vs_gt(f, eval_log['cogmap_full_log'], "full")
 
                 # Display evaluation metrics (similar to exploration metrics)
                 metrics = {}

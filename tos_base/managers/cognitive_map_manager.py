@@ -245,9 +245,8 @@ class CognitiveMapManager:
     def get_supported_types(self) -> List[str]:
         return ["global", "local", "rooms"]
         
-    def evaluate_cogmap_type(self, assistant_response: str, gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]], map_type: str, mode: str) -> Optional[BaseCogMapTurnLog]:
+    def evaluate_cogmap_type(self, assistant_response: str, gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]], map_type: str) -> Optional[BaseCogMapTurnLog]:
         """Extract JSON and evaluate a single cogmap type (global|local|rooms)."""
-        assert mode in ("explore", "evaluate"), f"Invalid mode: {mode}"
         self._register_active_entry_gate(gt_room)
         json_dict = self._extract_json_from_text(assistant_response)
         if json_dict is None or gt_room is None:
@@ -369,13 +368,13 @@ class CognitiveMapManager:
                 gt_rooms_state=gt_rooms_state,
             )
 
-    def evaluate_cogmaps(self, responses_by_type: Dict[str, str], gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]], mode: str) -> CognitiveMapTurnLog:
+    def evaluate_cogmaps(self, responses_by_type: Dict[str, str], gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]]) -> CognitiveMapTurnLog:
         """Evaluate multiple types and record one aggregate log for the turn."""
         out = CognitiveMapTurnLog()
         for map_type_key, resp in (responses_by_type or {}).items():
             if not isinstance(resp, str):
                 continue
-            single = self.evaluate_cogmap_type(resp, gt_room, gt_agent, observed_items, map_type_key, mode)
+            single = self.evaluate_cogmap_type(resp, gt_room, gt_agent, observed_items, map_type_key)
             if single is None:
                 continue
             if single.type == "global":
@@ -384,32 +383,8 @@ class CognitiveMapManager:
                 out.local_log = single
             elif single.type == "rooms":
                 out.rooms_log = single
-        turn_log = out
-        if mode == "explore":
-            self.explore_logs.append(turn_log)
-        else:
-            self.evaluate_log = turn_log
-        return turn_log
+        return out
             
-    
-    def get_cogmap_summary(self) -> Dict[str, Any]:
-        """Get metrics for both explore and evaluate modes (per type)."""
-        def _extract(log: Optional[CognitiveMapTurnLog]) -> Dict[str, Any]:
-            empty = {m: 0.0 for m in ("dir", "facing", "pos", "overall")}
-            out = {"global": empty.copy(), "local": empty.copy(), "rooms": empty.copy()}
-            if log is None or not isinstance(log, CognitiveMapTurnLog):
-                return out
-            if getattr(log, 'global_log', None) and log.global_log.metrics.valid:
-                out["global"] = log.global_log.metrics.to_dict()
-            if getattr(log, 'local_log', None) and log.local_log.metrics.valid:
-                out["local"] = log.local_log.metrics.to_dict()
-            if getattr(log, 'rooms_log', None) and log.rooms_log.metrics.valid:
-                out["rooms"] = log.rooms_log.metrics.to_dict()
-            return out
-        explore = _extract(self.explore_logs[-1] if self.explore_logs else None)
-        evaluate = _extract(self.evaluate_log)
-        return {"explore": explore, "evaluate": evaluate}
-    
     @staticmethod
     def _calculate_cogmap_per_turn(env_data_list: List[Dict], mode: str = "update") -> Dict[str, List[float]]:
         """Calculate average cognitive map metrics for each turn across all samples.
@@ -436,18 +411,25 @@ class CognitiveMapManager:
                     continue
                 # Select the per-type log aggregator
                 cogmap_agg = turn_log.get('cogmap_log', {})
-                for level in ['global', 'local', 'rooms']:
-                    level_data = (cogmap_agg.get(level, {}) or cogmap_agg.get('by_type', {}).get(level, {}).get('metrics', {}))
-                    for metric in ['dir', 'facing', 'pos', 'overall']:
-                        value = level_data.get(metric) if isinstance(level_data, dict) else None
-                        if value is not None and isinstance(value, (int, float)):
-                            turn_metrics[level][turn_idx][metric].append(float(value))
+                for level in ['global']:
+                    level_data = cogmap_agg.get(level, {})
+                    if isinstance(level_data, dict):
+                        # Choose metrics based on mode
+                        if mode == "full":
+                            metrics_data = level_data.get('metrics_full', {})
+                        else:  # mode == "update"
+                            metrics_data = level_data.get('metrics', {})
+
+                        for metric in ['dir', 'facing', 'pos', 'overall']:
+                            value = metrics_data.get(metric) if isinstance(metrics_data, dict) else None
+                            if value is not None and isinstance(value, (int, float)):
+                                turn_metrics[level][turn_idx][metric].append(float(value))
 
         # Calculate averages for each turn and level
-        result = {'global': {}, 'local': {}, 'rooms': {}}
+        result = {'global': {}}
 
-        for level in ['global', 'local', 'rooms']:
-            level_turn_metrics = turn_metrics[level]
+        for level in ['global']:
+            level_turn_metrics = turn_metrics.get(level, {})
             max_turns = max(level_turn_metrics.keys()) if level_turn_metrics else -1
 
             for metric in ['dir', 'facing', 'pos', 'overall']:
@@ -478,17 +460,18 @@ class CognitiveMapManager:
         for env_data in env_data_list:
             env_turn_logs = env_data.get('env_turn_logs', [])
 
-            # Find the last exploration turn with cogmap_full_log
-            last_explore_cogmap = None
+            # Find the last exploration turn with cogmap_log
             for turn_log in reversed(env_turn_logs):
                 if turn_log.get('is_exploration_phase', False):
-                    cogmap_full_log = turn_log.get('cogmap_full_log', {})
-                    if cogmap_full_log:
-                        last_explore_cogmap = cogmap_full_log.get('global', {})
-                        for metric in metrics:
-                            value = last_explore_cogmap.get(metric)
-                            if value is not None:
-                                explore_metrics[metric].append(value)
+                    cogmap_log = turn_log.get('cogmap_log', {})
+                    if cogmap_log:
+                        global_log = cogmap_log.get('global', {})
+                        if global_log:
+                            global_metrics = global_log.get('metrics_full', {})
+                            for metric in metrics:
+                                value = global_metrics.get(metric)
+                                if value is not None:
+                                    explore_metrics[metric].append(value)
                         break
 
             # Get evaluation task cogmap metrics - store separately for each task
@@ -497,13 +480,15 @@ class CognitiveMapManager:
                 if task_type not in evaluate_metrics_by_task:
                     evaluate_metrics_by_task[task_type] = {m: [] for m in metrics}
 
-                cogmap_full_log = task_data.get('cogmap_full_log', {})
-                if cogmap_full_log:
-                    global_metrics = cogmap_full_log.get('global', {})
-                    for metric in metrics:
-                        value = global_metrics.get(metric)
-                        if value is not None:
-                            evaluate_metrics_by_task[task_type][metric].append(value)
+                cogmap_log = task_data.get('cogmap_log', {})
+                if cogmap_log:
+                    global_log = cogmap_log.get('global', {})
+                    if global_log:
+                        global_metrics = global_log.get('metrics_full', {})
+                        for metric in metrics:
+                            value = global_metrics.get(metric)
+                            if value is not None:
+                                evaluate_metrics_by_task[task_type][metric].append(value)
 
         # Calculate averages, excluding None values
         explore_avg = {}
@@ -1088,7 +1073,7 @@ class CognitiveMapManager:
                         if should_keep:
                             room_dict[preferred_key] = v
                     out_rooms[str(rid)] = _strip_conf_and_faces_global(room_dict)
-        jd["rooms"] = out_rooms
+            jd["rooms"] = out_rooms
         return jd
 
 
