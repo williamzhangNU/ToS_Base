@@ -1029,26 +1029,48 @@ class CognitiveMapManager:
                 out[name] = new_info
             return out
 
+        def _should_keep_key(key: str, keep_set: set) -> tuple[bool, str]:
+            """Check if key should be kept and return the preferred key name from keep_set"""
+            if key in keep_set:
+                return True, key
+            # Check if key with underscores matches any keep element without underscores
+            if '_' in key:
+                key_no_underscore = key.replace('_', '')
+                for keep_item in keep_set:
+                    if keep_item.replace('_', '') == key_no_underscore:
+                        return True, keep_item
+
+            return False, key
+
         # --- Global: keep observed + gates + agent; drop initial_pos ---
         if isinstance(jd.get("global"), dict):
             g = jd["global"]
             keep = set(observed) | gate_names | {"agent"}
-            jd["global"] = _strip_conf_and_faces_global(
-                {k: v for k, v in g.items() if k in keep and k != "initial_pos"}
-            )
+            global_dict = {}
+            for k, v in g.items():
+                should_keep, preferred_key = _should_keep_key(k, keep)
+                if should_keep:
+                    global_dict[preferred_key] = v
+            jd["global"] = _strip_conf_and_faces_global(global_dict)
 
         # --- Local: drop origin + keep only visible objects ---
         if isinstance(jd.get("local"), dict):
             loc = jd["local"]
             agent_ori = gt_agent.ori
             if "objects" in loc:
-                jd["local"] = _strip_conf_and_faces_local(
-                    {k: v for k, v in loc["objects"].items() if k in visible}, agent_ori
-                )
+                local_dict = {}
+                for k, v in loc["objects"].items():
+                    should_keep, preferred_key = _should_keep_key(k, visible)
+                    if should_keep:
+                        local_dict[preferred_key] = v
+                jd["local"] = _strip_conf_and_faces_local(local_dict, agent_ori)
             else:
-                jd["local"] = _strip_conf_and_faces_local(
-                    {k: v for k, v in loc.items() if k in visible}, agent_ori
-                )
+                local_dict = {}
+                for k, v in loc.items():
+                    should_keep, preferred_key = _should_keep_key(k, visible)
+                    if should_keep:
+                        local_dict[preferred_key] = v
+                jd["local"] = _strip_conf_and_faces_local(local_dict, agent_ori)
 
         # --- Rooms: drop origin + keep only observed objects ---
         rooms = jd.get("rooms") if isinstance(jd, dict) else None
@@ -1071,19 +1093,28 @@ class CognitiveMapManager:
                     gate = next((g for g in gt_room.gates if g.name == gate_name), None)
                     if gate:
                         gate_ori = gate.get_ori_for_room(int(rid))
-                        out_rooms[str(rid)] = _strip_conf_and_faces_local(
-                            {k: v for k, v in inner.items() if k in keep}, gate_ori
-                        )
+                        room_dict = {}
+                        for k, v in inner.items():
+                            should_keep, preferred_key = _should_keep_key(k, keep)
+                            if should_keep:
+                                room_dict[preferred_key] = v
+                        out_rooms[str(rid)] = _strip_conf_and_faces_local(room_dict, gate_ori)
                     else:
                         # fallback if gate not found
-                        out_rooms[str(rid)] = _strip_conf_and_faces_global(
-                            {k: v for k, v in inner.items() if k in keep}
-                        )
+                        room_dict = {}
+                        for k, v in inner.items():
+                            should_keep, preferred_key = _should_keep_key(k, keep)
+                            if should_keep:
+                                room_dict[preferred_key] = v
+                        out_rooms[str(rid)] = _strip_conf_and_faces_global(room_dict)
                 else:
                     # fallback if no entry gate
-                    out_rooms[str(rid)] = _strip_conf_and_faces_global(
-                        {k: v for k, v in inner.items() if k in keep}
-                    )
+                    room_dict = {}
+                    for k, v in inner.items():
+                        should_keep, preferred_key = _should_keep_key(k, keep)
+                        if should_keep:
+                            room_dict[preferred_key] = v
+                    out_rooms[str(rid)] = _strip_conf_and_faces_global(room_dict)
         jd["rooms"] = out_rooms
         return jd
 
