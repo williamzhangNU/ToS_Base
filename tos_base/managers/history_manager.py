@@ -13,7 +13,7 @@ class HistoryManager:
     def __init__(self, config, room, agent, override=False, override_cogmap=False, dir = ".cache"):
         self.responses = []
         self.images = []
-        self.cogmap_responses = []  # Store cognitive map responses
+        self.cogmap_logs = []  # Store CognitiveMapTurnLog dicts per turn
         self.current_turn = 0
         self.dir = os.path.abspath(os.path.join(dir, self.generate_unique_name(config, room, agent)))
         self.path = os.path.join(self.dir, "env_history.json")
@@ -64,7 +64,8 @@ class HistoryManager:
         if os.path.exists(self.cogmap_path):
             with open(self.cogmap_path, "r") as f:
                 data = json.load(f)
-                self.cogmap_responses = data.get('cogmap_responses', [])    
+                # prefer logs; keep backward compatibility if only responses exist
+                self.cogmap_logs = data.get('cogmap_logs', [])
 
     def get_image_path(self, turn_num):
         assert 0 < turn_num <= len(self.images)
@@ -80,12 +81,11 @@ class HistoryManager:
                 }, f, ensure_ascii=False, indent=2)
             
     def save_cogmap(self) -> None:
-        """Save cognitive map responses to separate file"""
-        if not os.path.exists(self.cogmap_path):
-            with open(self.cogmap_path, "w") as f:
-                json.dump({
-                    "cogmap_responses": self.cogmap_responses
-                }, f, ensure_ascii=False, indent=2)
+        """Save cognitive map logs to separate file"""
+        with open(self.cogmap_path, "w") as f:
+            json.dump({
+                "cogmap_logs": self.cogmap_logs
+            }, f, ensure_ascii=False, indent=2)
     
     def update_response(self, response: Union[str, Dict[str, Any]], room_state, agent_state):
         self.responses.append(response)
@@ -97,16 +97,16 @@ class HistoryManager:
     def get_responses(self) -> List[Union[str, Dict[str, Any]]]:
         return self.responses
     
-    def get_cogmap_response(self, turn_idx: int) -> Optional[str]:
-        """Get cognitive map response for a specific turn (0-indexed)"""
-        if 0 <= turn_idx < len(self.cogmap_responses):
-            return self.cogmap_responses[turn_idx]
+    def get_cogmap_log(self, turn_idx: int) -> Optional[Dict[str, Any]]:
+        """Get cached CognitiveMapTurnLog (dict) for a specific turn (0-indexed)."""
+        if 0 <= turn_idx < len(self.cogmap_logs):
+            return self.cogmap_logs[turn_idx]
         return None
     
-    def update_cogmap_response(self, response: str):
-        """Add a cognitive map response for the current turn"""
-        self.cogmap_responses.append(response)
+    def update_cogmap_log(self, log_dict: Dict[str, Any]):
+        """Append a CognitiveMapTurnLog (dict) for the current turn."""
+        self.cogmap_logs.append(log_dict)
         
-    def has_cogmap_response(self, turn_idx: int) -> bool:
-        """Check if cognitive map response exists for a specific turn (0-indexed)"""
-        return 0 <= turn_idx < len(self.cogmap_responses) and self.cogmap_responses[turn_idx] is not None
+    def has_cogmap_log(self, turn_idx: int) -> bool:
+        """Check if cognitive map log exists for a specific turn (0-indexed)."""
+        return 0 <= turn_idx < len(self.cogmap_logs) and self.cogmap_logs[turn_idx] is not None

@@ -1,60 +1,101 @@
 """
 Cognitive map prompts (modular, per-type).
 
-Keep prompts concise. Exposed via get_cogmap_prompt(map_type).
+A single BASE prompt contains all shared schema and general rules.
+Per-type prompts ONLY add their specific instructions (no repetition).
 """
 
-# Global-only
+BASE_COGMAP_PROMPT = """\
+## Cognitive Map (JSON)
+
+Represent the scene as a JSON map. Always output the cognitive map JSON first.
+
+### Schema (shared)
+- position: [x, y] integers (or integer-like)
+- facing: use cardinal words ("north|south|east|west") for global/rooms frames; use axis signs ("+x|-x|+y|-y") for local frames
+- confidence (optional): one of "high" (certain), "medium" (estimated), "low" (unknown). Omit if unknown.
+
+### General rules (shared)
+- Coordinate frame MUST be explicit in the content.
+- Include only observed/known information—do not invent.
+"""
+
+# Global-only specifics
 COGMAP_INSTRUCTION_GLOBAL_ONLY = """\
-## Cognitive Map (global only)
+## Cognitive Map — Global (specifics)
 
-Keep a concise global map JSON of the scene on a N by M grid.
+- Grid: concise global map on an N×M grid.
+- Frame: origin [0,0] is your initial position; +Y is your initial facing direction (north).
+- Content: include all observed objects and gates; include the agent
+- Facing: use "north|south|east|west".
 
-- Global: origin [0,0] and +Y is your initial facing direction
-
-Fields:
-- position: [x, y] in the map’s coordinate system (integers or integer-like)
-- facing: one of "north|south|east|west" (omit or set unknown if not applicable)
-- confidence: "high" (certain), "medium" (estimated), "low" (unknown)
-
-Content rules:
-- Global: include observed objects and gates; include agent; exclude "initial_pos"
-Always output the cognitive map JSON first in your thinking.
+Example:
+```json
+{
+    "agent": {"position": [2, 3], "facing": "east", "confidence": "high"},
+    "chair": {"position": [2, 4], "facing": "north", "confidence": "medium"},
+}
+```
 """
 
-# Local-only
+# Local-only specifics
 COGMAP_INSTRUCTION_LOCAL_ONLY = """\
-## Cognitive Map (local only)
+## Cognitive Map — Local (specifics)
 
-Keep a concise local map JSON.
+- Frame: must include "origin":"agent". Always keep in mind that the origin is the agent's position and orientation.
+- Structure: include an "objects" dict; each object's position and facing are relative to the agent at time of writing.
+- Content: include all objects and doors in your current field of view; DO NOT include the agent itself in "objects".
+- Facing: use "+x|-x|+y|-y" (local axes).
 
-- Local: must include "origin":"agent" and an "objects" dict. Each object's
-  position and facing are relative to the agent at the time of writing.
-- Facings use +x, -x, +y, -y relative to the local frame.
-- Include only currently visible objects; exclude the agent itself here.
+Example:
+```json
+{
+    "origin": "agent",
+    "objects": {
+      "chair": {"position": [0, 1], "facing": "-x", "confidence": "high"}
+    }
+}
+```
 """
 
-# Rooms-only
+# Rooms-only specifics
 COGMAP_INSTRUCTION_ROOMS_ONLY = """\
-## Cognitive Map (rooms only)
+## Cognitive Map — Rooms (specifics)
 
-Keep concise per-room maps.
+- Structure: map of rooms keyed by room id.
+- Frame per room: must include "origin":"<gate_name>" where the origin gate is the first used to enter that room; +Y points into the room.
+- Content: include each room’s "objects" dict; DO NOT include the agent; DO NOT include the entry door.
+- Initial room: include it with origin at the initial position and orientation.
+- Facing: use "north|south|east|west".
 
-- Each room entry is keyed by room id and must include "origin":"<gate_name>" and an "objects" dict.
-- The origin gate is the gate first used to enter that room. +Y points into the room.
-- Do not include the agent or origin gate inside a room's objects.
-- Exclude the initial room if it has no origin gate.
+Example:
+```json
+{
+  "1": {
+    "origin": "initial_pos",
+    "objects": {
+      "chair": {"position": [1, 0], "facing": "north"},
+      "table": {"position": [2, 1], "facing": "west"}
+    }
+  },
+  "2": {
+    "origin": "door",
+    "objects": {
+      "sofa": {"position": [0, 2], "facing": "south"}
+    }
+  }
+}
+```
 """
 
 def get_cogmap_prompt(map_type: str) -> str:
-    mt = (map_type or "global").lower()
-    if mt == "global":
-        return COGMAP_INSTRUCTION_GLOBAL_ONLY
-    if mt == "local":
-        return COGMAP_INSTRUCTION_LOCAL_ONLY
-    if mt == "rooms":
-        return COGMAP_INSTRUCTION_ROOMS_ONLY
+    """Return the assembled cognitive-map prompt for a given type."""
+    t = (map_type or "global").strip().lower()
+    if t == "global":
+        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}"
+    if t == "local":
+        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_LOCAL_ONLY}"
+    if t == "rooms":
+        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_ROOMS_ONLY}"
     # default to global
-    return COGMAP_INSTRUCTION_GLOBAL_ONLY
-
-
+    return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}"
