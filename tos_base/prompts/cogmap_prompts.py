@@ -97,5 +97,32 @@ def get_cogmap_prompt(map_type: str) -> str:
         return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_LOCAL_ONLY}"
     if t == "rooms":
         return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_ROOMS_ONLY}"
+    if t == "relations":
+        return RELATIONS_PROMPT
     # default to global
     return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}"
+
+# --- Pairwise relations ---
+from ..utils.relation_codes import _DIR_LABEL_TO_CODE as _DLC, _DIST_LABEL_TO_CODE as _SLC
+
+def _build_relations_mapping_text() -> str:
+    dir_pairs = ", ".join([f"{lab}={code}" for lab, code in _DLC.items()])
+    dist_pairs = ", ".join([f"{lab}={code}" for lab, code in _SLC.items()])
+    return f"Directions: {dir_pairs}. Distances: {dist_pairs}."
+
+RELATIONS_PROMPT = f"""\
+## Pairwise Relations (JSON)
+
+- Report unordered pairs for ALL observed objects (objects and gates) and agent's initial position as "initial_pos". Do NOT include agent current pose.
+- Keys: "A|B" (alphabetical). A|B means A is relative to B.
+- Values: "(DIR, DIST)" where DIR and DIST are compact codes. {_build_relations_mapping_text()}
+- Output a flat JSON object of pairs (no extra nesting).
+
+Example:
+```json
+{{
+  "initial_pos|chair": "(E, near)",
+  "chair|door1": "(NW, mid)"
+}}
+```
+"""
