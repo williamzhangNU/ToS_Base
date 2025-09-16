@@ -97,7 +97,7 @@ class Prompter:
             else:
                 obs_str = PASSIVE_INSTRUCTION_TEXT.format(
                     room_info=room_desc,
-                    exp_history=exp_history,
+                    exp_history=exp_history_str,
                     observation_instructions=observation_instructions,
                 )
 
