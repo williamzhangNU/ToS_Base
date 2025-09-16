@@ -866,7 +866,7 @@ if __name__ == "__main__":
 
     def multiple_runs(n_runs: int, proxy_name: str, **kwargs):
         action_counts, action_costs, edge_coverages, node_coverages = [], [], [], []
-        for seed in tqdm(range(10, 10 + n_runs), desc=f'Running experiments for {proxy_name}'):
+        for seed in tqdm(range(n_runs), desc=f'Running experiments for {proxy_name}'):
             room, agent = RoomGenerator.generate_room(
                 room_size=[15, 15],
                 n_objects=8,
@@ -877,7 +877,7 @@ if __name__ == "__main__":
             RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
             proxy = get_agent_proxy(proxy_name, room, agent, metric='relations', **kwargs)
             proxy.run()
-            print(proxy.to_text())
+            # print(proxy.to_text())
             summary = proxy.mgr.get_exp_summary()
             action_count, action_cost, edge_coverage, node_coverage = summary['action_counts'], summary['action_cost'], summary['edge_coverage'], summary['node_coverage']
         
@@ -891,8 +891,8 @@ if __name__ == "__main__":
 
 
     # action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(10, 'inquisitor')
-    # action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(1, proxy_name='analyst', delegate='observer_analyst', observer_delegate='strategist')
-    action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(1, proxy_name='analyst', delegate='candidate_planner', observer_delegate='strategist')
+    # action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(1, proxy_name='analyst', delegate='observer_analyst', observer_delegate='oracle')
+    action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(100, proxy_name='analyst', delegate='candidate_planner', observer_delegate='strategist')
 
     # Calculate average action counts per action type
     avg_action_counts = defaultdict(float)
