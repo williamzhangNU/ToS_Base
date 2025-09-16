@@ -59,35 +59,89 @@ class CogMapMetrics:
 
 
 @dataclass
-class SingleCogMapTurnLog:
-    """Metrics and info for a single cogmap type (e.g., global/local/rooms)."""
+class BaseCogMapTurnLog:
+    """Common fields for all cogmap types."""
     type: str
-    metrics: CogMapMetrics = field(default_factory=CogMapMetrics)
-    gates: Dict[str, float] = field(default_factory=dict)
     extraction_success: bool = False
     original_response: str = ""
+    pred_json: Dict[str, Any] = field(default_factory=dict)
     pred_room_state: Optional['BaseRoom'] = None
-    gt_json: Dict[str, Any] = field(default_factory=dict)
+    metrics: CogMapMetrics = field(default_factory=CogMapMetrics)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "type": self.type,
-            "metrics": (self.metrics.to_dict() if self.metrics.valid else {}),
-            "gates": self.gates,
             "extraction_success": self.extraction_success,
             "original_response": self.original_response,
+            "pred_json": self.pred_json,
             "pred_room_state": self.pred_room_state.to_dict() if self.pred_room_state else {},
-            "gt_json": self.gt_json,
+            "metrics": (self.metrics.to_dict() if self.metrics.valid else {}),
         }
+
+@dataclass
+class GlobalCogMapTurnLog(BaseCogMapTurnLog):
+    connectivity: Dict[str, float] = field(default_factory=dict)
+    gt_room_state: Optional['BaseRoom'] = None
+    gt_json: Dict[str, Any] = field(default_factory=dict)
+    gt_room_state_full: Optional['BaseRoom'] = None
+    gt_json_full: Dict[str, Any] = field(default_factory=dict)
+    metrics_full: CogMapMetrics = field(default_factory=CogMapMetrics)
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = super().to_dict()
+        out.update({
+            "connectivity": self.connectivity,
+            "gt_room_state": self.gt_room_state.to_dict() if self.gt_room_state else {},
+            "gt_json": self.gt_json,
+            "gt_room_state_full": self.gt_room_state_full.to_dict() if self.gt_room_state_full else {},
+            "gt_json_full": self.gt_json_full,
+            "metrics_full": (self.metrics_full.to_dict() if self.metrics_full.valid else {}),
+        })
+        return out
+
+@dataclass
+class LocalCogMapTurnLog(BaseCogMapTurnLog):
+    gt_room_state: Optional['BaseRoom'] = None
+    gt_json: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = super().to_dict()
+        out.update({
+            "gt_room_state": self.gt_room_state.to_dict() if self.gt_room_state else {},
+            "gt_json": self.gt_json,
+        })
+        return out
+
+@dataclass
+class RoomsCogMapTurnLog(BaseCogMapTurnLog):
+    pred_rooms_state: Dict[str, 'BaseRoom'] = field(default_factory=dict)
+    gt_rooms_state: Dict[str, 'BaseRoom'] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = super().to_dict()
+        out.update({
+            "pred_rooms_state": {k: v.to_dict() for k, v in self.pred_rooms_state.items()} if self.pred_rooms_state else {},
+            "gt_rooms_state": {k: v.to_dict() for k, v in self.gt_rooms_state.items()} if self.gt_rooms_state else {},
+        })
+        return out
 
 
 @dataclass
 class CognitiveMapTurnLog:
     """Aggregate per-type logs for one turn."""
-    by_type: Dict[str, SingleCogMapTurnLog] = field(default_factory=dict)
+    global_log: Optional[GlobalCogMapTurnLog] = None
+    local_log: Optional[LocalCogMapTurnLog] = None
+    rooms_log: Optional[RoomsCogMapTurnLog] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {t: log.to_dict() for t, log in self.by_type.items()}
+        out: Dict[str, Any] = {}
+        if self.global_log:
+            out["global"] = self.global_log.to_dict()
+        if self.local_log:
+            out["local"] = self.local_log.to_dict()
+        if self.rooms_log:
+            out["rooms"] = self.rooms_log.to_dict()
+        return out
 
 
 # =============================== transforms =============================== 
@@ -191,18 +245,18 @@ class CognitiveMapManager:
     def get_supported_types(self) -> List[str]:
         return ["global", "local", "rooms"]
         
-    def evaluate_cogmap_type(self, assistant_response: str, gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]], map_type: str, mode: str) -> Optional[SingleCogMapTurnLog]:
+    def evaluate_cogmap_type(self, assistant_response: str, gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]], map_type: str, mode: str) -> Optional[BaseCogMapTurnLog]:
         """Extract JSON and evaluate a single cogmap type (global|local|rooms)."""
         assert mode in ("explore", "evaluate"), f"Invalid mode: {mode}"
         self._register_active_entry_gate(gt_room)
-        jd = self._extract_json_from_text(assistant_response)
-        if jd is None or gt_room is None:
+        json_dict = self._extract_json_from_text(assistant_response)
+        if json_dict is None or gt_room is None:
             return None
         all_item_names = {o.name for o in gt_room.all_objects}
         observed_set: set[str] = set(all_item_names if observed_items is None else [str(x) for x in observed_items])
         visible_names = self._visible_object_names(gt_room, gt_agent)
-        jd = self._preprocess_predicted(jd, observed_set, visible_names, gt_room, gt_agent)
-        pred_global_br, pred_local_br, pred_rooms_map, pred_gates = self._parse_predicted_maps(jd)
+        json_dict = self._preprocess_predicted(json_dict, observed_set, visible_names, gt_room, gt_agent)
+        pred_global_br, pred_local_br, pred_rooms_map, pred_gates = self._parse_predicted_maps(json_dict)
         pred_global_br = pred_global_br or BaseRoom(objects=[], name="pred_global")
         pred_local_br = pred_local_br or BaseRoom(objects=[], name="pred_local")
         pred_rooms_map = pred_rooms_map or {}
@@ -212,20 +266,27 @@ class CognitiveMapManager:
         gt_rooms_map = self._build_gt_room_baserooms(gt_room, gt_agent, observed_set)
         self._ensure_pos_norm_L(gt_room, gt_agent)
 
-        mt = (map_type or "global").lower()
+        map_type_lower = (map_type or "global").lower()
         metrics = CogMapMetrics.invalid()
-        gt_json: Dict[str, Any] = {}
+        pred_json: Dict[str, Any] = {}
         pred_state: Optional[BaseRoom] = None
-        if mt == "global":
+        gt_room_state: Optional[BaseRoom] = None
+        if map_type_lower == "global":
+            # Global includes ALL gates in both pred and GT; and provide full vs observed GT
             metrics = self._compare_baserooms(pred_global_br, gt_global_br)
             pred_state = pred_global_br
-            gt_json = self.baseroom_to_json(gt_global_br, include_gates=True)
-        elif mt == "local":
+            pred_json = self.baseroom_to_json(pred_global_br, include_gates=True)
+            gt_room_state = gt_global_br
+        elif map_type_lower == "local":
             if len(gt_local_br.objects) > 0:
-                metrics = self._compare_baserooms(pred_local_br, gt_local_br)
+                # include gates in local GT
+                gt_local_with_gates = self._build_gt_local_with_gates(gt_room, gt_agent)
+                metrics = self._compare_baserooms(pred_local_br, gt_local_with_gates)
+                gt_local_br = gt_local_with_gates
             pred_state = pred_local_br
-            gt_json = self.baseroom_to_json(gt_local_br, include_gates=False)
-        elif mt == "rooms":
+            pred_json = self.baseroom_to_json(pred_local_br, include_gates=True)
+            gt_room_state = gt_local_br
+        elif map_type_lower == "rooms":
             per_room: List[CogMapMetrics] = []
             for rid in sorted(gt_rooms_map.keys()):
                 gt_br = gt_rooms_map[rid]
@@ -234,37 +295,96 @@ class CognitiveMapManager:
                 pred_br = pred_rooms_map.get(str(rid)) or pred_rooms_map.get(rid) or BaseRoom(objects=[], name=f"pred_room_{rid}")
                 per_room.append(self._compare_baserooms(pred_br, gt_br))
             metrics = CogMapMetrics.average(per_room)
-            # store average GT projection for reference
-            gt_json = {rid: self.baseroom_to_json(br, include_gates=False) for rid, br in gt_rooms_map.items()}
+            pred_json = {rid: self.baseroom_to_json(pred_rooms_map.get(str(rid)) or BaseRoom(objects=[], name=f"pred_room_{rid}"), include_gates=False) for rid in gt_rooms_map.keys()}
+            gt_room_state = None
         else:
-            # unknown type -> skip
-            return None
+            raise ValueError(f"Invalid map type: {map_type_lower}")
 
-        gates_block: Dict[str, float] = {}
-        if mt == "global":
+        connectivity_block: Dict[str, float] = {}
+        if map_type_lower == "global":
             gate_acc = self._evaluate_gate_connections(pred_gates, gt_room)
-            gates_block = {"conn_acc": float(gate_acc)} if isinstance(gate_acc, (int, float)) else {}
+            connectivity_block = {"conn_acc": float(gate_acc)} if isinstance(gate_acc, (int, float)) else {}
 
-        return SingleCogMapTurnLog(
-            type=mt,
-            metrics=metrics,
-            gates=gates_block,
-            extraction_success=True,
-            original_response=assistant_response,
-            pred_room_state=pred_state,
-            gt_json=gt_json,
-        )
+        # Populate GT jsons and room states
+        gt_json_out: Dict[str, Any] = {}
+        gt_json_full: Dict[str, Any] = {}
+        gt_room_state_full: Optional[BaseRoom] = None
+        pred_rooms_state: Dict[str, BaseRoom] = {}
+        gt_rooms_state: Dict[str, BaseRoom] = {}
+
+        if map_type_lower == "global":
+            # observed-only GT json (already filtered):
+            gt_json_out = self.baseroom_to_json(gt_global_br, include_gates=True)
+            # full GT json and room state (all objects):
+            full_raw = self._baseroom_from_gt(gt_room, gt_agent)
+            full_global = _transform_baseroom(full_raw, gt_agent.init_pos, gt_agent.init_ori)
+            gt_room_state_full = full_global
+            gt_json_full = self.baseroom_to_json(full_global, include_gates=True)
+        elif map_type_lower == "local":
+            gt_json_out = self.baseroom_to_json(gt_room_state, include_gates=True) if gt_room_state else {}
+        elif map_type_lower == "rooms":
+            for rid, gt_br in gt_rooms_map.items():
+                gt_rooms_state[str(rid)] = gt_br
+            for rid, pr in pred_rooms_map.items():
+                pred_rooms_state[str(rid)] = pr
+
+        if map_type_lower == "global":
+            # compute full metrics w.r.t. full GT
+            metrics_full = self._compare_baserooms(pred_global_br, gt_room_state_full or pred_global_br)
+            return GlobalCogMapTurnLog(
+                type=map_type_lower,
+                extraction_success=True,
+                original_response=assistant_response,
+                pred_json=pred_json,
+                pred_room_state=pred_state,
+                metrics=metrics,
+                connectivity=connectivity_block,
+                gt_room_state=gt_room_state,
+                gt_json=gt_json_out,
+                gt_room_state_full=gt_room_state_full,
+                gt_json_full=gt_json_full,
+                metrics_full=metrics_full,
+            )
+        elif map_type_lower == "local":
+            return LocalCogMapTurnLog(
+                type=map_type_lower,
+                extraction_success=True,
+                original_response=assistant_response,
+                pred_json=pred_json,
+                pred_room_state=pred_state,
+                metrics=metrics,
+                gt_room_state=gt_room_state,
+                gt_json=gt_json_out,
+            )
+        else:
+            # rooms
+            return RoomsCogMapTurnLog(
+                type=map_type_lower,
+                extraction_success=True,
+                original_response=assistant_response,
+                pred_json=pred_json,
+                pred_room_state=None,
+                metrics=metrics,
+                pred_rooms_state=pred_rooms_state,
+                gt_rooms_state=gt_rooms_state,
+            )
 
     def evaluate_cogmaps(self, responses_by_type: Dict[str, str], gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]], mode: str) -> CognitiveMapTurnLog:
         """Evaluate multiple types and record one aggregate log for the turn."""
-        logs: Dict[str, SingleCogMapTurnLog] = {}
-        for mt, resp in (responses_by_type or {}).items():
+        out = CognitiveMapTurnLog()
+        for map_type_key, resp in (responses_by_type or {}).items():
             if not isinstance(resp, str):
                 continue
-            single = self.evaluate_cogmap_type(resp, gt_room, gt_agent, observed_items, mt, mode)
-            if single is not None:
-                logs[mt] = single
-        turn_log = CognitiveMapTurnLog(by_type=logs)
+            single = self.evaluate_cogmap_type(resp, gt_room, gt_agent, observed_items, map_type_key, mode)
+            if single is None:
+                continue
+            if single.type == "global":
+                out.global_log = single
+            elif single.type == "local":
+                out.local_log = single
+            elif single.type == "rooms":
+                out.rooms_log = single
+        turn_log = out
         if mode == "explore":
             self.explore_logs.append(turn_log)
         else:
@@ -279,10 +399,12 @@ class CognitiveMapManager:
             out = {"global": empty.copy(), "local": empty.copy(), "rooms": empty.copy()}
             if log is None or not isinstance(log, CognitiveMapTurnLog):
                 return out
-            for t in ("global", "local", "rooms"):
-                s = log.by_type.get(t)
-                if s and s.metrics and s.metrics.valid:
-                    out[t] = s.metrics.to_dict()
+            if getattr(log, 'global_log', None) and log.global_log.metrics.valid:
+                out["global"] = log.global_log.metrics.to_dict()
+            if getattr(log, 'local_log', None) and log.local_log.metrics.valid:
+                out["local"] = log.local_log.metrics.to_dict()
+            if getattr(log, 'rooms_log', None) and log.rooms_log.metrics.valid:
+                out["rooms"] = log.rooms_log.metrics.to_dict()
             return out
         explore = _extract(self.explore_logs[-1] if self.explore_logs else None)
         evaluate = _extract(self.evaluate_log)
@@ -574,6 +696,17 @@ class CognitiveMapManager:
         raw = BaseRoom(objects=objs, name='gt_local_raw')
         return _transform_baseroom(raw, gt_agent.pos, gt_agent.ori)
 
+    def _build_gt_local_with_gates(self, gt_room: Room, gt_agent: Agent) -> BaseRoom:
+        visible = self._visible_object_names(gt_room, gt_agent)
+        objs: List[Object] = []
+        for name in visible:
+            o = gt_room.get_object_by_name(name)
+            objs.append(Object(name=o.name, pos=o.pos.copy(), ori=o.ori.copy(), has_orientation=getattr(o, 'has_orientation', True)))
+        for g in gt_room.gates:
+            objs.append(Object(name=g.name, pos=g.pos.copy(), ori=g.ori.copy(), has_orientation=True))
+        raw = BaseRoom(objects=objs, name='gt_local_raw')
+        return _transform_baseroom(raw, gt_agent.pos, gt_agent.ori)
+    
     def _build_gt_room_baserooms(self, gt_room: Room, gt_agent: Agent, observed_set: set[str]) -> Dict[int, BaseRoom]:
         out: Dict[int, BaseRoom] = {}
         if not isinstance(gt_room, Room):

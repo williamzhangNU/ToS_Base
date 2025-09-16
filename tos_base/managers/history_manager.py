@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 import os
 import shutil
 import json
@@ -21,12 +21,13 @@ class HistoryManager:
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.evaluation_turn_logs: Dict = {}
+        self.cogmap_logs = []  # Store CognitiveMapTurnLog dicts per turn
         self.exp_type = observation_config['exp_type']
         self.model_path= HistoryManager.get_model_dir(output_dir, model_config)
         self.output_dir = os.path.abspath(os.path.join(
             self.model_path,
-            self._generate_room_key(room_dict, agent_dict), 
-            observation_config['render_mode'], 
+            self._generate_room_key(room_dict, agent_dict),
+            observation_config['render_mode'],
             observation_config['exp_type']
         ))
         model_config_path = os.path.join(self.model_path, "model_config.json")
@@ -37,6 +38,7 @@ class HistoryManager:
             self.output_dir = os.path.join(self.output_dir, observation_config["proxy_agent"])
         self.exploration_path = os.path.join(self.output_dir, "exploration_turn_logs.json")
         self.evaluation_path = os.path.join(self.output_dir, "evaluation_turn_logs.json")
+        self.cogmap_path = os.path.join(self.output_dir, "cogmap_history.json")
         if override:
             if os.path.exists(self.output_dir):
                 shutil.rmtree(self.output_dir)
@@ -63,7 +65,13 @@ class HistoryManager:
         if os.path.exists(self.evaluation_path):
             with open(self.evaluation_path, "r") as f:
                 self.evaluation_turn_logs = json.load(f)
-    
+        """Load cognitive map responses from separate file"""
+        if os.path.exists(self.cogmap_path):
+            with open(self.cogmap_path, "r") as f:
+                data = json.load(f)
+                # prefer logs; keep backward compatibility if only responses exist
+                self.cogmap_logs = data.get('cogmap_logs', [])
+
     def save(self) -> None:
         """Save env turn logs to JSON file"""
         if self.exploration_turn_logs:
@@ -71,6 +79,14 @@ class HistoryManager:
                 json.dump(self.exploration_turn_logs, f, ensure_ascii=False, indent=2)
         with open(self.evaluation_path, "w") as f:
             json.dump(self.evaluation_turn_logs, f, ensure_ascii=False, indent=2)
+
+    def save_cogmap(self) -> None:
+        """Save cognitive map logs to separate file"""
+        with open(self.cogmap_path, "w") as f:
+            json.dump({
+                "cogmap_logs": self.cogmap_logs
+            }, f, ensure_ascii=False, indent=2)
+
     
     def update_turn_log(self, turn_log: Dict):
         """
@@ -93,10 +109,22 @@ class HistoryManager:
             turn_log['room_image'] = img_path
             self.evaluation_turn_logs[turn_log['evaluation_log']['task_type']] = turn_log
 
-
     def get_responses(self) -> List[Dict]:
         return [log.get('assistant_raw_message') for log in self.exploration_turn_logs if log.get('assistant_raw_message') is not None]
 
+    def get_cogmap_log(self, turn_idx: int) -> Optional[Dict[str, Any]]:
+        """Get cached CognitiveMapTurnLog (dict) for a specific turn (0-indexed)."""
+        if 0 <= turn_idx < len(self.cogmap_logs):
+            return self.cogmap_logs[turn_idx]
+        return None
+
+    def update_cogmap_log(self, log_dict: Dict[str, Any]):
+        """Append a CognitiveMapTurnLog (dict) for the current turn."""
+        self.cogmap_logs.append(log_dict)
+
+    def has_cogmap_log(self, turn_idx: int) -> bool:
+        """Check if cognitive map log exists for a specific turn (0-indexed)."""
+        return 0 <= turn_idx < len(self.cogmap_logs) and self.cogmap_logs[turn_idx] is not None
 
     def update_cogmap(self, turn_log: Dict) -> None:
         """Update cognitive map response for a specific turn"""

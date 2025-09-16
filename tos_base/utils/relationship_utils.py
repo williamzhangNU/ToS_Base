@@ -356,6 +356,7 @@ if __name__ == "__main__":
     # ax = rose_glyph_compass_style(pairs=[(4, 1)])
     # ax = rose_glyph_compass_style(pairs=[(5, 1), (5, 2), (6, 2)])
     # ax = rose_glyph_compass_style(pairs=[(6, 1), (6, 2), (7, 2)])
-    ax = rose_glyph_compass_style(pairs=all_pairs)
+    # ax = rose_glyph_compass_style(pairs=all_pairs)
+    ax = rose_glyph_compass_style(pairs=[(1, 1), (2, 2), (1, 2)])
 
     plt.savefig("rose_glyph_pretty.png", transparent=True)

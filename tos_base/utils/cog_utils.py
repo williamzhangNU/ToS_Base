@@ -94,9 +94,13 @@ def evaluate_cognitive_maps_from_turnlogs(
                 for msg_idx in range(max_message_idx):
                     msg = env_messages[msg_idx]
                     messages.append(msg.copy())
-                # Build per-type prompts
+                # Use cached log if available; otherwise build per-type prompts
                 if turn_logs[turn_idx-1]['is_exploration_phase']:
                     target_turn_idx = turn_idx - 1
+                    cached_log = history_manager.get_cogmap_log(target_turn_idx)
+                    if cached_log:
+                        turn_logs[target_turn_idx]['cogmap_log'] = cached_log
+                        continue
                     assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
                     base_user = turn_log.get('user_message', '')
                     for t in cognitive_map_manager.get_supported_types():
@@ -110,6 +114,10 @@ def evaluate_cognitive_maps_from_turnlogs(
                     continue
                 elif not turn_log['is_exploration_phase'] and turn_log.get('evaluation_log') and turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('action'):
                     target_turn_idx = turn_idx
+                    cached_log = history_manager.get_cogmap_log(target_turn_idx)
+                    if cached_log:
+                        turn_logs[target_turn_idx]['cogmap_log'] = cached_log
+                        continue
                     assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
                     base_user = re.sub(r'## Evaluation Question.*', '', turn_log.get('user_message', ''), flags=re.DOTALL) + turn_log['evaluation_log']['evaluation_data']['action']
                     for t in cognitive_map_manager.get_supported_types():
@@ -125,15 +133,19 @@ def evaluate_cognitive_maps_from_turnlogs(
                     continue
 
         elif env_config.get('exp_type') == 'passive':
-            assert env_messages[0]["role"] == "user", f"Expected user message but got {env_messages[0]['role']}"
-            base_user = re.sub(r'## Evaluation Question.*', '', turn_logs[0].get('user_message', ''), flags=re.DOTALL)
-            for t in cognitive_map_manager.get_supported_types():
-                msgs = [env_messages[0].copy()]
-                msgs[0]["content"] = base_user + get_cogmap_prompt(t)
-                all_messages_list.append(msgs)
-                all_env_ids.append(env_id_counter)
-                env_id_to_location[env_id_counter] = (env_idx, 0, t)
-                env_id_counter += 1
+            cached_log = history_manager.get_cogmap_log(0)
+            if cached_log:
+                turn_logs[0]['cogmap_log'] = cached_log
+            else:
+                assert env_messages[0]["role"] == "user", f"Expected user message but got {env_messages[0]['role']}"
+                base_user = re.sub(r'## Evaluation Question.*', '', turn_logs[0].get('user_message', ''), flags=re.DOTALL)
+                for t in cognitive_map_manager.get_supported_types():
+                    msgs = [env_messages[0].copy()]
+                    msgs[0]["content"] = base_user + get_cogmap_prompt(t)
+                    all_messages_list.append(msgs)
+                    all_env_ids.append(env_id_counter)
+                    env_id_to_location[env_id_counter] = (env_idx, 0, t)
+                    env_id_counter += 1
 
     
     if all_messages_list:
@@ -151,7 +163,10 @@ def evaluate_cognitive_maps_from_turnlogs(
             turn_log = env_summary['env_turn_logs'][turn_idx]
             cognitive_map_manager = env_cogmap_managers[env_idx]
             _evaluate_and_store_cogmap_logs(turn_log, responses_by_type, cognitive_map_manager, env_summary['env_info']['config'])
-
+            # cache aggregated log for this turn
+            history_manager = env_history_managers[env_idx]
+            if history_manager is not None:
+                history_manager.update_cogmap_log(turn_log['cogmap_log'])
     # After processing all cognitive maps, generate cogmap_summary for each environment
     for env_idx, cognitive_map_manager in env_cogmap_managers.items():
         env_summary = env_summarys[env_idx]
@@ -160,6 +175,10 @@ def evaluate_cognitive_maps_from_turnlogs(
         cogmap_summary = cognitive_map_manager.get_cogmap_summary()
 
         env_summary['summary']['cogmap_summary'] = cogmap_summary
+<<<<<<< HEAD
+=======
+    
+>>>>>>> 1456cee (update cogmap)
         
     return env_summarys
 
