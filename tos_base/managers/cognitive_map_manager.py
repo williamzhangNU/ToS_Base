@@ -536,39 +536,39 @@ class CognitiveMapManager:
                     continue
                 # Select the per-type log aggregator
                 cogmap_agg = turn_log.get('cogmap_log', {})
-                for level in ['global']:
-                    level_data = cogmap_agg.get(level, {})
-                    if isinstance(level_data, dict):
-                        # Choose metrics based on mode
-                        if mode == "full":
-                            metrics_data = level_data.get('metrics_full', {})
-                        else:  # mode == "update"
-                            metrics_data = level_data.get('metrics', {})
+                level = 'global'
+                level_data = cogmap_agg.get(level, {})
+                if isinstance(level_data, dict):
+                    # Choose metrics based on mode
+                    if mode == "full":
+                        metrics_data = level_data.get('metrics_full', {})
+                    else:  # mode == "update"
+                        metrics_data = level_data.get('metrics', {})
 
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            value = metrics_data.get(metric) if isinstance(metrics_data, dict) else None
-                            if value is not None and isinstance(value, (int, float)):
-                                turn_metrics[level][turn_idx][metric].append(float(value))
+                    for metric in ['dir', 'facing', 'pos', 'overall']:
+                        value = metrics_data.get(metric) if isinstance(metrics_data, dict) else None
+                        if value is not None and isinstance(value, (int, float)):
+                            turn_metrics[level][turn_idx][metric].append(float(value))
 
         # Calculate averages for each turn and level
         result = {'global': {}}
 
-        for level in ['global']:
-            level_turn_metrics = turn_metrics.get(level, {})
-            max_turns = max(level_turn_metrics.keys()) if level_turn_metrics else -1
+        level = 'global'
+        level_turn_metrics = turn_metrics.get(level, {})
+        max_turns = max(level_turn_metrics.keys()) if level_turn_metrics else -1
 
-            for metric in ['dir', 'facing', 'pos', 'overall']:
-                avg_values = []
+        for metric in ['dir', 'facing', 'pos', 'overall']:
+            avg_values = []
 
-                for turn_idx in range(max_turns + 1):
-                    if (turn_idx in level_turn_metrics and metric in level_turn_metrics[turn_idx] and level_turn_metrics[turn_idx][metric]):
-                        values = level_turn_metrics[turn_idx][metric]
-                        avg_value = sum(values) / len(values)
-                        avg_values.append(avg_value)
-                    else:
-                        avg_values.append(PAD)
+            for turn_idx in range(max_turns + 1):
+                if (turn_idx in level_turn_metrics and metric in level_turn_metrics[turn_idx] and level_turn_metrics[turn_idx][metric]):
+                    values = level_turn_metrics[turn_idx][metric]
+                    avg_value = sum(values) / len(values)
+                    avg_values.append(avg_value)
+                else:
+                    avg_values.append(PAD)
 
-                result[level][metric] = avg_values
+            result[level][metric] = avg_values
         return result
 
     @staticmethod

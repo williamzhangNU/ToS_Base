@@ -14,10 +14,11 @@ from .. import (
 class HistoryManager:
     """Simple conversation history manager.
     Store only env turn logs in a single JSON file
+    Directory structure: model_name/room_hash_key/vision_or_text/active_or_passive/
+    Example: gpt-4o/1d54fa/vision/active/
     """
 
     def __init__(self, observation_config:Dict, model_config:Dict ,room_dict: Dict, agent_dict: Dict, output_dir:str, override=False):
-        # dir structure model_name/room_key/vision_or_text/active_or_passive/
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.evaluation_turn_logs: Dict = {}
@@ -145,21 +146,21 @@ class HistoryManager:
         samples = {}
         all_config_keys = set()
 
-        # Scan all sample directories (hash values)
+        # Scan all sample directories (room keys)
         sample_dirs = [d for d in os.listdir(model_dir) if os.path.isdir(os.path.join(model_dir, d))]
 
-        # 连续编号仅针对有效样本（存在合法 subdirs）
+        # Sequential numbering only for valid samples (with valid subdirs)
         valid_idx = 0
         for sample_dir in sample_dirs:
             sample_path = os.path.join(model_dir, sample_dir)
 
-            # 收集包含日志文件的子目录
+            # Collect subdirectories containing log files
             subdirs: List[str] = []
             for root, _, files in os.walk(sample_path):
                 if "exploration_turn_logs.json" in files or "evaluation_turn_logs.json" in files:
                     subdirs.append(root)
 
-            # subdirs 为空则视为无效样本，跳过
+            # Skip if subdirs is empty (invalid sample)
             if not subdirs:
                 continue
 
@@ -221,16 +222,14 @@ class HistoryManager:
         if os.path.exists(exploration_file):
             with open(exploration_file, 'r') as f:
                 exploration_logs = json.load(f)
-                if exploration_logs:
-                    sample_data["env_turn_logs"] = exploration_logs  # Only exploration logs
+            sample_data["env_turn_logs"] = exploration_logs if exploration_logs else [] # Only exploration logs
 
         # Load evaluation turn logs - store each task separately
         if os.path.exists(evaluation_file):
             with open(evaluation_file, 'r') as f:
                 evaluation_logs = json.load(f)
-                if evaluation_logs and isinstance(evaluation_logs, dict):
-                    # Store each evaluation task separately
-                    sample_data["evaluation_tasks"] = evaluation_logs
+            # Store each evaluation task separately
+            sample_data["evaluation_tasks"] = evaluation_logs if evaluation_logs else {}
 
         # Process image paths if save_images is enabled
         if save_images:
