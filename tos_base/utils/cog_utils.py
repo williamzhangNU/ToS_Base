@@ -13,17 +13,6 @@ from ..managers.history_manager import HistoryManager
 from .. import Room, Agent
 import re
 
-
-def _evaluate_and_store_cogmap_logs(turn_log, response, cognitive_map_manager, env_config):
-    """Helper function to evaluate cognitive map response and store logs in turn_log"""
-    cogmap_log = None
-    cogmap_full_log = None
-    if env_config.get('exp_type') == 'passive' or turn_log.get('is_exploration_phase'):
-        mode = "explore"
-    else:
-        mode = "evaluate"
-    
-
 def evaluate_cognitive_maps_from_turnlogs(
     env_summarys: List[Dict[str, Any]],  # List of env summaries from get_env_summary()
     message_lists: List[List[Dict[str, str]]],  # Corresponding list of message histories
@@ -52,7 +41,7 @@ def evaluate_cognitive_maps_from_turnlogs(
     if not cogmap_config:
         cogmap_config = {
             "cogmap_type": "standard",
-            "pos_allow_scale": True,
+            "pos_allow_scale": False,
             "scope": "all",
         }
     
@@ -75,7 +64,7 @@ def evaluate_cognitive_maps_from_turnlogs(
         )
         env_cogmap_managers[env_idx] = cognitive_map_manager
 
-        history_manager = HistoryManager(env_config['observation_config'], room_config, agent_config)
+        history_manager = HistoryManager(env_config['observation_config'], env_config['model_config'],room_config, agent_config, env_config['output_dir'])
         env_history_managers[env_idx] = history_manager
         
         turn_logs = env_summary['env_turn_logs']

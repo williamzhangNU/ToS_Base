@@ -199,14 +199,14 @@ class SpatialEnvLogger:
         html_path = os.path.join(output_dir, "env_data.html")
         dashboard_path = visualize_json(saved_data, html_path, True)
         
-        print(f"Environment data logged to {output_dir}")
-        print(f"Dashboard written to {dashboard_path}")
+        print(f"Environment data logged to {os.path.abspath(output_dir)}")
+        print(f"Dashboard written to {os.path.abspath(dashboard_path)}")
         return output_dir
     
 
 
     @staticmethod
-    def log_each_env_info(output_dir: str, model_name, save_images: bool = True):
+    def log_each_env_info(output_dir: str, model_config, save_images: bool = True):
         """Logs detailed information for each environment and overall performance metrics.
 
         New implementation that reads from directory structure:
@@ -218,10 +218,10 @@ class SpatialEnvLogger:
 
         # Use new directory-based aggregation instead of env_summaries
         # output_dir is results/debug, model_name from kwargs
-        model_dir = os.path.join(output_dir, model_name)
-        aggregated_data = HistoryManager._aggregate_from_directories(
+        model_dir = HistoryManager.get_model_dir(output_dir, model_config)
+        aggregated_data = HistoryManager.aggregate_from_directories(
             model_dir=model_dir,
             save_images=save_images,
         )
 
-        return SpatialEnvLogger._save_data(aggregated_data, model_dir, model_name=model_name)
+        return SpatialEnvLogger._save_data(aggregated_data, model_dir, model_name=model_config['model_name'])

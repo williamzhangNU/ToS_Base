@@ -16,29 +16,40 @@ class HistoryManager:
     Store only env turn logs in a single JSON file
     """
 
-    def __init__(self, observation_config:Dict, room_dict: Dict, agent_dict: Dict, override=False, dir = "results/debug"):
+    def __init__(self, observation_config:Dict, model_config:Dict ,room_dict: Dict, agent_dict: Dict, output_dir:str, override=False):
         # dir structure model_name/room_key/vision_or_text/active_or_passive/
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.evaluation_turn_logs: Dict = {}
         self.exp_type = observation_config['exp_type']
-        self.dir = os.path.abspath(os.path.join(dir, observation_config['model_name'], self._generate_room_key(room_dict, agent_dict), observation_config['render_mode'], observation_config['exp_type']))
+        self.model_path= HistoryManager.get_model_dir(output_dir, model_config)
+        self.output_dir = os.path.abspath(os.path.join(
+            self.model_path,
+            self._generate_room_key(room_dict, agent_dict), 
+            observation_config['render_mode'], 
+            observation_config['exp_type']
+        ))
+        model_config_path = os.path.join(self.model_path, "model_config.json")
+        if not os.path.exists(model_config_path):
+            with open(model_config_path, "w") as f:
+                json.dump(model_config, f, ensure_ascii=False, indent=2)
         if observation_config['exp_type'] == 'passive':
-            self.dir = os.path.join(self.dir, observation_config["proxy_agent"])
-        self.exploration_path = os.path.join(self.dir, "exploration_turn_logs.json")
-        self.evaluation_path = os.path.join(self.dir, "evaluation_turn_logs.json")
+            self.output_dir = os.path.join(self.output_dir, observation_config["proxy_agent"])
+        self.exploration_path = os.path.join(self.output_dir, "exploration_turn_logs.json")
+        self.evaluation_path = os.path.join(self.output_dir, "evaluation_turn_logs.json")
         if override:
-            if os.path.exists(self.dir):
-                shutil.rmtree(self.dir)
+            if os.path.exists(self.output_dir):
+                shutil.rmtree(self.output_dir)
 
         self._load()
-        os.makedirs(self.dir, exist_ok=True)
-        os.makedirs(os.path.join(self.dir, "images"), exist_ok=True)
-        
-    
+        os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(os.path.join(self.output_dir, "images"), exist_ok=True)
+
+
     def is_history_exist(self):
         return os.path.exists(self.exploration_path)
     
+
     def _generate_room_key(self, room_dict, agent_dict):
         room_str = json.dumps({**room_dict, **agent_dict}, sort_keys=True)
 
@@ -69,7 +80,7 @@ class HistoryManager:
         if turn_log['is_exploration_phase']:
             assert not self.is_history_exist()
             if turn_log['room_state'] and turn_log['agent_state']:
-                img_path = os.path.join(self.dir, "images", f"room_turn_{turn_log['turn_number']}.png")
+                img_path = os.path.join(self.output_dir, "images", f"room_turn_{turn_log['turn_number']}.png")
                 RoomPlotter.plot(Room.from_dict(turn_log['room_state']), Agent.from_dict(turn_log['agent_state']), mode='img', save_path=img_path)
                 turn_log['room_image'] = img_path
             #invalid
@@ -77,7 +88,7 @@ class HistoryManager:
         else:
             assert turn_log['evaluation_log']
             assert turn_log['room_state'] and turn_log['agent_state']
-            img_path = os.path.join(self.dir, "images", f"room_{turn_log['evaluation_log']['task_type']}.png")
+            img_path = os.path.join(self.output_dir, "images", f"room_{turn_log['evaluation_log']['task_type']}.png")
             RoomPlotter.plot(Room.from_dict(turn_log['room_state']), Agent.from_dict(turn_log['agent_state']), mode='img', save_path=img_path)
             turn_log['room_image'] = img_path
             self.evaluation_turn_logs[turn_log['evaluation_log']['task_type']] = turn_log
@@ -110,7 +121,21 @@ class HistoryManager:
                 self.exploration_turn_logs[turn_idx].get('cogmap_response') is not None)
 
     @staticmethod
-    def _aggregate_from_directories(model_dir: str, save_images: bool = True) -> Dict:
+    def get_model_dir(output_dir: str, model_config: Dict) -> str:
+        """Generate a unique directory name for the model configuration"""
+        #TODO may be a minor diff leads to a different hash
+        for k in [k for k, v in model_config.items() if v is None]:
+            model_config.pop(k)
+        model_config.pop("api_key", None) 
+        model_config.pop("base_url", None)
+        model_config.pop("max_retries", None)
+        model_config.pop("timeout", None)
+        model_config_str = json.dumps(model_config, sort_keys=True)
+        model_name = model_config['model_name'] + "_" + hashlib.sha256(model_config_str.encode("utf-8")).hexdigest()[:16]
+        return os.path.join(output_dir, model_name)
+    
+    @staticmethod
+    def aggregate_from_directories(model_dir: str, save_images: bool = True) -> Dict:
         """
         Aggregate data from new directory structure:
         base_dir/model_name/hash_value/vision_or_text/active_or_passive/
