@@ -50,7 +50,7 @@ class Prompter:
         obs = {}
         room_desc = get_room_description(room, agent, with_topdown=self.config.prompt_config['topdown'])
         if self.config.render_mode == 'vision':
-            images = [self.image_handler.get_image('instruction')]
+            images = [self.image_handler.get_image('instruction'),self.image_handler.get_image('label')]
         else:
             observation_instructions = (
                 PairwiseRelationship.prompt()
@@ -69,7 +69,7 @@ class Prompter:
                 obs_str = ACTIVE_INSTRUCTION_VISION.format(
                     room_info=room_desc,
                     exp_instructions=exp_instructions,
-                    instruction_example=self.config.image_placeholder
+                    image_placeholder=self.config.image_placeholder
                 )
 
                 obs['multi_modal_data'] = {self.config.image_placeholder: images}
@@ -91,7 +91,7 @@ class Prompter:
                 obs_str = PASSIVE_INSTRUCTION_VISION.format(
                     room_info=room_desc,
                     exp_history=exp_history_str,
-                    instruction_example=self.config.image_placeholder
+                    image_placeholder=self.config.image_placeholder
                 )
                 obs['multi_modal_data'] = {self.config.image_placeholder: images}
             else:
