@@ -280,6 +280,15 @@ class SpatialSolver:
             self._ensure_domain_initialized(name)
         return {name: var.domain.copy() for name, var in self.solver.variables.items()}
 
+    def get_num_possible_positions(self) -> Dict[str, int]:
+        """Return counts of possible positions for each variable without mutating domains.
+
+        If a variable's domain has not been initialized (empty set), return the
+        full grid cell count as its count.
+        """
+        full = self.grid_size ** 2
+        return {name: (len(var.domain) if var.domain else full) for name, var in self.solver.variables.items()}
+
     def get_possible_relations(self, max_samples_per_var: int = 50,
                         perspective: Tuple[int, int] = (0, 1), bin_system=CardinalBinsAllo(), distance_bin_system=StandardDistanceBins(),
                         path_consistent: bool = True) -> Dict[Tuple[str, str], Set[str]]:

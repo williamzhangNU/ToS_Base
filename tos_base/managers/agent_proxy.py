@@ -36,8 +36,8 @@ def _closest_cardinal(vec: np.ndarray) -> np.ndarray:
 class AgentProxy:
     """Base proxy that executes actions via ExplorationManager and logs a simple history."""
 
-    def __init__(self, room: Room, agent: Agent):
-        self.mgr = ExplorationManager(room, agent)
+    def __init__(self, room: Room, agent: Agent, grid_size: int | None = None):
+        self.mgr = ExplorationManager(room, agent, grid_size=grid_size)
         self.room, self.agent = self.mgr.exploration_room, self.mgr.agent
         # Focused room id for planning when at gates (agent may belong to two rooms at a door)
         self.room_focus = self.agent.room_id
@@ -458,7 +458,7 @@ class ObserverAnalystAgentProxy(AgentProxy):
     def __init__(self, room: Room, agent: Agent, grid_size: int | None = None,
                  rel_threshold: int = 0, eval_samples: int = 30, delegate: str = 'oracle', max_observes: int = 100,
                  metric: str = 'positions'):
-        super().__init__(room, agent)
+        super().__init__(room, agent, grid_size=grid_size)
         g = (max(self.room.mask.shape) if getattr(self.room, 'mask', None) is not None else 10)
         self.grid_size = int(g if grid_size is None else grid_size)
         self.rel_threshold = int(rel_threshold)
@@ -723,7 +723,7 @@ class AnalystAgentProxy(AgentProxy):
     def __init__(self, room: Room, agent: Agent, grid_size: int | None = None,
                  max_queries: int = 16, rel_threshold: int = 0, eval_samples: int = 30,
                  delegate: str = 'oracle', observer_delegate: str = 'oracle', metric: str = 'positions'):
-        super().__init__(room, agent)
+        super().__init__(room, agent, grid_size=grid_size)
         g = (max(self.room.mask.shape) if getattr(self.room, 'mask', None) is not None else 10)
         self.solver = SpatialSolver([o.name for o in self.room.all_objects] + ['initial_pos'], grid_size=(g if grid_size is None else grid_size))
         self.solver.set_initial_position('initial_pos', (0, 0))
@@ -840,7 +840,7 @@ class AnalystAgentProxy(AgentProxy):
         return self.turns
 
 
-def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = None, observer_delegate: str | None = None, metric: str | None = None) -> AgentProxy:
+def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = None, observer_delegate: str | None = None, metric: str | None = None, grid_size: int | None = None) -> AgentProxy:
     name = (name or 'oracle').lower()
     mapping = {
         'oracle': OracleAgentProxy,
@@ -852,10 +852,10 @@ def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = 
         'candidate_planner': CandidatePlannerAgentProxy,
     }
     if name == 'analyst':
-        return mapping['analyst'](room, agent, delegate=(delegate or 'oracle'), observer_delegate=(observer_delegate or 'oracle'), metric=(metric or 'positions'))
+        return mapping['analyst'](room, agent, grid_size=grid_size, delegate=(delegate or 'oracle'), observer_delegate=(observer_delegate or 'oracle'), metric=(metric or 'positions'))
     if name == 'observer_analyst':
-        return mapping['observer_analyst'](room, agent, delegate=(delegate or 'oracle'), metric=(metric or 'positions'))
-    return mapping.get(name, OracleAgentProxy)(room, agent)
+        return mapping['observer_analyst'](room, agent, grid_size=grid_size, delegate=(delegate or 'oracle'), metric=(metric or 'positions'))
+    return mapping.get(name, OracleAgentProxy)(room, agent, grid_size=grid_size)
 
 
 if __name__ == "__main__":
@@ -866,7 +866,7 @@ if __name__ == "__main__":
 
     def multiple_runs(n_runs: int, proxy_name: str, **kwargs):
         action_counts, action_costs, edge_coverages, node_coverages = [], [], [], []
-        for seed in tqdm(range(n_runs), desc=f'Running experiments for {proxy_name}'):
+        for seed in tqdm(range(1, 1 + n_runs), desc=f'Running experiments for {proxy_name}'):
             room, agent = RoomGenerator.generate_room(
                 room_size=[15, 15],
                 n_objects=8,
@@ -875,10 +875,11 @@ if __name__ == "__main__":
                 main=4
             )
             RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
-            proxy = get_agent_proxy(proxy_name, room, agent, metric='relations', **kwargs)
+            proxy = get_agent_proxy(proxy_name, room, agent, metric='positions', **kwargs)
             proxy.run()
             # print(proxy.to_text())
             summary = proxy.mgr.get_exp_summary()
+            quality = summary['exploration_quality']
             action_count, action_cost, edge_coverage, node_coverage = summary['action_counts'], summary['action_cost'], summary['edge_coverage'], summary['node_coverage']
         
             action_counts.append(action_count)
@@ -891,8 +892,8 @@ if __name__ == "__main__":
 
 
     # action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(10, 'inquisitor')
-    # action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(1, proxy_name='analyst', delegate='observer_analyst', observer_delegate='oracle')
-    action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(100, proxy_name='analyst', delegate='candidate_planner', observer_delegate='strategist')
+    # action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(10, proxy_name='analyst', delegate='observer_analyst', observer_delegate='oracle')
+    action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(10, proxy_name='analyst', delegate='candidate_planner', observer_delegate='strategist')
 
     # Calculate average action counts per action type
     avg_action_counts = defaultdict(float)

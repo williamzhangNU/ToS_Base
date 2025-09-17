@@ -91,15 +91,18 @@ def evaluate_cognitive_maps_from_turnlogs(
                         continue
                     assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
 
-                    # Generate per-type prompts for multi-type evaluation
+                    # Active exploration:
+                    # - For each turn: generate local and global
+                    # - For final turn only: also generate rooms and relations
                     base_user = turn_log['user_message']
-                    for map_type in cognitive_map_manager.get_supported_types():
+                    is_last_exp = (turn_idx == len(turn_logs) - 1)
+                    per_turn_types = ['local', 'global']
+                    final_only_types = ['rooms', 'relations'] if is_last_exp else []
+                    for map_type in per_turn_types + final_only_types:
                         msgs = [m.copy() for m in messages]
                         cogmap_prompt = get_cogmap_prompt(map_type)
                         msgs[-2]["content"] = base_user + cogmap_prompt
-                        msgs.pop()  # Remove assistant response
-
-                        # Add to batch
+                        msgs.pop()
                         env_id_to_location[env_id_counter] = (env_idx, target_turn_idx, map_type)
                         all_messages_list.append(msgs)
                         all_env_ids.append(env_id_counter)
@@ -111,18 +114,16 @@ def evaluate_cognitive_maps_from_turnlogs(
                     assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
                     base_user = re.sub(r'## Evaluation Question.*', '', turn_log.get['user_message'],  flags=re.DOTALL) + turn_log['evaluation_log']['evaluation_data']['action']
 
-                    # Generate per-type prompts for multi-type evaluation
-                    for map_type in cognitive_map_manager.get_supported_types():
-                        msgs = [m.copy() for m in messages]
-                        cogmap_prompt = get_cogmap_prompt(map_type)
-                        msgs[-2]["content"] = base_user + cogmap_prompt
-                        msgs.pop()  # Remove assistant response
-
-                        # Add to batch
-                        env_id_to_location[env_id_counter] = (env_idx, target_turn_idx, map_type)
-                        all_messages_list.append(msgs)
-                        all_env_ids.append(env_id_counter)
-                        env_id_counter += 1
+                    # Evaluation tasks: only global (correctness)
+                    map_type = 'global'
+                    msgs = [m.copy() for m in messages]
+                    cogmap_prompt = get_cogmap_prompt(map_type)
+                    msgs[-2]["content"] = base_user + cogmap_prompt
+                    msgs.pop()
+                    env_id_to_location[env_id_counter] = (env_idx, target_turn_idx, map_type)
+                    all_messages_list.append(msgs)
+                    all_env_ids.append(env_id_counter)
+                    env_id_counter += 1
                 else:
                     continue
 
@@ -134,16 +135,15 @@ def evaluate_cognitive_maps_from_turnlogs(
             assert env_messages[0]["role"] == "user", f"Expected user message but got {env_messages[0]['role']}"
             base_user = re.sub(r'## Evaluation Question.*', '', turn_logs[0].get('user_message', ''), flags=re.DOTALL)
 
-            # Generate per-type prompts for multi-type evaluation
-            for map_type in cognitive_map_manager.get_supported_types():
-                messages = [env_messages[0].copy()]
-                cogmap_prompt = get_cogmap_prompt(map_type)
-                messages[0]["content"] = base_user + cogmap_prompt
-
-                all_messages_list.append(messages)
-                all_env_ids.append(env_id_counter)
-                env_id_to_location[env_id_counter] = (env_idx, 0, map_type)
-                env_id_counter += 1
+            # Passive: only global for first exp turn (correctness only)
+            map_type = 'global'
+            messages = [env_messages[0].copy()]
+            cogmap_prompt = get_cogmap_prompt(map_type)
+            messages[0]["content"] = base_user + cogmap_prompt
+            all_messages_list.append(messages)
+            all_env_ids.append(env_id_counter)
+            env_id_to_location[env_id_counter] = (env_idx, 0, map_type)
+            env_id_counter += 1
             # let cogmaplog be reused in passive
             turn_log = {'turn_number': 1 ,"user_message": base_user, "is_exploration_phase": True, "room_state": room_config, "agent_state": agent_config}
             turn_logs[0] = turn_log
@@ -182,7 +182,7 @@ def evaluate_cognitive_maps_from_turnlogs(
                 # Get observed items
                 observed_items = turn_log['observed_items'] if env_config.get('exp_type') == 'active' else [obj.name for obj in room_state.all_objects]
 
-                # Evaluate cognitive maps using multi-type responses
+                # Evaluate cognitive maps using selected responses
                 cogmap_log = cognitive_map_manager.evaluate_cogmaps(
                     responses_by_type,
                     room_state,

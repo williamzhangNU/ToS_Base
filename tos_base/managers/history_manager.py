@@ -195,14 +195,21 @@ class HistoryManager:
         # Aggregate performance for each config combination across all samples
         for config_name in sorted(all_config_keys):
             env_data_list = []
-            for sample_data_dict in samples.values():
+            for sample_data_dict in samples.values(): # config_key -> sample_data
                 if config_name in sample_data_dict and sample_data_dict[config_name] is not None:
                     env_data_list.append(sample_data_dict[config_name])
 
             if env_data_list:
                 result["exp_summary"]["group_performance"][config_name] = ExplorationManager.aggregate_group_performance(env_data_list)
                 result["eval_summary"]["group_performance"][config_name] = EvaluationManager.aggregate_group_performance(env_data_list)
-                result["cogmap_summary"]["group_performance"][config_name] = CognitiveMapManager.aggregate_group_performance(env_data_list)
+                # Determine scenario from config name (vision/text + active/passive). We only have active/passive and render mode in path
+                scenario = "active_exploration"
+                if "passive" in config_name:
+                    # passive: only correctness of global
+                    scenario = "passive_exploration"
+                elif "active" in config_name:
+                    scenario = "active_exploration"
+                result["cogmap_summary"]["group_performance"][config_name] = CognitiveMapManager.aggregate_group_performance(env_data_list, scenario=scenario)
 
         return result
 

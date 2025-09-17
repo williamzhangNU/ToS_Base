@@ -169,17 +169,17 @@ class HTMLGenerator:
                 update_data = cogmap_group.get("cogmap_update_per_turn", {})
                 full_data = cogmap_group.get("cogmap_full_per_turn", {})
 
-                # Update mode plot (global only)
-                if update_data and update_data.get("global") and any(update_data["global"].values()):
-                    global_data = update_data.get("global", {})
+                # Only accept new shape (metric -> list)
+                global_update = update_data if isinstance(update_data, dict) else {}
+                if global_update and any(global_update.values()):
                     title = f"{gname} - Global (Update)"
-                    cogmap_update_plot = create_cogmap_metrics_plot(global_data, title)
+                    cogmap_update_plot = create_cogmap_metrics_plot(global_update, title)
 
                 # Full mode plot (global only)
-                if full_data and full_data.get("global") and any(full_data["global"].values()):
-                    global_data = full_data.get("global", {})
+                global_full = full_data if isinstance(full_data, dict) else {}
+                if global_full and any(global_full.values()):
                     title = f"{gname} - Global (Full)"
-                    cogmap_full_plot = create_cogmap_metrics_plot(global_data, title)
+                    cogmap_full_plot = create_cogmap_metrics_plot(global_full, title)
 
             # Display plots in a single row (up to 3 plots)
             available_plots = []

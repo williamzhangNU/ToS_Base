@@ -20,6 +20,7 @@ class ExplorationTurnLog:
     room_state: Optional['Room'] = None
     agent_state: Optional['Agent'] = None
     information_gain: Optional[Dict[str, Any]] = None  # Information gain metrics
+    exploration_quality: Optional[float] = None
 
     def to_dict(self):
         return {
@@ -29,7 +30,8 @@ class ExplorationTurnLog:
             "action_counts": dict(self.action_counts),
             "room_state": self.room_state.to_dict() if self.room_state else {},
             "agent_state": self.agent_state.to_dict() if self.agent_state else {},
-            "information_gain": self.information_gain or 0.0
+            "information_gain": self.information_gain or 0.0,
+            "exploration_quality": self.exploration_quality or 0.0,
         }
 
 class ExplorationManager:
@@ -41,13 +43,12 @@ class ExplorationManager:
     """
     DEFAULT_EXP_SUMMARY = {"node_coverage": 0.0, "edge_coverage": 0.0, "n_exploration_steps": 0, "action_counts": {}}
     
-    def __init__(self, room: Room, agent: Agent, enable_information_gain: bool = False):
+    def __init__(self, room: Room, agent: Agent, enable_information_gain: bool = False, grid_size: int | None = None, enable_exploration_quality: bool = True):
         self.base_room = room.copy()
         self.exploration_room = room.copy()
         self.agent = agent.copy()
         self.keep_object_names = [self.agent.name] + [obj.name for obj in getattr(self.exploration_room, 'all_objects', [])]
 
-        self.finished = False
         self.exp_summary = copy.deepcopy(self.DEFAULT_EXP_SUMMARY)
         self.turn_logs: List[ExplorationTurnLog] = []
         # History now stores ActionResult for each executed action (in order)
@@ -84,13 +85,18 @@ class ExplorationManager:
         
         # Information gain control
         self.enable_information_gain = bool(enable_information_gain)
+        # Exploration quality control (per-turn when enabled)
+        self.enable_exploration_quality = bool(enable_exploration_quality)
+        # Grid size for solver metrics (use provided or infer from mask; fallback 10)
+        inferred_g = (max(self.exploration_room.mask.shape) if getattr(self.exploration_room, 'mask', None) is not None else 10)
+        self.grid_size: int = int(inferred_g if grid_size is None else grid_size)
         # Initialize spatial solver for information gain tracking (only when enabled)
         if self.enable_information_gain:
             object_names = self.node_names + ['initial_pos']
-            grid_size = max(self.exploration_room.mask.shape)
-            self.spatial_solver = SpatialSolver(object_names, grid_size)
+            self.spatial_solver = SpatialSolver(object_names, self.grid_size)
             self.spatial_solver.set_initial_position('initial_pos', (0, 0))
-            self.previous_total_positions = sum(len(domain) for domain in self.spatial_solver.get_possible_positions().values())
+            counts = self.spatial_solver.get_num_possible_positions()
+            self.previous_total_positions = sum(counts.values())
         else:
             self.spatial_solver = None
             self.previous_total_positions = 0
@@ -169,7 +175,6 @@ class ExplorationManager:
             result = self.execute_action(ReturnAction())
             if not result.success:
                 raise ValueError(f"Failed to return to origin: {result.message}")
-        self.finished = True
         return self.exploration_room
     
     def get_exp_summary(self) -> Dict[str, Any]:
@@ -306,6 +311,8 @@ class ExplorationManager:
         else:
             information_gain_ratio = 0.0
 
+        # Per-turn exploration quality (optional)
+        turn_quality = self._compute_exploration_quality() if self.enable_exploration_quality else 0.0
         
         # Log current turn with coverage snapshot
         self._update_exp_summary()
@@ -317,7 +324,8 @@ class ExplorationManager:
             action_counts=dict(self.exp_summary.get('action_counts', {})),
             room_state=self.exploration_room.copy(),
             agent_state=self.agent.copy(),
-            information_gain=information_gain_ratio if information_gain_ratio is not None else (self.turn_logs[-1].information_gain if self.turn_logs else 0.0)
+            information_gain=information_gain_ratio if information_gain_ratio is not None else (self.turn_logs[-1].information_gain if self.turn_logs else 0.0),
+            exploration_quality=turn_quality
         )
         self.turn_logs.append(turn_log)
     
@@ -328,15 +336,19 @@ class ExplorationManager:
         info_gain_list = [turn_log.information_gain for turn_log in self.turn_logs] if self.turn_logs else []
         acc_info_gain = sum(info_gain_list)
         avg_info_gain = acc_info_gain / len(self.turn_logs) if self.turn_logs else 0.0
+        # Latest exploration quality (optional, mirrors per-turn computation)
+        quality = self._compute_exploration_quality() if self.enable_exploration_quality else None
         self.exp_summary = {
             "node_coverage": node_cov,
             "edge_coverage": edge_cov,
             "n_exploration_steps": len(self.turn_logs),
             "action_counts": dict(self.action_counts),
             "action_cost": int(self.action_cost),
+            "exploration_cost": int(self.action_cost),
             "info_gain_list": info_gain_list,
             "acc_info_gain": acc_info_gain,
             "avg_info_gain": avg_info_gain,
+            "exploration_quality": quality,
         }
         return self.exp_summary
     
@@ -355,7 +367,8 @@ class ExplorationManager:
                 self.spatial_solver.add_observation(triples)
         
         # Calculate position count after action
-        current_positions = sum(len(domain) for domain in self.spatial_solver.get_possible_positions().values())
+        counts = self.spatial_solver.get_num_possible_positions()
+        current_positions = sum(counts.values())
         
         # Update previous_total_positions for next calculation
         self.previous_total_positions = current_positions
@@ -366,6 +379,52 @@ class ExplorationManager:
             return -np.log(ratio) if ratio > 0 else 0.0
         else:
             return 0.0
+
+    # === Exploration quality helpers ===
+    def _full_grid_cell_count(self) -> int:
+        return int(self.grid_size) * int(self.grid_size)
+
+    def _final_position_counts(self) -> Dict[str, int]:
+        """Counts of possible positions per variable at the end of exploration.
+        Uses existing solver if available, otherwise rebuilds a solver from history.
+        """
+        if self.spatial_solver is not None:
+            return self.spatial_solver.get_num_possible_positions()
+        # Build a temporary solver and ingest history triples
+        solver = SpatialSolver(self.node_names + ['initial_pos'], self.grid_size)
+        solver.set_initial_position('initial_pos', (0, 0))
+        for ar in self.history:
+            try:
+                if getattr(ar, 'action_type', None) in ('observe', 'query'):
+                    triples = ar.data.get('relation_triples', []) if hasattr(ar, 'data') else []
+                    if triples:
+                        solver.add_observation(triples)
+            except Exception:
+                continue
+        return solver.get_num_possible_positions()
+
+    def _compute_exploration_quality(self) -> float | None:
+        """Compute quality = sum_i log2(M/Ci) / (N * log2(M)). Exclude 'initial_pos'. Include gates.
+        Returns None if computation is not applicable.
+        """
+        try:
+            counts = self._final_position_counts()
+            M = self._full_grid_cell_count()
+            if M <= 1:
+                return 0.0
+            names = [n for n in counts.keys() if n != 'initial_pos']
+            if not names:
+                return 0.0
+            denom = len(names) * np.log2(M)
+            if denom <= 0:
+                return 0.0
+            total = 0.0
+            for n in names:
+                Ci = max(1, int(counts.get(n, M)))
+                total += float(np.log2(M / Ci))
+            return float(total / denom)
+        except Exception:
+            return None
 
 if __name__ == "__main__":
     pass
