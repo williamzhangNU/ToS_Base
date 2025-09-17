@@ -31,9 +31,6 @@ class HistoryManager:
             observation_config['exp_type']
         ))
         model_config_path = os.path.join(self.model_path, "model_config.json")
-        if not os.path.exists(model_config_path):
-            with open(model_config_path, "w") as f:
-                json.dump(model_config, f, ensure_ascii=False, indent=2)
         if observation_config['exp_type'] == 'passive':
             self.output_dir = os.path.join(self.output_dir, observation_config["proxy_agent"])
         self.exploration_path = os.path.join(self.output_dir, "exploration_turn_logs.json")
@@ -45,6 +42,9 @@ class HistoryManager:
         self._load()
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(os.path.join(self.output_dir, "images"), exist_ok=True)
+        if not os.path.exists(model_config_path):
+            with open(model_config_path, "w") as f:
+                json.dump(model_config, f, ensure_ascii=False, indent=2)
 
 
     def is_history_exist(self):

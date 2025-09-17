@@ -76,7 +76,10 @@ Rules:
 - Track your current and initial pose
 
 Here is an example of your observation: blue object 1 m straight ahead; yellow object 2 m at 45° to your left; green object 3 m at 22.5° to your right:
-{instruction_example}
+{image_placeholder}
+
+All objects in the following image are facing towards the camera and the labels match the objects listed below.
+{image_placeholder}
 
 Room Layout:
 {room_info}
@@ -99,7 +102,10 @@ Multi-room:
 - Rooms are connected by gates/doors on vertical (N–S) or horizontal (E–W) walls. When you stand at a door, you can see objects from both connected rooms (within FOV).
 
 Here is an example of your observation: blue object 1 m straight ahead; yellow object 2 m at 45° to your left; green object 3 m at 22.5° to your right:
-{instruction_example}
+{image_placeholder}
+
+All objects in the following image are facing towards the camera and the labels match the objects listed below.
+{image_placeholder}
 
 ## Room Layout
 {room_info}

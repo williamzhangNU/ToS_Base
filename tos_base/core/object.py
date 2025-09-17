@@ -28,6 +28,7 @@ class Object:
     pos: np.ndarray = field(default_factory=lambda: np.zeros(2))
     ori: np.ndarray = field(default_factory=lambda: np.array([0, 1]))
     has_orientation: bool = True
+    label: str = None
     # Room membership: int for single room, List[int] for multi-room objects (e.g., gates)
     room_id: Union[int, List[int], None] = None
 
@@ -56,6 +57,7 @@ class Object:
             'name': self.name,
             'pos': self.pos.tolist(),
             'ori': self.ori.tolist(),
+            'label': self.label,
             'has_orientation': self.has_orientation,
             'room_id': self.room_id
         }
@@ -67,7 +69,8 @@ class Object:
             pos=np.array(obj_dict['pos']),
             ori=np.array(obj_dict['ori']),
             has_orientation=obj_dict.get('has_orientation', True),
-            room_id=obj_dict.get('room_id')
+            room_id=obj_dict.get('room_id'),
+            label=obj_dict.get('label', None)
         )
 
     def __repr__(self) -> str:
