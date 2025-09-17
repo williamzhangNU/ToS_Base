@@ -165,24 +165,26 @@ class PovEvaluationTask(DirectionEvaluationTask):
             anchor, target_obj = self.room.objects[anchor_idx], self.room.objects[target_idx]
             return target_obj, anchor, None, self.QUESTION_TEMPLATE_POV, True
 
-    def generate_choices(self):
-        """Generate choices for POV fallback case (beyond-fov)."""
+    def generate_choices(self, rel=None):
+        """POV choices: use base when rel given; fallback to beyond-fov otherwise."""
+        if rel is not None:
+            return super().generate_choices(rel)
         dir_labels = EgoFrontBins().LABELS
         beyond_fov_label = 'beyond-fov'
-        dist_labels = ['near']  # Use any distance label
+        dist_labels = ['near']
         correct = self._fmt(beyond_fov_label, dist_labels[0])
-        
-        # Generate choices with beyond-fov as correct, others not beyond-fov
+
         choices = [correct]
         seen = {correct}
         for label in dir_labels:
-            if len(choices) == 4: break
+            if len(choices) == 4:
+                break
             if label != beyond_fov_label:
                 choice = self._fmt(label, dist_labels[0])
                 if choice not in seen:
                     choices.append(choice)
                     seen.add(choice)
-        
+
         self.np_random.shuffle(choices)
         return choices, choices.index(correct)
 
