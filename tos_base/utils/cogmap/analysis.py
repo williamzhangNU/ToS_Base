@@ -141,6 +141,7 @@ def compute_correctness_aggregates(env_data_list: List[Dict[str, Any]]) -> Dict[
     last_global_vals = []
     last_rel_vals = []
     for env_data in env_data_list:
+
         lg = get_last_exploration_cogmap(env_data)
         if lg:
             last_global_vals.append(MapCogMetrics.from_dict((lg or {}).get('global', {}).get('metrics_full', {})).to_dict())

@@ -13,7 +13,6 @@ from .types import MapCogMetrics
 from ..relation_codes import (
     decode_relation_codes, encode_relation_codes, discrete_relation_from_codes,
     make_ordered_pair_key, parse_pair_key, invert_relation_codes_str, invert_pair_key
-)
 from ..relationship_utils import room_to_ordered_relations
 
 
@@ -83,6 +82,7 @@ def map_vs_relations_consistency(pred_relations: Dict, pred_global: BaseRoom | N
     matches = 0
     total = len(expected_relations)
 
+    from ..relation_codes import invert_pair_key
     for pair_key, expected_rel in expected_relations.items():
         # Accept exact order; if opposite provided, invert before compare
         predicted_rel = pred_relations.get(pair_key)
