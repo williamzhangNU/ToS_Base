@@ -202,14 +202,13 @@ class HistoryManager:
             if env_data_list:
                 result["exp_summary"]["group_performance"][config_name] = ExplorationManager.aggregate_group_performance(env_data_list)
                 result["eval_summary"]["group_performance"][config_name] = EvaluationManager.aggregate_group_performance(env_data_list)
-                # Determine scenario from config name (vision/text + active/passive). We only have active/passive and render mode in path
-                scenario = "active_exploration"
-                if "passive" in config_name:
-                    # passive: only correctness of global
-                    scenario = "passive_exploration"
-                elif "active" in config_name:
-                    scenario = "active_exploration"
-                result["cogmap_summary"]["group_performance"][config_name] = CognitiveMapManager.aggregate_group_performance(env_data_list, scenario=scenario)
+                # Provide both exploration and evaluation cogmap summaries
+                exp_scenario = ("passive_exploration" if "passive" in config_name else "active_exploration")
+                eval_scenario = ("passive_evaluation" if "passive" in config_name else "active_evaluation")
+                result["cogmap_summary"]["group_performance"][config_name] = {
+                    "exploration": CognitiveMapManager.aggregate_group_performance(env_data_list, scenario=exp_scenario),
+                    "evaluation": CognitiveMapManager.aggregate_group_performance(env_data_list, scenario=eval_scenario),
+                }
 
         return result
 

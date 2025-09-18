@@ -1,4 +1,5 @@
 from typing import Dict, Tuple, List
+import math
 import numpy as np
 from itertools import combinations
 
@@ -9,7 +10,11 @@ from ...managers.spatial_solver import SpatialSolver
 from .transforms import br_from_anchor_to_initial
 from .metrics import compute_map_metrics
 from .types import MapCogMetrics
-from ..relation_codes import decode_relation_codes, make_pair_key, encode_relation_codes
+from ..relation_codes import (
+    decode_relation_codes, encode_relation_codes,
+    make_ordered_pair_key, parse_pair_key, invert_relation_codes_str,
+)
+from ..relationship_utils import room_to_ordered_relations
 
 
 def compare_on_common_subset(a: BaseRoom | None, b: BaseRoom | None, allow_scale: bool, pos_norm_L: float | None) -> MapCogMetrics:
@@ -68,33 +73,8 @@ def map_vs_relations_consistency(pred_relations: Dict, pred_global: BaseRoom | N
     if not pred_relations or pred_global is None:
         return 0.0
 
-    # Extract positions from BaseRoom
-    positions = {}
-    for obj in pred_global.objects:
-        if hasattr(obj, 'pos') and hasattr(obj, 'name'):
-            pos = obj.pos
-            if isinstance(pos, (list, tuple)) and len(pos) >= 2:
-                positions[obj.name] = (int(pos[0]), int(pos[1]))
-
-    if len(positions) < 2:
-        return 0.0
-
-    # Generate expected relations from map positions
-    expected_relations = {}
-    bin_system = CardinalBinsAllo()
-    distance_bin_system = StandardDistanceBins()
-
-    for name_a, name_b in combinations(positions.keys(), 2):
-        pos_a, pos_b = positions[name_a], positions[name_b]
-        # Create discrete relationship from positions
-        rel = PairwiseRelationshipDiscrete.relationship(
-            pos_a, pos_b, anchor_ori=(0, 1),
-            bin_system=bin_system, distance_bin_system=distance_bin_system
-        )
-        pair_key = make_pair_key(name_a, name_b)
-        expected_relations[pair_key] = encode_relation_codes(
-            rel.direction.bin_label, rel.dist.bin_label
-        )
+    # Expected relations from map (ordered A|B)
+    expected_relations = room_to_ordered_relations(pred_global)
 
     # Compare with predicted relations
     if not expected_relations:
@@ -103,8 +83,15 @@ def map_vs_relations_consistency(pred_relations: Dict, pred_global: BaseRoom | N
     matches = 0
     total = len(expected_relations)
 
+    from ..relation_codes import invert_pair_key
     for pair_key, expected_rel in expected_relations.items():
-        predicted_rel = pred_relations.get(pair_key, "")
+        # Accept exact order; if opposite provided, invert before compare
+        predicted_rel = pred_relations.get(pair_key)
+        if predicted_rel is None:
+            inv_key = invert_pair_key(pair_key)
+            inv_val = pred_relations.get(inv_key)
+            if inv_val is not None:
+                predicted_rel = invert_relation_codes_str(inv_val)
         if predicted_rel == expected_rel:
             matches += 1
         else:
@@ -132,57 +119,41 @@ def relations_consistency(pred_relations: Dict) -> float:
     if not pred_relations or len(pred_relations) < 3:
         return 1.0  # Trivially consistent if too few relations
 
-    # Extract unique object names
-    all_names = set()
-    for pair_key in pred_relations.keys():
-        if '|' in pair_key:
-            names = pair_key.split('|')
-            if len(names) == 2:
-                all_names.update(names)
-
-    all_names = list(all_names)
+    # Extract unique object names (ordered keys preferred)
+    all_names_set = set()
+    for k in pred_relations.keys():
+        a, b = parse_pair_key(k)
+        if a and b:
+            all_names_set.add(a); all_names_set.add(b)
+    all_names = list(all_names_set)
     if len(all_names) < 3:
         return 1.0  # Need at least 3 objects for triangular consistency
 
     total_checks = 0
     consistent_checks = 0
 
-    # Check consistency for each possible triple
-    for i, name_a in enumerate(all_names):
-        for j, name_b in enumerate(all_names[i+1:], i+1):
-            for name_c in all_names[j+1:]:
-                # Try both ab_key and ba_key directions
-                ab_key = f"{name_a}|{name_b}"
-                ba_key = f"{name_b}|{name_a}"
-                ac_key = f"{name_a}|{name_c}"
-                ca_key = f"{name_c}|{name_a}"
-                bc_key = f"{name_b}|{name_c}"
-                cb_key = f"{name_c}|{name_b}"
+    # Generate non-repetitive triples
 
-                # Try to find relations for this triangle
-                ab_rel = pred_relations.get(ab_key) or pred_relations.get(ba_key)
-                ac_rel = pred_relations.get(ac_key) or pred_relations.get(ca_key)
-                bc_rel = pred_relations.get(bc_key) or pred_relations.get(cb_key)
+    for name_a, name_b, name_c in combinations(all_names, 3):
+        from ..relation_codes import make_ordered_pair_key, invert_pair_key
+        ab_key = make_ordered_pair_key(name_a, name_b); ba_key = invert_pair_key(ab_key)
+        ac_key = make_ordered_pair_key(name_a, name_c); ca_key = invert_pair_key(ac_key)
+        bc_key = make_ordered_pair_key(name_b, name_c); cb_key = invert_pair_key(bc_key)
 
-                if ab_rel and ac_rel and bc_rel:
-                    total_checks += 1
+        ab_rel = pred_relations.get(ab_key)
+        if ab_rel is None and (val := pred_relations.get(ba_key)):
+            ab_rel = invert_relation_codes_str(val)
+        ac_rel = pred_relations.get(ac_key)
+        if ac_rel is None and (val := pred_relations.get(ca_key)):
+            ac_rel = invert_relation_codes_str(val)
+        bc_rel = pred_relations.get(bc_key)
+        if bc_rel is None and (val := pred_relations.get(cb_key)):
+            bc_rel = invert_relation_codes_str(val)
 
-                    # Adjust relations based on actual key directions
-                    # If we found ba_key instead of ab_key, invert the relation
-                    if ab_key not in pred_relations and ba_key in pred_relations:
-                        ab_rel = _invert_relation(ab_rel)
-
-                    # If we found ca_key instead of ac_key, invert the relation
-                    if ac_key not in pred_relations and ca_key in pred_relations:
-                        ac_rel = _invert_relation(ac_rel)
-
-                    # If we found cb_key instead of bc_key, invert the relation
-                    if bc_key not in pred_relations and cb_key in pred_relations:
-                        bc_rel = _invert_relation(bc_rel)
-
-                    # Check consistency
-                    if _check_triple_consistency(name_a, name_b, name_c, ab_rel, ac_rel, bc_rel):
-                        consistent_checks += 1
+        if ab_rel and ac_rel and bc_rel:
+            total_checks += 1
+            if _check_triple_consistency(name_a, name_b, name_c, ab_rel, ac_rel, bc_rel):
+                consistent_checks += 1
 
     return consistent_checks / total_checks if total_checks > 0 else 1.0
 
@@ -195,35 +166,19 @@ def _check_triple_consistency(name_a: str, name_b: str, name_c: str,
     then checks if any derived AB relation matches the given AB relation.
     """
     # Create spatial solver with the three objects
-    solver = SpatialSolver([name_a, name_b, name_c], grid_size=10)
+    solver = SpatialSolver([name_a, name_b, name_c], grid_size=20)
 
     # Set C at origin (easier to reason about AC and BC relations)
     solver.set_initial_position(name_c, (0, 0))
 
-    # Parse relations to get codes
-    ab_dir, ab_dist = decode_relation_codes(ab_rel)
+    # Parse discrete relations directly from codes
     ac_dir, ac_dist = decode_relation_codes(ac_rel)
     bc_dir, bc_dist = decode_relation_codes(bc_rel)
 
-    # Get representative positions and create constraints for AC and BC
-    # AC relation: A relative to C
-    ac_a_pos = _get_representative_position_from_codes(ac_dir, ac_dist, invert=False)
-    # BC relation: B relative to C
-    bc_b_pos = _get_representative_position_from_codes(bc_dir, bc_dist, invert=False)
-
-    if ac_a_pos is None or bc_b_pos is None:
-        return False
-
-    # Create discrete relations from representative positions
-    c_pos = (0, 0)
-    ac_discrete_rel = PairwiseRelationshipDiscrete.relationship(
-        ac_a_pos, c_pos, anchor_ori=(0, 1),
-        bin_system=CardinalBinsAllo(), distance_bin_system=StandardDistanceBins()
-    )
-    bc_discrete_rel = PairwiseRelationshipDiscrete.relationship(
-        bc_b_pos, c_pos, anchor_ori=(0, 1),
-        bin_system=CardinalBinsAllo(), distance_bin_system=StandardDistanceBins()
-    )
+    # Build discrete relations from bins only (no grid distance checks)
+    from ..relation_codes import discrete_relation_from_codes
+    ac_discrete_rel = discrete_relation_from_codes(ac_dir, ac_dist)
+    bc_discrete_rel = discrete_relation_from_codes(bc_dir, bc_dist)
 
     # Add constraints: A relative to C, B relative to C
     from ...core.relationship import RelationTriple
@@ -232,40 +187,38 @@ def _check_triple_consistency(name_a: str, name_b: str, name_c: str,
         RelationTriple(subject=name_b, anchor=name_c, relation=bc_discrete_rel, orientation=(0, 1))
     ]
 
-    solver.add_observation(relation_triples)
-
-    # Get possible positions from solver
-    possible_positions = solver.get_possible_positions()
-    a_positions = list(possible_positions.get(name_a, []))
-    b_positions = list(possible_positions.get(name_b, []))
-
-    if not a_positions or not b_positions:
+    ok = solver.add_observation(relation_triples)
+    if not ok:
         return False
 
-    # For all possible (A, B) position pairs, check if any produces the predicted AB relation
-    bin_system = CardinalBinsAllo()
-    distance_bin_system = StandardDistanceBins()
+    # Use possible relations instead of enumerating positions
+    rel_sets = solver.get_possible_relations(
+        max_samples_per_var=50,
+        perspective=(0, 1),
+        bin_system=CardinalBinsAllo(),
+        distance_bin_system=StandardDistanceBins(),
+        path_consistent=False,
+    )
 
-    for a_pos in a_positions:
-        for b_pos in b_positions:
-            # Calculate A relative to B (since ab_rel describes "A|B" = A relative to B)
-            actual_ab_rel = PairwiseRelationshipDiscrete.relationship(
-                a_pos, b_pos, anchor_ori=(0, 1),
-                bin_system=bin_system, distance_bin_system=distance_bin_system
-            )
-            actual_ab_dir = actual_ab_rel.direction.bin_label
-            actual_ab_dist = actual_ab_rel.dist.bin_label
+    # Normalize keys to ordered lookup and code strings
+    from ..relation_codes import encode_relation_codes, decode_relation_codes
+    ab_dir, ab_dist = decode_relation_codes(ab_rel)
+    target = encode_relation_codes(ab_dir, ab_dist)
+    # rel_sets uses unordered tuple keys (a,b). Check both and invert when needed
+    pair = (min(name_a, name_b), max(name_a, name_b))
+    s = rel_sets.get(pair, set())
+    if not s:
+        return False
 
-            # Convert to codes for comparison
-            from ..relation_codes import to_code
-            actual_ab_dir_code = to_code(actual_ab_dir)
-            actual_ab_dist_code = to_code(actual_ab_dist)
-
-            # Check if this matches the predicted AB relation
-            if (actual_ab_dir_code.upper() == ab_dir.upper() and
-                actual_ab_dist_code.lower() == ab_dist.lower()):
-                return True
-
+    # Ensure we compare as A relative to B (unified branch)
+    need_invert = not (name_a <= name_b)
+    for cand in s:
+        d, r = decode_relation_codes(cand)
+        code = encode_relation_codes(d, r)
+        if need_invert:
+            code = invert_relation_codes_str(code)
+        if code == target:
+            return True
     return False
 
 def _get_representative_position_from_codes(dir_code: str, dist_code: str, invert: bool = False) -> tuple:

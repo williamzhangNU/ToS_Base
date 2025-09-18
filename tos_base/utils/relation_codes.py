@@ -106,3 +106,83 @@ def make_pair_key(a: str, b: str) -> str:
     return (f"{a_s}|{b_s}" if a_s.lower() <= b_s.lower() else f"{b_s}|{a_s}")
 
 
+
+# ---- Ordered pair helpers (A relative to B is encoded as 'A|B') ----
+def make_ordered_pair_key(a: str, b: str) -> str:
+    """Ordered pair key 'A|B' (A relative to B)."""
+    return f"{str(a)}|{str(b)}"
+
+
+def parse_pair_key(key: str) -> Tuple[str, str]:
+    """Parse 'A|B' into (A, B) preserving order; returns ("", "") if invalid."""
+    s = str(key).split('|')
+    return (s[0], s[1]) if len(s) == 2 else ("", "")
+
+
+def invert_pair_key(key: str) -> str:
+    a, b = parse_pair_key(key)
+    return f"{b}|{a}" if a or b else key
+# ---- Convenience helpers ----
+def make_ordered_and_inverse_pair_keys(a: str, b: str) -> Tuple[str, str]:
+    """Return (ordered_key 'A|B', inverse_key 'B|A')."""
+    ordered = make_ordered_pair_key(a, b)
+    return ordered, invert_pair_key(ordered)
+
+
+# ---- Direction/distance utilities ----
+def invert_dir_code(code: str) -> str:
+    c = str(code).upper()
+    inv = {
+        'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E',
+        'NE': 'SW', 'SW': 'NE', 'NW': 'SE', 'SE': 'NW'
+    }
+    return inv.get(c, c)
+
+
+def invert_relation_codes_str(relation_str: str) -> str:
+    """Invert a relation string like '(W, near)' -> '(E, near)'."""
+    d, r = decode_relation_codes(relation_str)
+    return f"({invert_dir_code(d)}, {r})"
+
+
+# ---- Discrete relation construction from codes ----
+def discrete_relation_from_codes(dir_code: str, dist_code: str):
+    """Construct PairwiseRelationshipDiscrete from (dir_code, dist_code).
+
+    Uses bin centers; no world positions are computed.
+    """
+    # Local import to avoid circulars
+    from ..core.relationship import (
+        PairwiseRelationshipDiscrete, DegreeRel, DegreeRelBinned,
+        DistanceRelBinned, CardinalBinsAllo, StandardDistanceBins
+    )
+
+    bin_system = CardinalBinsAllo()
+    dist_system = StandardDistanceBins()
+
+    # Direction: map code->label->bin index -> bin center degree
+    dir_label = to_label(dir_code)
+    try:
+        dir_idx = bin_system.LABELS.index(dir_label)
+    except ValueError:
+        # Fallback: default to 'north'
+        dir_idx = 0
+    lo_deg, hi_deg = bin_system.BINS[dir_idx]
+    deg = (float(lo_deg) + float(hi_deg)) / 2.0
+    drel = DegreeRel(degree=deg)
+    d_binned = DegreeRelBinned.from_relation(drel, bin_system)
+
+    # Distance: code->label->bin index -> bin center distance
+    dist_label = to_label(dist_code)
+    try:
+        dist_idx = dist_system.LABELS.index(dist_label)
+    except ValueError:
+        # default to 'near'
+        dist_idx = 1
+    lo_r, hi_r = dist_system.BINS[dist_idx]
+    dist_val = (float(lo_r) + float(hi_r)) / 2.0
+    s_binned = DistanceRelBinned.from_value(dist_val, dist_system)
+
+    return PairwiseRelationshipDiscrete(direction=d_binned, dist=s_binned)
+
+
