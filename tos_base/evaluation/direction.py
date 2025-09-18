@@ -9,7 +9,7 @@ from ..core.relationship import (
     CardinalBinsAllo,
     EgoFrontBins,
 )
-
+from ..utils.utils import hash
 
 class DirectionEvaluationTask(BaseEvaluationTask):
     """Pairwise discrete direction (allocentric) and perspective-taking (egocentric)."""
@@ -131,9 +131,16 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         return obj1, obj2, rel, self.QUESTION_TEMPLATE_DIR
 
     def generate_question(self) -> str:
-        obj1, obj2, rel, template = self.generate_question_data()
-        choices, idx = self.generate_choices(rel)
-        return self._finalize(template, obj1.name, obj2.name, choices, idx)
+        while True:
+            obj1, obj2, rel, template = self.generate_question_data()
+            choices, idx = self.generate_choices(rel)
+            question = self._finalize(template, obj1.name, obj2.name, choices, idx)
+            self.eval_data.id = hash(question)
+            if self.history_manager.has_question(self.eval_data.id):
+                continue
+            else:
+                break
+        return question
 
 
 class PovEvaluationTask(DirectionEvaluationTask):
@@ -186,14 +193,21 @@ class PovEvaluationTask(DirectionEvaluationTask):
         return choices, choices.index(correct)
 
     def generate_question(self) -> str:
-        target_obj, anchor, rel, template, is_fallback = self.generate_question_data()
-        
-        if is_fallback:
-            choices, idx = self.generate_choices_pov_fallback()
-        else:
-            choices, idx = self.generate_choices(rel)
-        
-        return self._finalize(template, target_obj.name, anchor.name, choices, idx)
+        while True:
+            target_obj, anchor, rel, template, is_fallback = self.generate_question_data()
+
+            if is_fallback:
+                choices, idx = self.generate_choices_pov_fallback()
+            else:
+                choices, idx = self.generate_choices(rel)
+
+            question = self._finalize(template, target_obj.name, anchor.name, choices, idx)
+            self.eval_data.id = hash(question)
+            if self.history_manager.has_question(self.eval_data.id):
+                continue
+            else:
+                break
+        return question
 
 
 class BackwardPovEvaluationTask(DirectionEvaluationTask):
@@ -268,17 +282,22 @@ class BackwardPovEvaluationTask(DirectionEvaluationTask):
         return choices, correct_idx
 
     def generate_question(self) -> str:
-        target_obj, correct_anchor, spatial_relationship, anchor_idx, is_fallback = self.generate_question_data()
-        choices, correct_idx = self.generate_choices(target_obj, correct_anchor, anchor_idx, is_fallback)
-        
-        # Format the question
-        choices_text, correct_label = self.format_choices(choices, correct_idx)
-        self.eval_data.question = self.QUESTION_TEMPLATE_BWD_POV.format(
-            obj_name=target_obj.name, 
-            spatial_relationship=spatial_relationship,
-            choices_text=choices_text
-        )
-        self.eval_data.answer = correct_label
-        self.eval_data.choices = choices
-        
+        while True:
+            target_obj, correct_anchor, spatial_relationship, anchor_idx, is_fallback = self.generate_question_data()
+            choices, correct_idx = self.generate_choices(target_obj, correct_anchor, anchor_idx, is_fallback)
+
+            # Format the question
+            choices_text, correct_label = self.format_choices(choices, correct_idx)
+            self.eval_data.question = self.QUESTION_TEMPLATE_BWD_POV.format(
+                obj_name=target_obj.name,
+                spatial_relationship=spatial_relationship,
+                choices_text=choices_text
+            )
+            self.eval_data.answer = correct_label
+            self.eval_data.choices = choices
+            self.eval_data.id = hash(self.eval_data.question)
+            if self.history_manager.has_question(self.eval_data.id):
+                continue
+            else:
+                break
         return self.eval_data.question

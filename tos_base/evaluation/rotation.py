@@ -7,7 +7,7 @@ from typing_extensions import override
 from .tasks import BaseEvaluationTask
 from ..core.object import Object
 from ..core.relationship import PairwiseRelationship
-
+from ..utils.utils import hash
 
 class RotEvaluationTask(BaseEvaluationTask):
     """Ask the sequence of objects appearing when rotating in place."""
@@ -101,18 +101,24 @@ class RotEvaluationTask(BaseEvaluationTask):
 
     # ---------- main ----------
     def generate_question(self) -> str:
-        self.turn_direction = self.np_random.choice(["clockwise", "counterclockwise"])
-        self.angle_eps = float(self.config.get("angle_eps", 30.0))
+        while True:
+            self.turn_direction = self.np_random.choice(["clockwise", "counterclockwise"])
+            self.angle_eps = float(self.config.get("angle_eps", 30.0))
 
-        correct_seq = self._gen_valid_sequence(self.turn_direction, self.angle_eps)
-        choices, idx = self.generate_choices(correct_seq)
-        choices_text, correct_label = self.format_choices(choices, idx)
+            correct_seq = self._gen_valid_sequence(self.turn_direction, self.angle_eps)
+            choices, idx = self.generate_choices(correct_seq)
+            choices_text, correct_label = self.format_choices(choices, idx)
 
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(
-            turn_direction=self.turn_direction, choices_text=choices_text
-        )
-        self.eval_data.answer = correct_label
-        self.eval_data.choices = choices
+            self.eval_data.question = self.QUESTION_TEMPLATE.format(
+                turn_direction=self.turn_direction, choices_text=choices_text
+            )
+            self.eval_data.answer = correct_label
+            self.eval_data.choices = choices
+            self.eval_data.id = hash(self.eval_data.question)
+            if self.history_manager.has_question(self.eval_data.id):
+                continue
+            else:
+                break
         return self.eval_data.question
 
     @override
@@ -134,21 +140,26 @@ class RotDualEvaluationTask(RotEvaluationTask):
     )
 
     def generate_question(self) -> str:
-        eps = float(self.config.get("angle_eps", 30.0))
-        td = self.np_random.choice(["clockwise", "counterclockwise"])
+        while True:
+            self.turn_direction = self.np_random.choice(["clockwise", "counterclockwise"])
+            self.angle_eps = float(self.config.get("angle_eps", 30.0))
 
-        # Reuse base sequence generator
-        seq = self._gen_valid_sequence(td, eps)
-        object_sequence = ", ".join(seq)
+            correct_seq = self._gen_valid_sequence(self.turn_direction, self.angle_eps)
+            object_sequence = ", ".join(correct_seq)
 
-        choices, correct_idx = self.generate_choices(td)  # reuse simple dir choices
-        choices_text, correct_label = self.format_choices(choices, correct_idx)
+            choices, idx = self.generate_choices(self.turn_direction)
+            choices_text, correct_label = self.format_choices(choices, idx)
 
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(
-            object_sequence=object_sequence, choices_text=choices_text
-        )
-        self.eval_data.answer = correct_label
-        self.eval_data.choices = choices
+            self.eval_data.question = self.QUESTION_TEMPLATE.format(
+                object_sequence=object_sequence, choices_text=choices_text
+            )
+            self.eval_data.answer = correct_label
+            self.eval_data.choices = choices
+            self.eval_data.id = hash(self.eval_data.question)
+            if self.history_manager.has_question(self.eval_data.id):
+                continue
+            else:
+                break
         return self.eval_data.question
 
     def generate_choices(self, correct_answer: Any) -> Tuple[List[str], int]:

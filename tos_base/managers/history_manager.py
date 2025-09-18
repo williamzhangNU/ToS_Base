@@ -21,7 +21,7 @@ class HistoryManager:
     def __init__(self, observation_config:Dict, model_config:Dict ,room_dict: Dict, agent_dict: Dict, output_dir:str, override=False):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
-        self.evaluation_turn_logs: Dict[Dict] = {}
+        self.evaluation_turn_logs: Dict[str, Dict[str, Dict]] = {}
         self.exp_type = observation_config['exp_type']
         self.model_path= HistoryManager.get_model_dir(output_dir, model_config)
         self.output_dir = os.path.abspath(os.path.join(
@@ -91,10 +91,20 @@ class HistoryManager:
         else:
             assert turn_log['evaluation_log']
             assert turn_log['room_state'] and turn_log['agent_state']
-            img_path = os.path.join(self.output_dir, "images", f"room_{turn_log['evaluation_log']['task_type']}.png")
+
+            task_type = turn_log['evaluation_log']['task_type']
+            question_id = turn_log['evaluation_log']['evaluation_data']['id']
+
+            img_path = os.path.join(self.output_dir, "images", f"room_{task_type}_{question_id}.png")
             RoomPlotter.plot(Room.from_dict(turn_log['room_state']), Agent.from_dict(turn_log['agent_state']), mode='img', save_path=img_path)
             turn_log['room_image'] = img_path
-            self.evaluation_turn_logs[turn_log['evaluation_log']['task_type']] = turn_log
+
+            # Initialize task type if it doesn't exist
+            if task_type not in self.evaluation_turn_logs:
+                self.evaluation_turn_logs[task_type] = {}
+
+            # Store the question with its ID
+            self.evaluation_turn_logs[task_type][question_id] = turn_log
 
     def get_responses(self) -> List[Dict]:
         return [log.get('assistant_raw_message') for log in self.exploration_turn_logs if log.get('assistant_raw_message') is not None]
@@ -110,13 +120,24 @@ class HistoryManager:
             assert turn_log['evaluation_log']
             assert self.exp_type == 'active'
             task_type = turn_log['evaluation_log']['task_type']
+            question_id = turn_log['evaluation_log']['evaluation_data']['id']
+
             assert task_type in self.evaluation_turn_logs
-            self.evaluation_turn_logs[task_type]['cogmap_log'] = turn_log['cogmap_log']
+            assert question_id in self.evaluation_turn_logs[task_type]
+
+            self.evaluation_turn_logs[task_type][question_id]['cogmap_log'] = turn_log['cogmap_log']
 
     def has_cogmap_response(self, turn_idx: int = None) -> bool:
         """Check if cognitive map response exists for a specific turn (0-indexed)"""
         return (0 <= turn_idx < len(self.exploration_turn_logs) and
                 self.exploration_turn_logs[turn_idx].get('cogmap_log'))
+
+    def has_question(self, question_id: str) -> bool:
+        """Check if a question with the given ID already exists in evaluation logs"""
+        for task_type, questions in self.evaluation_turn_logs.items():
+            if question_id in questions:
+                return True
+        return False
 
     @staticmethod
     def get_model_dir(output_dir: str, model_config: Dict) -> str:
@@ -242,11 +263,12 @@ class HistoryManager:
                     turn_log['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in turn_log['message_images']]
 
             # Process evaluation tasks
-            for eval_log in sample_data["evaluation_tasks"].values():
-                if eval_log.get("room_image"):
-                    eval_log['room_image'] = os.path.relpath(eval_log['room_image'], model_dir)
-                if eval_log.get('message_images'):
-                    eval_log['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in eval_log['message_images']]
+            for task_questions in sample_data["evaluation_tasks"].values():
+                for question_data in task_questions.values():
+                    if question_data.get("room_image"):
+                        question_data['room_image'] = os.path.relpath(question_data['room_image'], model_dir)
+                    if question_data.get('message_images'):
+                        question_data['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in question_data['message_images']]
 
         return sample_data if sample_data["env_turn_logs"] or sample_data["evaluation_tasks"] else None
 

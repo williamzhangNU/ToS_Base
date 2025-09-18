@@ -6,7 +6,7 @@ import numpy as np
 from .tasks import BaseEvaluationTask
 from ..core.object import Object
 from ..core.relationship import CardinalBinsAllo
-
+from ..utils.utils import hash
 
 class E2AEvaluationTask(BaseEvaluationTask):
     """Given object names, choose correct coordinates and orientations."""
@@ -21,13 +21,19 @@ class E2AEvaluationTask(BaseEvaluationTask):
     )
 
     def generate_question(self) -> str:
-        # choices: each option picks its own random subset of objects
-        choices, correct_idx = self.generate_choices()
-        choices_text, correct_label = self.format_choices(choices, correct_idx)
+        while True:
+            # choices: each option picks its own random subset of objects
+            choices, correct_idx = self.generate_choices()
+            choices_text, correct_label = self.format_choices(choices, correct_idx)
 
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(choices_text=choices_text)
-        self.eval_data.answer = correct_label
-        self.eval_data.choices = choices
+            self.eval_data.question = self.QUESTION_TEMPLATE.format(choices_text=choices_text)
+            self.eval_data.answer = correct_label
+            self.eval_data.choices = choices
+            self.eval_data.id = hash(self.eval_data.question)
+            if self.history_manager.has_question(self.eval_data.id):
+                continue
+            else:
+                break
         return self.eval_data.question
 
     def _get_orientation_string(self, obj: Object) -> str:
