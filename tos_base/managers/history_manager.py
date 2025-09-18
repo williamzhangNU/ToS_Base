@@ -146,10 +146,7 @@ class HistoryManager:
 
     def has_question(self, question_id: str) -> bool:
         """Check if a question with the given ID already exists in evaluation logs"""
-        for task_type, questions in self.evaluation_turn_logs.items():
-            if question_id in questions:
-                return True
-        return False
+        return any(question_id in questions for questions in self.evaluation_turn_logs.values())
 
     def get_eval_counts(self) -> Dict[str, int]:
         """Return number of completed eval questions per task class name."""

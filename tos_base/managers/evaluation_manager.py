@@ -51,23 +51,23 @@ class EvaluationManager:
         "unanswered_count": 0
     }
     
-    def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent, history_manager=None):
+    def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent, history_manager=None, seed: int | None = None):
         # Expand tasks according to 'num' and exclude already completed ones (if history provided)
         self.history_manager = history_manager
         expanded: List[Dict[str, Any]] = []
+        counts = self.history_manager.get_eval_counts() if self.history_manager else {}
         for spec in eval_tasks:
             ttype = spec['task_type']
             num = int(spec.get('num', 1))
             done_count = 0
-            if self.history_manager:
+            if counts:
                 # use class name keys in history_manager (DirectionEvaluationTask etc.)
                 # but spec uses short name; map via EvalTaskType
                 try:
-                    from ..evaluation.task_types import EvalTaskType
                     class_name = EvalTaskType.from_short_name(ttype).class_name
                 except Exception:
                     class_name = ttype
-                done_count = self.history_manager.get_eval_counts().get(class_name, 0)
+                done_count = counts.get(class_name, 0)
             remaining = max(0, num - done_count)
             for _ in range(remaining):
                 expanded.append({'task_type': ttype})
@@ -78,12 +78,17 @@ class EvaluationManager:
         self.agent = agent.copy()
         self.results = []
         self.turn_logs: List[EvaluationTurnLog] = []
+        self.seed = seed
         
         # Initialize tasks
         self.tasks = []
-        for task_spec in self.eval_tasks:
+        for idx, task_spec in enumerate(self.eval_tasks):
             task_type = task_spec['task_type']
-            task = EvalTaskType.create_task(task_type, np_random, room, agent, {}, history_manager)
+            # deterministic per-task RNG derived from env seed when provided
+            task_rng = np.random.default_rng(
+                (int(self.seed) + idx * 1000003) % (2**32)
+            ) if self.seed is not None else np_random
+            task = EvalTaskType.create_task(task_type, task_rng, room, agent, {}, history_manager)
             self.tasks.append(task)
             self.results.append({
                 "task_type": task.__class__.__name__,
