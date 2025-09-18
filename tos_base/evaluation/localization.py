@@ -8,7 +8,7 @@ from ..core.object import Object, Gate
 from ..core.relationship import  PairwiseRelationshipDiscrete,  OrientationRel
 from ..actions import BaseAction
 from ..actions import ObserveAction
-
+from ..utils.utils import hash
 def _ori_to_name(ori: Tuple[int, int]) -> str:
     mapping = {(0, 1): "north", (1, 0): "east", (0, -1): "south", (-1, 0): "west"}
     return mapping.get(tuple(int(x) for x in ori), "north")
@@ -72,35 +72,40 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
     )
 
     def generate_question(self) -> dict:
-        pos, ori, rid, visible_objs, hidden_objs = self._sample_valid_agent_pose()
-        self.agent.pos, self.agent.ori, self.agent.room_id = np.array(pos), np.array(ori), int(rid)
-        origin_obj = self.np_random.choice(hidden_objs)
-        observations = self._take_observations()
+        while True:
+            pos, ori, rid, visible_objs, hidden_objs = self._sample_valid_agent_pose()
+            self.agent.pos, self.agent.ori, self.agent.room_id = np.array(pos), np.array(ori), int(rid)
+            origin_obj = self.np_random.choice(hidden_objs)
+            observations = self._take_observations()
 
-        # correct answer: your coord relative to origin and orientation
-        origin_pos = tuple(origin_obj.pos)
-        correct_coord = (int(self.agent.pos[0]) - origin_pos[0], int(self.agent.pos[1]) - origin_pos[1])
-        correct_orientation = _ori_to_name(tuple(self.agent.ori))
-        correct_answer = (correct_coord, correct_orientation)
-        # store ctx for choices
-        self._ctx = {
-            'rid': int(rid),
-            'origin_pos': origin_pos,
-            'visible_names': [o.name for o in visible_objs],
-            'agent_ori': tuple(self.agent.ori),
-        }
-        choices, correct_idx = self.generate_choices(correct_answer)
-        choices_text, correct_label = self.format_choices(choices, correct_idx)
-        self.eval_data.action = self.ACTION_TEMPLATE.format(
-            observations=observations
-        )
-        self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(
-            origin_name=origin_obj.name,
-            choices_text=choices_text,
-        )
-        self.eval_data.answer = correct_label
-        self.eval_data.choices = choices
-        self.eval_data.reasoning = self._generate_reasoning()
+            # correct answer: your coord relative to origin and orientation
+            origin_pos = tuple(origin_obj.pos)
+            correct_coord = (int(self.agent.pos[0]) - origin_pos[0], int(self.agent.pos[1]) - origin_pos[1])
+            correct_orientation = _ori_to_name(tuple(self.agent.ori))
+            correct_answer = (correct_coord, correct_orientation)
+            # store ctx for choices
+            self._ctx = {
+                'rid': int(rid),
+                'origin_pos': origin_pos,
+                'visible_names': [o.name for o in visible_objs],
+                'agent_ori': tuple(self.agent.ori),
+            }
+            choices, correct_idx = self.generate_choices(correct_answer)
+            choices_text, correct_label = self.format_choices(choices, correct_idx)
+            self.eval_data.action = self.ACTION_TEMPLATE.format(
+                observations=observations
+            )
+            self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(
+                origin_name=origin_obj.name,
+                choices_text=choices_text,
+            )
+            self.eval_data.answer = correct_label
+            self.eval_data.choices = choices
+            self.eval_data.id = hash(self.eval_data.question)
+            if self.history_manager.has_question(self.eval_data.id):
+                continue
+            else:
+                break
         return self.eval_data.question
 
     def generate_choices(self, correct_answer: Tuple[Tuple[int, int], str]) -> Tuple[List[str], int]:
@@ -255,39 +260,44 @@ class ForwardLocEvaluationTask(BaseLocEvaluationTask):
         return "; ".join(lines)
 
     def generate_question(self) -> dict:
-        pos, ori, rid, _, hidden_objs = self._sample_valid_agent_pose()
-        self.agent.pos, self.agent.ori, self.agent.room_id = np.array(pos), np.array(ori), int(rid)
-        origin_obj = self.np_random.choice(hidden_objs)
+        while True:
+            pos, ori, rid, _, hidden_objs = self._sample_valid_agent_pose()
+            self.agent.pos, self.agent.ori, self.agent.room_id = np.array(pos), np.array(ori), int(rid)
+            origin_obj = self.np_random.choice(hidden_objs)
 
-        # question fields
-        origin_pos = tuple(origin_obj.pos)
-        loc_rel = (int(self.agent.pos[0]) - origin_pos[0], int(self.agent.pos[1]) - origin_pos[1])
-        dir_name = _ori_to_name(tuple(self.agent.ori))
+            # question fields
+            origin_pos = tuple(origin_obj.pos)
+            loc_rel = (int(self.agent.pos[0]) - origin_pos[0], int(self.agent.pos[1]) - origin_pos[1])
+            dir_name = _ori_to_name(tuple(self.agent.ori))
 
-        # compute correct observation text (pairwise-only, compact)
-        correct_obs = self._observe_text(self.agent, max_items=3)
-        # store context including origin name for filtering choices later
-        self._ctx = {
-            'end_agent': self.agent.copy(),
-            'final_ori': tuple(self.agent.ori),
-            'origin_name': origin_obj.name,
-        }
+            # compute correct observation text (pairwise-only, compact)
+            correct_obs = self._observe_text(self.agent, max_items=3)
+            # store context including origin name for filtering choices later
+            self._ctx = {
+                'end_agent': self.agent.copy(),
+                'final_ori': tuple(self.agent.ori),
+                'origin_name': origin_obj.name,
+            }
 
-        # build choices
-        choices, correct_idx = self.generate_choices(correct_obs)
-        choices_text, correct_label = self.format_choices(choices, correct_idx)
+            # build choices
+            choices, correct_idx = self.generate_choices(correct_obs)
+            choices_text, correct_label = self.format_choices(choices, correct_idx)
 
-        self.eval_data.action = self.ACTION_TEMPLATE.format(
-            origin_name=origin_obj.name,
-            loc=f"({int(loc_rel[0])}, {int(loc_rel[1])})",
-            direction=dir_name,
-        )
-        self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(
-            choices_text=choices_text,
-        )
-        self.eval_data.answer = correct_label
-        self.eval_data.choices = choices
-        self.eval_data.reasoning = self._generate_reasoning()
+            self.eval_data.action = self.ACTION_TEMPLATE.format(
+                origin_name=origin_obj.name,
+                loc=f"({int(loc_rel[0])}, {int(loc_rel[1])})",
+                direction=dir_name,
+            )
+            self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(
+                choices_text=choices_text,
+            )
+            self.eval_data.answer = correct_label
+            self.eval_data.choices = choices
+            self.eval_data.id = hash(self.eval_data.question)
+            if self.history_manager.has_question(self.eval_data.id):
+                continue
+            else:
+                break
         return self.eval_data.question
 
     def generate_choices(self, correct_answer: Any) -> Tuple[List[str], int]:

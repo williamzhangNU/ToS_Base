@@ -19,9 +19,9 @@ from ..core.relationship import (
 
 @dataclass
 class EvaluationData:
+    id: str
     question: str
     answer: str
-    reasoning: str
     task_type: str
     action: str = None
     choices: List[str] = None
@@ -41,6 +41,7 @@ class EvaluationData:
     def to_dict(self) -> Dict[str, Any]:
         """Convert the evaluation data to a dictionary"""
         return {
+            'id': self.id,
             'question': self.question,
             'answer': self.answer,
             'task_type': self.task_type,
@@ -56,16 +57,17 @@ class EvaluationData:
 class BaseEvaluationTask(ABC):
     """Abstract base class for all spatial evaluation tasks."""
     
-    def __init__(self, np_random: np.random.Generator, room: Room, agent: Agent, config: Dict[str, Any] = None):
+    def __init__(self, np_random: np.random.Generator, room: Room, agent: Agent, config: Dict[str, Any] = None, history_manager=None):
         """Initialize the evaluation task"""
         self.config = config or {}
         self.np_random = np_random
         self.room = room.copy()
         self.agent = agent.copy()
+        self.history_manager = history_manager
         self.eval_data = EvaluationData(
+            id="",
             question="",
             answer="",
-            reasoning="",
             action=None,
             task_type=self.__class__.__name__,
             choices=[]
@@ -80,16 +82,8 @@ class BaseEvaluationTask(ABC):
         return self.eval_data.question
     
     @property
-    def reasoning(self) -> str:
-        return self.eval_data.reasoning
-    
-    @property
     def choices(self) -> List[str]:
         return self.eval_data.choices
-    
-    def _generate_reasoning(self) -> str:
-        """Generate reasoning for the evaluation task"""
-        return f"Reasoning for {self.__class__.__name__}"
     
     def format_choices(self, choices: List[str], correct_index: int) -> Tuple[str, str]:
         """Format choices as lines and return (choices_text, correct_label)."""
@@ -118,7 +112,6 @@ class BaseEvaluationTask(ABC):
         return {
             'question': self.question,
             'answer': self.answer,
-            'reasoning': self.reasoning,
             'choices': self.choices,
         }
 

@@ -28,11 +28,10 @@ def transform_ori(ori_world: np.ndarray, anchor_ori: np.ndarray) -> np.ndarray:
 
 
 def transform_baseroom(room: BaseRoom, anchor_pos: np.ndarray, anchor_ori: np.ndarray) -> BaseRoom:
-    objects: List[Object] = []
     for obj in room.objects:
         p = transform_point(obj.pos, anchor_pos, anchor_ori)
-        objects.append(Object(name=obj.name, pos=p, ori=obj.ori, has_orientation=obj.has_orientation))
-    return BaseRoom(objects=objects, name=room.name)
+        obj.pos = p
+    return room
 
 
 def inv_transform_point(pos_local: np.ndarray, anchor_pos: np.ndarray, anchor_ori: np.ndarray) -> np.ndarray:

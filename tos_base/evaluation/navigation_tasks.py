@@ -13,7 +13,7 @@ from ..core.relationship import EgoFrontBins, StandardDistanceBins, PairwiseRela
 from ..actions import BaseAction, ObserveAction, RotateAction, MoveAction
 from ..managers.exploration_manager import ExplorationManager
 from ..utils.action_utils import action_results_to_text
-
+from ..utils.utils import hash
 
 """Small, shared helpers. Use actions (Observe/Rotate/Move) via ExplorationManager."""
 
@@ -346,19 +346,24 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
         return choices, int(choices.index(correct_obs))
 
     def generate_question(self) -> dict:
-        self.steps = int(self.config.get('steps', 2))
-        seq, final_ori = self._generate_plan(self.steps)
-        per_step, end_agent = self.build_action_sequence(seq, final_ori)
-        actions_str = self.action_sequence_to_string(per_step)
-        correct_obs = self._observe_text(end_agent, max_items=3)
-        self._ctx = {'end_agent': end_agent.copy(), 'final_ori': tuple(final_ori)}
-        choices, correct_idx = self.generate_choices(correct_obs)
-        choices_text, correct_label = self.format_choices(choices, correct_idx)
-        self.eval_data.action = self.ACTION_TEMPLATE.format(actions=actions_str)
-        self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(choices_text=choices_text)
-        self.eval_data.answer = correct_label
-        self.eval_data.choices = choices
-        self.eval_data.reasoning = self._generate_reasoning()
+        while True:
+            self.steps = int(self.config.get('steps', 2))
+            seq, final_ori = self._generate_plan(self.steps)
+            per_step, end_agent = self.build_action_sequence(seq, final_ori)
+            actions_str = self.action_sequence_to_string(per_step)
+            correct_obs = self._observe_text(end_agent, max_items=3)
+            self._ctx = {'end_agent': end_agent.copy(), 'final_ori': tuple(final_ori)}
+            choices, correct_idx = self.generate_choices(correct_obs)
+            choices_text, correct_label = self.format_choices(choices, correct_idx)
+            self.eval_data.action = self.ACTION_TEMPLATE.format(actions=actions_str)
+            self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(choices_text=choices_text)
+            self.eval_data.answer = correct_label
+            self.eval_data.choices = choices
+            self.eval_data.id = hash(self.eval_data.question)
+            if self.history_manager.has_question(self.eval_data.id):
+                continue
+            else:
+                break
         return self.eval_data.question
 
 class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
@@ -432,19 +437,24 @@ class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
         return choices, int(choices.index(correct))
 
     def generate_question(self) -> dict:
-        self.steps = int(self.config.get('max_steps', 2))
-        seq, final_ori = self._generate_plan(self.steps)
-        per_step, end_agent = self.build_action_sequence(seq, final_ori)
-        final_obs = action_results_to_text([ObserveAction().execute(self.room, end_agent.copy())])
-        correct_actions = self.action_sequence_to_string(per_step)
-        self._ctx = {'seq': list(seq), 'final_ori': tuple(final_ori)}
-        choices, correct_idx = self.generate_choices(correct_actions)
-        choices_text, correct_label = self.format_choices(choices, correct_idx)
-        self.eval_data.action = self.ACTION_TEMPLATE.format(final_obs=final_obs)
-        self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(choices_text=choices_text)
-        self.eval_data.answer = correct_label
-        self.eval_data.choices = choices
-        self.eval_data.reasoning = self._generate_reasoning()
+        while True:
+            self.steps = int(self.config.get('max_steps', 2))
+            seq, final_ori = self._generate_plan(self.steps)
+            per_step, end_agent = self.build_action_sequence(seq, final_ori)
+            final_obs = action_results_to_text([ObserveAction().execute(self.room, end_agent.copy())])
+            correct_actions = self.action_sequence_to_string(per_step)
+            self._ctx = {'seq': list(seq), 'final_ori': tuple(final_ori)}
+            choices, correct_idx = self.generate_choices(correct_actions)
+            choices_text, correct_label = self.format_choices(choices, correct_idx)
+            self.eval_data.action = self.ACTION_TEMPLATE.format(final_obs=final_obs)
+            self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(choices_text=choices_text)
+            self.eval_data.answer = correct_label
+            self.eval_data.choices = choices
+            self.eval_data.id = hash(self.eval_data.question)
+            if self.history_manager.has_question(self.eval_data.id):
+                continue
+            else:
+                break
         return self.eval_data.question
 
 

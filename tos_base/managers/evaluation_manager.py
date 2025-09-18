@@ -51,7 +51,7 @@ class EvaluationManager:
         "unanswered_count": 0
     }
     
-    def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent):
+    def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent, history_manager=None):
         self.eval_tasks = eval_tasks
         self.np_random = np_random
         self.room = room.copy()
@@ -64,7 +64,7 @@ class EvaluationManager:
         for task_spec in eval_tasks:
             task_type = task_spec['task_type']
             task_kwargs = task_spec.get('task_kwargs', {})
-            task = EvalTaskType.create_task(task_type, np_random, room, agent, task_kwargs)
+            task = EvalTaskType.create_task(task_type, np_random, room, agent, task_kwargs, history_manager)
             self.tasks.append(task)
             self.results.append({
                 "task_type": task.__class__.__name__,

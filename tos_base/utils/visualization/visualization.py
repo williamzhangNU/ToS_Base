@@ -140,10 +140,34 @@ class HTMLGenerator:
                 cogmap_group = self.cogmap_summary["group_performance"][gname]
                 f.write("<div class='group-metrics'>")
                 f.write("<strong>Cognitive Map:</strong>")
-                # Display other cognitive map metrics (exclude the per_turn data)
-                cogmap_group_filtered = {k: v for k, v in cogmap_group.items()
-                                       if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn"]}
-                f.write(VisualizationHelper.dict_to_html(cogmap_group_filtered))
+
+                # Display main cognitive map metrics (exclude per_turn data)
+                main_metrics = {k: v for k, v in cogmap_group.items()
+                               if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn"]}
+
+                # Check if we need 75/25 layout or single column
+                items = list(main_metrics.items())
+                total_items = len(items)
+                left_count = max(1, int(total_items * 0.75)) if total_items > 1 else total_items
+                right_metrics = dict(items[left_count:]) if left_count < total_items else {}
+
+                # Create layout class based on content
+                layout_class = "cogmap-compare" if right_metrics else "cogmap-compare single-column"
+                f.write(f"<div class='{layout_class}'>")
+
+                # Left side - Main cognitive map metrics
+                f.write("<div class='cogmap-box side'>")
+                left_metrics = dict(items[:left_count])
+                f.write(VisualizationHelper.dict_to_html(left_metrics))
+                f.write("</div>")
+
+                # Right side - Only if has content
+                if right_metrics:
+                    f.write("<div class='cogmap-box side'>")
+                    f.write(VisualizationHelper.dict_to_html(right_metrics))
+                    f.write("</div>")
+
+                f.write("</div>")  # End cogmap-compare
                 f.write("</div>\n")
 
             f.write("</div>\n")  # End text-metrics-section
@@ -437,16 +461,57 @@ class HTMLGenerator:
                 f.write(VisualizationHelper.dict_to_html(details))
                 f.write("</div>\n")
 
-            # Display cognitive map response if available
-            if env_log.get('cogmap_response'):
-                response_content = env_log['cogmap_response']
-                response_short = escape(response_content[:300]).replace("\n", "<br>")
-                response_full = escape(response_content).replace("\n", "<br>")
-                cogmap_id = f"cogmap_response_{page_idx}_{t_idx}"
-                f.write(f"<div id='{cogmap_id}' class='block cogmap-response expandable' onclick='toggleCogmapResponse(\"{cogmap_id}\")' data-expanded='false'><strong>🗺️ Cognitive Map Response <span class='expand-hint'>(click to toggle)</span></strong><br><span class='content-text'>{response_short}...</span></div>\n")
-                # Store full content in hidden div
-                f.write(f"<div id='{cogmap_id}_full' style='display:none'>{response_full}</div>\n")
-                f.write(f"<div id='{cogmap_id}_short' style='display:none'>{response_short}...</div>\n")
+            # Display cognitive map original responses if available
+            if env_log.get('cogmap_log'):
+                cogmap_log = env_log['cogmap_log']
+
+                # Display global original response
+                global_data = cogmap_log.get('global', {})
+                if global_data.get('original_response'):
+                    global_response = global_data['original_response']
+                    global_short = escape(global_response[:300]).replace("\n", "<br>")
+                    global_full = escape(global_response).replace("\n", "<br>")
+                    global_id = f"cogmap_global_{page_idx}_{t_idx}"
+                    f.write(f"<div id='{global_id}' class='block cogmap-response expandable' onclick='toggleCogmapResponse(\"{global_id}\")' data-expanded='false'><strong>🗺️ Global Cognitive Map Response <span class='expand-hint'>(click to toggle)</span></strong><br><span class='content-text'>{global_short}...</span></div>\n")
+                    # Store full content in hidden div
+                    f.write(f"<div id='{global_id}_full' style='display:none'>{global_full}</div>\n")
+                    f.write(f"<div id='{global_id}_short' style='display:none'>{global_short}...</div>\n")
+
+                # Display local original response
+                local_data = cogmap_log.get('local', {})
+                if local_data.get('original_response'):
+                    local_response = local_data['original_response']
+                    local_short = escape(local_response[:300]).replace("\n", "<br>")
+                    local_full = escape(local_response).replace("\n", "<br>")
+                    local_id = f"cogmap_local_{page_idx}_{t_idx}"
+                    f.write(f"<div id='{local_id}' class='block cogmap-response expandable' onclick='toggleCogmapResponse(\"{local_id}\")' data-expanded='false'><strong>🗺️ Local Cognitive Map Response <span class='expand-hint'>(click to toggle)</span></strong><br><span class='content-text'>{local_short}...</span></div>\n")
+                    # Store full content in hidden div
+                    f.write(f"<div id='{local_id}_full' style='display:none'>{local_full}</div>\n")
+                    f.write(f"<div id='{local_id}_short' style='display:none'>{local_short}...</div>\n")
+
+                # Display relations original response
+                relations_data = cogmap_log.get('relations', {})
+                if relations_data.get('original_response'):
+                    relations_response = relations_data['original_response']
+                    relations_short = escape(relations_response[:300]).replace("\n", "<br>")
+                    relations_full = escape(relations_response).replace("\n", "<br>")
+                    relations_id = f"cogmap_relations_{page_idx}_{t_idx}"
+                    f.write(f"<div id='{relations_id}' class='block cogmap-response expandable' onclick='toggleCogmapResponse(\"{relations_id}\")' data-expanded='false'><strong>🗺️ Relations Cognitive Map Response <span class='expand-hint'>(click to toggle)</span></strong><br><span class='content-text'>{relations_short}...</span></div>\n")
+                    # Store full content in hidden div
+                    f.write(f"<div id='{relations_id}_full' style='display:none'>{relations_full}</div>\n")
+                    f.write(f"<div id='{relations_id}_short' style='display:none'>{relations_short}...</div>\n")
+
+                # Display rooms original response
+                rooms_data = cogmap_log.get('rooms', {})
+                if rooms_data.get('original_response'):
+                    rooms_response = rooms_data['original_response']
+                    rooms_short = escape(rooms_response[:300]).replace("\n", "<br>")
+                    rooms_full = escape(rooms_response).replace("\n", "<br>")
+                    rooms_id = f"cogmap_rooms_{page_idx}_{t_idx}"
+                    f.write(f"<div id='{rooms_id}' class='block cogmap-response expandable' onclick='toggleCogmapResponse(\"{rooms_id}\")' data-expanded='false'><strong>🗺️ Rooms Cognitive Map Response <span class='expand-hint'>(click to toggle)</span></strong><br><span class='content-text'>{rooms_short}...</span></div>\n")
+                    # Store full content in hidden div
+                    f.write(f"<div id='{rooms_id}_full' style='display:none'>{rooms_full}</div>\n")
+                    f.write(f"<div id='{rooms_id}_short' style='display:none'>{rooms_short}...</div>\n")
             def _fmt_xy(v):
                 try:
                     return f"[{int(v[0])},{int(v[1])}]"
@@ -696,15 +761,33 @@ class HTMLGenerator:
                     f.write(VisualizationHelper.dict_to_html(details))
                     f.write("</div>\n")
 
-                # Display cognitive map response if available (same as exploration)
-                if eval_log.get('cogmap_response'):
-                    response_content = eval_log['cogmap_response']
-                    response_short = escape(response_content[:300]).replace("\n", "<br>")
-                    response_full = escape(response_content).replace("\n", "<br>")
-                    cogmap_id = f"cogmap_response_{page_idx}_{t_idx}"
-                    f.write(f"<div id='{cogmap_id}' class='block cogmap-response expandable' onclick='toggleCogmapResponse(\"{cogmap_id}\")' data-expanded='false'><strong>🗺️ Cognitive Map Response <span class='expand-hint'>(click to toggle)</span></strong><br><span class='content-text'>{response_short}...</span></div>\n")
-                    f.write(f"<div id='{cogmap_id}_full' style='display:none'>{response_full}</div>\n")
-                    f.write(f"<div id='{cogmap_id}_short' style='display:none'>{response_short}...</div>\n")
+                # Display cognitive map original responses if available (same as exploration)
+                if eval_log.get('cogmap_log'):
+                    cogmap_log = eval_log['cogmap_log']
+
+                    # Display global original response
+                    global_data = cogmap_log.get('global', {})
+                    if global_data.get('original_response'):
+                        global_response = global_data['original_response']
+                        global_short = escape(global_response[:300]).replace("\n", "<br>")
+                        global_full = escape(global_response).replace("\n", "<br>")
+                        global_id = f"cogmap_global_{page_idx}_{t_idx}"
+                        f.write(f"<div id='{global_id}' class='block cogmap-response expandable' onclick='toggleCogmapResponse(\"{global_id}\")' data-expanded='false'><strong>🗺️ Global Cognitive Map Response <span class='expand-hint'>(click to toggle)</span></strong><br><span class='content-text'>{global_short}...</span></div>\n")
+                        # Store full content in hidden div
+                        f.write(f"<div id='{global_id}_full' style='display:none'>{global_full}</div>\n")
+                        f.write(f"<div id='{global_id}_short' style='display:none'>{global_short}...</div>\n")
+
+                    # Display local original response
+                    local_data = cogmap_log.get('local', {})
+                    if local_data.get('original_response'):
+                        local_response = local_data['original_response']
+                        local_short = escape(local_response[:300]).replace("\n", "<br>")
+                        local_full = escape(local_response).replace("\n", "<br>")
+                        local_id = f"cogmap_local_{page_idx}_{t_idx}"
+                        f.write(f"<div id='{local_id}' class='block cogmap-response expandable' onclick='toggleCogmapResponse(\"{local_id}\")' data-expanded='false'><strong>🗺️ Local Cognitive Map Response <span class='expand-hint'>(click to toggle)</span></strong><br><span class='content-text'>{local_short}...</span></div>\n")
+                        # Store full content in hidden div
+                        f.write(f"<div id='{local_id}_full' style='display:none'>{local_full}</div>\n")
+                        f.write(f"<div id='{local_id}_short' style='display:none'>{local_short}...</div>\n")
 
                 # Reuse the same helper functions from exploration turns
                 def _fmt_xy(v):

@@ -8,7 +8,7 @@ Per-type prompts ONLY add their specific instructions (no repetition).
 BASE_COGMAP_PROMPT = """\
 ## Cognitive Map (JSON)
 
-Represent the scene as a JSON map. Always output the cognitive map JSON first.
+Represent the scene as a JSON map. 
 
 ### Schema (shared)
 - position: [x, y] integers (or integer-like)
@@ -18,6 +18,10 @@ Represent the scene as a JSON map. Always output the cognitive map JSON first.
 ### General rules (shared)
 - Coordinate frame MUST be explicit in the content.
 - Include only observed/known information—do not invent.
+
+In your thinking (<think> ... </think>):  
+1) Briefly reason about your cognitive map 
+2) Then provide the cognitive map JSON in <answer>...</answer>
 """
 
 # Global-only specifics

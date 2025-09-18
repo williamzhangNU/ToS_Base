@@ -1,6 +1,6 @@
 import re
 from typing import Tuple
-
+import hashlib
 def parse_llm_response(text: str, enable_think: bool = True) -> Tuple[str, str, bool]:
     """Parse LLM response for optional <think> and required <answer> content.
 
@@ -20,3 +20,7 @@ def parse_llm_response(text: str, enable_think: bool = True) -> Tuple[str, str, 
 
     parsed_ok = bool(think_content) and bool(answer_content)
     return think_content, answer_content, parsed_ok
+
+def hash(input_str: str) -> str:
+    """Generate a stable hash for the given input string."""
+    return hashlib.sha256(input_str.encode('utf-8')).hexdigest()[:16]

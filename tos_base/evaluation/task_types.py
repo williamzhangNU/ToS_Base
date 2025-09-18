@@ -87,12 +87,12 @@ class EvalTaskType(Enum):
         raise ValueError(f"Unknown task class name: {class_name}")
     
     @classmethod
-    def create_task(cls, task_name: str, np_random: np.random.Generator, room: 'Room', agent: 'Agent', config: dict = None) -> 'BaseEvaluationTask':
+    def create_task(cls, task_name: str, np_random: np.random.Generator, room: 'Room', agent: 'Agent', config: dict = None, history_manager = None) -> 'BaseEvaluationTask':
         """Create an evaluation task instance from task name."""
         task_map = cls.get_task_map()
         if task_name in task_map:
             task_class = task_map[task_name]
-            return task_class(np_random, room, agent, config or {})
+            return task_class(np_random, room, agent, config or {}, history_manager)
         else:
             raise ValueError(f"Unknown evaluation task: {task_name}") 
         
