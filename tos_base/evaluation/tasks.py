@@ -19,6 +19,7 @@ from ..core.relationship import (
 
 @dataclass
 class EvaluationData:
+    id: str
     question: str
     answer: str
     task_type: str
@@ -40,6 +41,7 @@ class EvaluationData:
     def to_dict(self) -> Dict[str, Any]:
         """Convert the evaluation data to a dictionary"""
         return {
+            'id': self.id,
             'question': self.question,
             'answer': self.answer,
             'task_type': self.task_type,
@@ -62,6 +64,7 @@ class BaseEvaluationTask(ABC):
         self.room = room.copy()
         self.agent = agent.copy()
         self.eval_data = EvaluationData(
+            id="",
             question="",
             answer="",
             action=None,

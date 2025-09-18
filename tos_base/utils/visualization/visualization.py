@@ -140,10 +140,34 @@ class HTMLGenerator:
                 cogmap_group = self.cogmap_summary["group_performance"][gname]
                 f.write("<div class='group-metrics'>")
                 f.write("<strong>Cognitive Map:</strong>")
-                # Display other cognitive map metrics (exclude the per_turn data)
-                cogmap_group_filtered = {k: v for k, v in cogmap_group.items()
-                                       if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn"]}
-                f.write(VisualizationHelper.dict_to_html(cogmap_group_filtered))
+
+                # Display main cognitive map metrics (exclude per_turn data)
+                main_metrics = {k: v for k, v in cogmap_group.items()
+                               if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn"]}
+
+                # Check if we need 75/25 layout or single column
+                items = list(main_metrics.items())
+                total_items = len(items)
+                left_count = max(1, int(total_items * 0.75)) if total_items > 1 else total_items
+                right_metrics = dict(items[left_count:]) if left_count < total_items else {}
+
+                # Create layout class based on content
+                layout_class = "cogmap-compare" if right_metrics else "cogmap-compare single-column"
+                f.write(f"<div class='{layout_class}'>")
+
+                # Left side - Main cognitive map metrics
+                f.write("<div class='cogmap-box side'>")
+                left_metrics = dict(items[:left_count])
+                f.write(VisualizationHelper.dict_to_html(left_metrics))
+                f.write("</div>")
+
+                # Right side - Only if has content
+                if right_metrics:
+                    f.write("<div class='cogmap-box side'>")
+                    f.write(VisualizationHelper.dict_to_html(right_metrics))
+                    f.write("</div>")
+
+                f.write("</div>")  # End cogmap-compare
                 f.write("</div>\n")
 
             f.write("</div>\n")  # End text-metrics-section

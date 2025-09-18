@@ -4,7 +4,7 @@ from typing import List, Tuple, Any
 import numpy as np
 from typing_extensions import override
 
-from .tasks import BaseEvaluationTask, EvaluationData
+from .tasks import BaseEvaluationTask
 from ..core.object import Object
 from ..core.relationship import PairwiseRelationship
 

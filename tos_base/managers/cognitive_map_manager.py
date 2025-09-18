@@ -442,11 +442,9 @@ class CognitiveMapManager:
     def aggregate_group_performance(env_data_list: List[Dict], exp_type: str = None) -> Dict[str, Any]:
         """Aggregate cognitive map metrics per scenario.
 
-        scenario in {
-            'active_exploration': error + consistency + correctness,
-            'active_evaluation': correctness (global only),
-            'passive_exploration': correctness (global only),
-            'passive_evaluation': correctness (global only)
+        exp_type in {
+            'active': error + consistency + correctness,
+            'passive': correctness (global only),
         }
         """
         assert isinstance(env_data_list, list) and len(env_data_list) > 0, "env_data_list must be a non-empty list"

@@ -252,11 +252,100 @@ body {
 
 .dict-value.nested-dict {
     width: 100%;
+    max-width: 100%;
     margin-top: 8px;
     padding: 8px;
     background: #ffffff;
     border: 1px solid #e9ecef;
     border-radius: 4px;
+    overflow: hidden;
+    word-wrap: break-word;
+    box-sizing: border-box;
+}
+
+/* Ensure nested dict containers are properly constrained */
+.dict-value.nested-dict .dict-container {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+/* Ensure deeply nested dict items don't overflow */
+.dict-value.nested-dict .dict-item {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+    word-wrap: break-word;
+    margin: 0;
+}
+
+/* Handle deeply nested dict values */
+.dict-value.nested-dict .dict-value.nested-dict {
+    width: calc(100% - 16px);
+    max-width: calc(100% - 16px);
+    margin: 4px 0 0 0;
+    padding: 6px;
+}
+
+/* Fix nested dict overlapping in group-metrics sections (main page) */
+.group-metrics .dict-container {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.group-metrics .dict-item {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+    word-wrap: break-word;
+    margin: 0;
+}
+
+.group-metrics .dict-value.nested-dict {
+    width: 100%;
+    max-width: 100%;
+    margin-top: 8px;
+    padding: 8px;
+    background: #ffffff;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+    word-wrap: break-word;
+    box-sizing: border-box;
+}
+
+.group-metrics .dict-value.nested-dict .dict-container {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.group-metrics .dict-value.nested-dict .dict-item {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+    word-wrap: break-word;
+    margin: 0;
+}
+
+.group-metrics .dict-value.nested-dict .dict-value.nested-dict {
+    width: calc(100% - 16px);
+    max-width: calc(100% - 16px);
+    margin: 4px 0 0 0;
+    padding: 6px;
 }
 
 .empty-dict {
@@ -470,22 +559,50 @@ body {
 /* Cognitive map layout */
 .cogmap-compare {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 16px;
+    grid-template-columns: 75% 25%;
+    gap: 0;
     margin-top: 10px;
+}
+
+/* Handle single column case when right side is empty */
+.cogmap-compare:has(.cogmap-box.side:only-child) {
+    grid-template-columns: 1fr;
+}
+
+/* Alternative for browsers that don't support :has() */
+.cogmap-compare.single-column {
+    grid-template-columns: 1fr;
 }
 .cogmap-box {
     background: white;
     border: 1px solid #dee2e6;
-    border-radius: 10px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    border-radius: 0;
+    box-shadow: none;
     overflow: hidden;
+    margin: 0;
+    padding: 0;
 }
 .cogmap-box.side {
     display: flex;
     flex-direction: column;
     min-height: 100%;
+    border-left: none;
 }
+
+.cogmap-box.side:first-child {
+    border-right: none;
+}
+
+.cogmap-box.side:last-child {
+    border-left: 1px solid #dee2e6;
+}
+
+/* Add minimal padding to prevent text clipping in right panel */
+.cogmap-box.side .dict-container {
+    padding: 0 8px;
+    margin: 0;
+}
+
 .cogmap-box-title {
     background: linear-gradient(135deg, #e9f3ff 0%, #d7ebff 100%);
     color: #0d47a1;
@@ -512,6 +629,7 @@ body {
 .cogmap-gt-section {
     padding: 10px 12px;
     border-bottom: 1px dashed #dbe4f3;
+    margin: 0;
 }
 .cogmap-gt-section:last-child {
     border-bottom: none;
@@ -527,10 +645,11 @@ body {
     font-size: 13px;
     line-height: 1.5;
     background: #f8fbff;
-    border: 1px solid #e6eefb;
-    border-radius: 6px;
+    border: none;
+    border-radius: 0;
     padding: 8px 10px;
     color: #0d47a1;
+    margin: 0;
 }
 /* Room chunk blocks inside the Rooms section */
 .room-chunk {
@@ -727,75 +846,6 @@ a:hover {
     font-weight: 500;
 }
 
-.group-metrics {
-    margin: 10px 0;
-    padding: 10px;
-    background: #f8f9fa;
-    border-radius: 6px;
-    border-left: 3px solid #6c757d;
-}
-
-.group-metrics strong {
-    color: #495057;
-    font-weight: 600;
-    display: block;
-    margin-bottom: 8px;
-}
-
-/* Improved dictionary styling */
-.dict-container {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 8px;
-    margin-top: 10px;
-}
-
-.dict-item {
-    background: #f8f9fa;
-    padding: 8px 12px;
-    border-radius: 6px;
-    border: 1px solid #dee2e6;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 0.9em;
-}
-
-.dict-key {
-    font-weight: 600;
-    color: #495057;
-    margin-right: 8px;
-}
-
-.dict-value {
-    color: #6c757d;
-    font-weight: 500;
-}
-
-.dict-value.number {
-    color: #007bff;
-    font-weight: 600;
-}
-
-.dict-value.true {
-    color: #28a745;
-    font-weight: 600;
-}
-
-.dict-value.false {
-    color: #dc3545;
-    font-weight: 600;
-}
-
-.empty-dict {
-    color: #6c757d;
-    font-style: italic;
-    padding: 8px 12px;
-    background: #f8f9fa;
-    border-radius: 6px;
-    border: 1px dashed #dee2e6;
-}
-
 /* Responsive design */
 @media (max-width: 768px) {
     .sample-page {
@@ -968,18 +1018,23 @@ a:hover {
     .cogmap-columns {
         grid-template-columns: 1fr;
     }
-    
+
     .turn-averages-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .cognitive-map-charts,
     .turn-averages-section {
         margin: 15px 0;
         padding: 15px;
     }
-    
+
     .three-plots-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Stack cognitive map layout vertically on mobile */
+    .cogmap-compare {
         grid-template-columns: 1fr;
     }
 }

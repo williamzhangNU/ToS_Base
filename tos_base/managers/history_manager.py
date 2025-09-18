@@ -21,7 +21,7 @@ class HistoryManager:
     def __init__(self, observation_config:Dict, model_config:Dict ,room_dict: Dict, agent_dict: Dict, output_dir:str, override=False):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
-        self.evaluation_turn_logs: Dict = {}
+        self.evaluation_turn_logs: Dict[Dict] = {}
         self.exp_type = observation_config['exp_type']
         self.model_path= HistoryManager.get_model_dir(output_dir, model_config)
         self.output_dir = os.path.abspath(os.path.join(
