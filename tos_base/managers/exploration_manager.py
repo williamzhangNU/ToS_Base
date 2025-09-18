@@ -338,7 +338,7 @@ class ExplorationManager:
         Keep simple: we use exploration quality as info gain elsewhere.
         """
         if not self.enable_information_gain or (self.spatial_solver is None):
-            return 0.0
+            return
         if getattr(action_result, 'action_type', None) in ('observe', 'query'):
             triples = action_result.data.get('relation_triples', []) if hasattr(action_result, 'data') else []
             if triples:
@@ -346,7 +346,6 @@ class ExplorationManager:
                 filt = [tr for tr in triples if tr.subject in keep and tr.anchor in keep]
                 if filt:
                     self.spatial_solver.add_observation(filt)
-        return 0.0
 
     # === Exploration quality helpers ===
     def _full_grid_cell_count(self) -> int:

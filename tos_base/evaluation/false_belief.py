@@ -23,7 +23,7 @@ class FalseBeliefEvaluationTask(BaseEvaluationTask):
 
     def generate_question(self) -> dict:
         while True:
-            # 1) Pick a room with ≥3 objects AND ≥3 oriented objects; place agent randomly
+            # 1) Pick a room with >= 3 objects AND >= 3 oriented objects; place agent randomly
             rids = [int(r) for r in self.room.objects_by_room.keys() if isinstance(r, int) and r > 0]
             self.np_random.shuffle(rids)
             rid = -1
@@ -32,7 +32,7 @@ class FalseBeliefEvaluationTask(BaseEvaluationTask):
                 objs_r = [self.room.get_object_by_name(n) for n in names_r]
                 if len(objs_r) >= 3 and sum(1 for o in objs_r if o.has_orientation) >= 3:
                     rid = int(r); break
-            if rid == -1: raise ValueError("No room with ≥3 objects AND ≥3 oriented objects")
+            if rid == -1: raise ValueError("No room with >= 3 objects AND >= 3 oriented objects")
 
             xmin, xmax, ymin, ymax = self.room.get_boundary(room_id=rid)
             coords = [(x, y) for x in range(xmin, xmax + 1) for y in range(ymin, ymax + 1)]
