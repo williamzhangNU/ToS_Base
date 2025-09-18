@@ -1,4 +1,5 @@
 from typing import List, Dict, Any, Callable, Optional
+from .types import MapCogMetrics, RelationMetrics
 
 from .types import MapCogMetrics, RelationMetrics
 
@@ -11,7 +12,7 @@ def _avg(values: List[float]) -> float:
 def _avg_metrics(keys: List[str], metrics_list: List[Dict[str, float]]) -> Dict[str, float]:
     if not metrics_list:
         return {k: 0.0 for k in keys}
-    return {k: _avg([m.get(k) for m in metrics_list if isinstance(m, dict)]) for k in keys}
+    return {k: _avg([float(m.get(k, 0.0)) for m in metrics_list if isinstance(m, dict)]) for k in keys}
 
 
 def _avg_list_of_lists(list_of_lists: List[List[float]]) -> List[float]:
@@ -82,24 +83,44 @@ def calculate_cogmap_per_turn(env_data_list: List[Dict[str, Any]], mode: str = "
     }
 
 
+# ---- Dataclass-based aggregation helpers ----
+def _avg_map_dicts(dicts: List[Dict[str, float]]) -> Dict[str, float]:
+    mats: List[MapCogMetrics] = []
+    for d in dicts:
+        m = MapCogMetrics.from_dict(d)
+        if m.valid:
+            mats.append(m)
+    return MapCogMetrics.average(mats).to_dict() if mats else MapCogMetrics.invalid().to_dict()
+
+
+def _avg_rel_dicts(dicts: List[Dict[str, float]]) -> Dict[str, float]:
+    rms: List[RelationMetrics] = []
+    for d in dicts:
+        r = RelationMetrics.from_dict(d)
+        if r.valid:
+            rms.append(r)
+    return RelationMetrics.average(rms).to_dict() if rms else RelationMetrics.invalid().to_dict()
+
+
+def _avg_map_over_turns(env_data: Dict[str, Any], section: str, field: str) -> MapCogMetrics:
+    mats: List[MapCogMetrics] = []
+    for t in env_data.get('env_turn_logs', []):
+        d = (t.get('cogmap_log') or {}).get(section, {}).get(field, {})
+        m = MapCogMetrics.from_dict(d)
+        if m.valid:
+            mats.append(m)
+    return MapCogMetrics.average(mats) if mats else MapCogMetrics.invalid()
+
+
 def compute_error_aggregates(env_data_list: List[Dict[str, Any]],) -> Dict[str, Any]:
-    map_keys = ["dir", "facing", "pos", "overall"]
 
     def _per_sample_local_err(env_data: Dict[str, Any]) -> Dict[str, float]:
-        vals = []
-        for t in env_data.get('env_turn_logs', []):
-            m = (t.get('cogmap_log', {}) or {}).get('local', {}).get('metrics', {})
-            if m:
-                vals.append({k: float(m.get(k, 0.0)) for k in map_keys})
-        return _avg_metrics(map_keys, vals)
+        m = _avg_map_over_turns(env_data, section='local', field='metrics')
+        return m.to_dict()
 
     def _per_sample_global_err(env_data: Dict[str, Any]) -> Dict[str, float]:
-        vals = []
-        for t in env_data.get('env_turn_logs', []):
-            m = (t.get('cogmap_log', {}) or {}).get('global', {}).get('metrics', {})
-            if m:
-                vals.append({k: float(m.get(k, 0.0)) for k in map_keys})
-        return _avg_metrics(map_keys, vals)
+        m = _avg_map_over_turns(env_data, section='global', field='metrics')
+        return m.to_dict()
 
     return {
         'local_vs_gt_local_avg': aggregate_per_sample_then_group(env_data_list, _per_sample_local_err),
@@ -107,24 +128,16 @@ def compute_error_aggregates(env_data_list: List[Dict[str, Any]],) -> Dict[str, 
     }
 
 
+def get_last_exploration_cogmap(env_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Return the last exploration turn's cogmap_log if present."""
+    for t in reversed(env_data.get('env_turn_logs', [])):
+        if t.get('cogmap_log'):
+            return t.get('cogmap_log')
+    return None
+
+
 def compute_correctness_aggregates(env_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
-    map_keys = ["dir", "facing", "pos", "overall"]
 
-    def _last_explore(env_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        for t in reversed(env_data.get('env_turn_logs', [])):
-            if t.get('cogmap_log'):
-                return t.get('cogmap_log')
-        return None
-
-    def _last_global_full(env_data: Dict[str, Any]) -> Dict[str, float]:
-        lg = _last_explore(env_data)
-        m = (lg or {}).get('global', {}).get('metrics_full', {})
-        return {k: float(m.get(k, 0.0)) for k in map_keys}
-
-    def _last_relations_full(env_data: Dict[str, Any]) -> Dict[str, float]:
-        lg = _last_explore(env_data)
-        m = (lg or {}).get('relations', {}).get('metrics_full', {})
-        return {k: float(m.get(k, 0.0)) for k in ['dir', 'dist', 'overall']}
 
     # Passive global map (full) aggregated
     passive_vals = []
@@ -135,63 +148,75 @@ def compute_correctness_aggregates(env_data_list: List[Dict[str, Any]]) -> Dict[
             if turns:
                 mm = (turns[0].get('cogmap_log') or {}).get('global', {}).get('metrics_full', {})
                 if mm:
-                    passive_vals.append({k: float(mm.get(k, 0.0)) for k in map_keys})
+                    passive_vals.append(MapCogMetrics.from_dict(mm).to_dict())
+
+    # Dataclass-based sample averaging
+    last_global_vals = []
+    last_rel_vals = []
+    for env_data in env_data_list:
+        lg = get_last_exploration_cogmap(env_data)
+        if lg:
+            last_global_vals.append(MapCogMetrics.from_dict((lg or {}).get('global', {}).get('metrics_full', {})).to_dict())
+            last_rel_vals.append(RelationMetrics.from_dict((lg or {}).get('relations', {}).get('metrics_full', {})).to_dict())
 
     return {
-        'last_global_vs_gt_full': aggregate_per_sample_then_group(env_data_list, _last_global_full),
-        'last_relations_vs_gt_full': aggregate_per_sample_then_group(env_data_list, _last_relations_full),
+        'last_global_vs_gt_full': _avg_map_dicts(last_global_vals),
+        'last_relations_vs_gt_full': _avg_rel_dicts(last_rel_vals),
         'per_turn_global_full': calculate_cogmap_per_turn(env_data_list, mode='full'),
         'per_turn_global_observed': calculate_cogmap_per_turn(env_data_list, mode='update'),
-        'passive_global_full': ( {k: (sum([d.get(k, 0.0) for d in passive_vals]) / len(passive_vals) if passive_vals else 0.0) for k in map_keys} ),
+        'passive_global_full': _avg_map_dicts(passive_vals),
     }
 
 
 def compute_consistency_aggregates(env_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
-    map_keys = ["dir", "facing", "pos", "overall"]
-
-    def _avg_metrics_dict(dcts: List[Dict[str, float]]) -> Dict[str, float]:
-        return {k: (sum([d.get(k, 0.0) for d in dcts]) / len(dcts) if dcts else 0.0) for k in map_keys}
 
     def _per_sample_local_vs_global(env_data: Dict[str, Any]) -> Dict[str, float]:
-        vals = []
+        mats: List[MapCogMetrics] = []
         for t in env_data.get('env_turn_logs', []):
             cons = (t.get('cogmap_log') or {}).get('consistency') or {}
-            m = cons.get('local_vs_global') or {}
-            if m:
-                vals.append({k: float(m.get(k, 0.0)) for k in map_keys})
-        return _avg_metrics_dict(vals)
+            m = MapCogMetrics.from_dict(cons.get('local_vs_global') or {})
+            if m.valid:
+                mats.append(m)
+        return MapCogMetrics.average(mats).to_dict() if mats else MapCogMetrics.invalid().to_dict()
 
     def _last_rooms_vs_global(env_data: Dict[str, Any]) -> Dict[str, float]:
-        lg = None
-        for t in reversed(env_data.get('env_turn_logs', [])):
-            if t.get('cogmap_log'):
-                lg = t.get('cogmap_log')
-                break
-        m = ((lg or {}).get('consistency', {}).get('rooms_vs_global', {}).get('average', {}))
-        return {k: float(m.get(k, 0.0)) for k in map_keys}
+        lg = get_last_exploration_cogmap(env_data)
+        m = MapCogMetrics.from_dict(((lg or {}).get('consistency', {}).get('rooms_vs_global', {}).get('average', {})))
+        return m.to_dict()
 
     def _last_map_vs_rel(env_data: Dict[str, Any]) -> float:
-        lg = None
-        for t in reversed(env_data.get('env_turn_logs', [])):
-            if t.get('cogmap_log'):
-                lg = t.get('cogmap_log')
-                break
+        lg = get_last_exploration_cogmap(env_data)
         return float((lg or {}).get('consistency', {}).get('map_vs_relations', 0.0))
 
     def _last_rel_cons(env_data: Dict[str, Any]) -> float:
-        lg = None
-        for t in reversed(env_data.get('env_turn_logs', [])):
-            if t.get('cogmap_log'):
-                lg = t.get('cogmap_log')
-                break
+        lg = get_last_exploration_cogmap(env_data)
         return float((lg or {}).get('consistency', {}).get('relations_consistency', 0.0))
 
+    # Dataclass-based aggregation across samples
+    local_vs_global_avg = aggregate_per_sample_then_group(env_data_list, _per_sample_local_vs_global)
+    rooms_vals = [_last_rooms_vs_global(s) for s in env_data_list]
+    rooms_vs_global_last = _avg_map_dicts(rooms_vals)
+    map_vs_relations_last = (sum([_last_map_vs_rel(s) for s in env_data_list]) / len(env_data_list)) if env_data_list else 0.0
+    relations_consistency_last = (sum([_last_rel_cons(s) for s in env_data_list]) / len(env_data_list)) if env_data_list else 0.0
+
     return {
-        'local_vs_global_avg': aggregate_per_sample_then_group(env_data_list, _per_sample_local_vs_global),
-        'rooms_vs_global_last': aggregate_per_sample_then_group(env_data_list, _last_rooms_vs_global),
-        'map_vs_relations_last': (sum([_last_map_vs_rel(s) for s in env_data_list]) / len(env_data_list)) if env_data_list else 0.0,
-        'relations_consistency_last': (sum([_last_rel_cons(s) for s in env_data_list]) / len(env_data_list)) if env_data_list else 0.0,
+        'local_vs_global_avg': local_vs_global_avg,
+        'rooms_vs_global_last': rooms_vs_global_last,
+        'map_vs_relations_last': map_vs_relations_last,
+        'relations_consistency_last': relations_consistency_last,
     }
+
+
+def compute_evaluation_correctness_aggregates(env_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate evaluation (non-exploration) global correctness across samples."""
+    vals: List[Dict[str, float]] = []
+    for env_data in env_data_list:
+        eval_tasks = env_data.get('evaluation_tasks') or {}
+        for task_log in eval_tasks.values():
+            m = (task_log.get('cogmap_log') or {}).get('global', {}).get('metrics_full', {})
+            if m:
+                vals.append(MapCogMetrics.from_dict(m).to_dict())
+    return _avg_map_dicts(vals)
 
 
 __all__ = [

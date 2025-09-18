@@ -1,8 +1,11 @@
-from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, EgoFrontBins, StandardDistanceBins, CardinalBinsEgo
 from typing import Union
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+
+from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, EgoFrontBins, StandardDistanceBins, CardinalBinsEgo, CardinalBinsAllo
+from ..core.room import BaseRoom
+from .relation_codes import encode_relation_codes, make_ordered_pair_key
 
 
 def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -> bool:
@@ -19,22 +22,22 @@ def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -
     a_len = math.hypot(ax, ay) or 1.0
     axn, ayn = ax / a_len, ay / a_len
 
-    if isinstance(relationship, PairwiseRelationshipDiscrete):
-        # Distance bin check (open interval)
+    if isinstance(relationship, (PairwiseRelationshipDiscrete)):
         j = relationship.dist.bin_id
         lo, hi = relationship.dist.bin_system.BINS[j]
+        dir_bin_id = relationship.direction.bin_id
+        bin_system = relationship.direction.bin_system
         d = math.sqrt(dsq)
         if not (d > float(lo) and d < float(hi)):
             return False
         
         # Direction bin check
-        bin_system = relationship.direction.bin_system
         # atan2(cross, dot) with normalized anchor; v length cancels out
         dot = axn*dx + ayn*dy
         cross = axn*dy - ayn*dx
         deg = -math.degrees(math.atan2(cross, dot)) if (abs(dx) > 1e-6 or abs(dy) > 1e-6) else 0.0
         bid, _ = bin_system.bin(deg)
-        return bid == relationship.direction.bin_id
+        return bid == dir_bin_id
 
     if isinstance(relationship, PairwiseRelationship):
         has_dir = relationship.direction is not None
@@ -65,6 +68,37 @@ def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -
 
     raise ValueError(f"Invalid relationship type: {type(relationship)}")
 
+
+
+# ---- BaseRoom → ordered relation codes (A|B means A relative to B) ----
+def room_to_ordered_relations(
+    br,
+    include_names: set[str] | None = None,
+    include_initial_pos: bool = False,
+    bin_system=CardinalBinsAllo(),
+    distance_bin_system=StandardDistanceBins(),
+    agent_init_pos: np.ndarray | tuple | None = None,
+) -> dict[str, str]:
+    assert isinstance(br, BaseRoom), f"br must be BaseRoom, got {type(br)}"
+
+    pos_by_name = {o.name: o.pos for o in br.objects}
+    names = set(pos_by_name.keys())
+    names.discard('agent')
+    if include_names is not None:
+        names &= set(include_names)
+    if include_initial_pos:
+        pos_by_name['initial_pos'] = np.array(agent_init_pos, dtype=float)
+        names.add('initial_pos')
+
+    names_sorted = sorted(names)
+    out: dict[str, str] = {}
+    for a in names_sorted:
+        for b in names_sorted:
+            if a == b:
+                continue
+            rel = PairwiseRelationshipDiscrete.relationship(tuple(pos_by_name[a]), tuple(pos_by_name[b]), anchor_ori=None, bin_system=bin_system, distance_bin_system=distance_bin_system)
+            out[make_ordered_pair_key(a, b)] = encode_relation_codes(rel.direction.bin_label, rel.dist.bin_label)
+    return out
 
 
 # ---- domain generator ----
@@ -227,29 +261,6 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgb, to_hex
 import colorsys
 
-def _tonal_shades(base_hex, n, light_low=0.22, light_high=0.82, sat_jitter=0.12):
-    """
-    基于主色生成 n 个同色系色阶，扩大明度跨度并加入轻微饱和度变化，提升区分度。
-    - light_low/high 控制明度范围（越开，色差越大）
-    - sat_jitter 控制饱和度微调幅度（0~0.2 较稳妥）
-    """
-    r, g, b = to_rgb(base_hex)
-    h, l, s = colorsys.rgb_to_hls(r, g, b)
-    # 使用感知更线性的 gamma 空间生成明度，拉大中间差异
-    t = np.linspace(0, 1, n)
-    gamma = 0.8
-    t = t**gamma
-    lights = light_low + (light_high - light_low) * t
-    # 让靠外圈略更“鲜”，靠内圈更“灰”，增强分层
-    sats = np.clip(s * (1 - sat_jitter/2 + sat_jitter * t), 0, 1)
-    shades = []
-    for li, si in zip(lights, sats):
-        rr, gg, bb = colorsys.hls_to_rgb(h, li, si)
-        shades.append(to_hex((rr, gg, bb)))
-    return shades
-
-import numpy as np
-import matplotlib.pyplot as plt
 
 def rose_glyph_compass_style(
     pairs,                      # [(sector_id, ring_id)]

@@ -43,6 +43,7 @@ from ..utils.cogmap.analysis import (
     compute_correctness_aggregates,
     compute_consistency_aggregates,
     calculate_cogmap_per_turn,
+    compute_evaluation_correctness_aggregates,
 )
 
 
@@ -299,7 +300,7 @@ class CognitiveMapManager:
 
     # =============================== Relations helpers/eval ===============================
     def _parse_predicted_relations(self, json_data: Dict[str, Any]) -> Dict[str, str]:
-        from ..utils.relation_codes import decode_relation_codes, make_pair_key
+        from ..utils.relation_codes import decode_relation_codes, make_ordered_pair_key, parse_pair_key
         out: Dict[str, str] = {}
         assert isinstance(json_data, dict), f"json_data must be a dict, but got {type(json_data)}"
 
@@ -311,9 +312,12 @@ class CognitiveMapManager:
             if not isinstance(cand, dict):
                 continue
             for k, v in cand.items():
-                if not isinstance(k, str) or '|' not in k:
+                if not isinstance(k, str):
                     continue
-                key = make_pair_key(*k.split('|'))
+                a, b = parse_pair_key(k)
+                if not a or not b:
+                    continue
+                key = make_ordered_pair_key(a, b)
                 if isinstance(v, str):
                     d, r = decode_relation_codes(v)
                     if d and r:
@@ -326,26 +330,7 @@ class CognitiveMapManager:
                             out[key] = f"({d1}, {r1})"
         return out
 
-    def _compute_relations_from_br(self, br: BaseRoom, include_names: Optional[set[str]] = None, include_initial_pos: bool = True) -> Dict[str, str]:
-        from ..utils.relation_codes import encode_relation_codes, make_pair_key
-        pos_by_name = {o.name: o.pos for o in br.objects}
-        names = set(pos_by_name.keys())
-        # Exclude agent for relations
-        names.discard('agent')
-        if include_names is not None:
-            names &= set(include_names)
-        if include_initial_pos:
-            pos_by_name['initial_pos'] = np.array([0.0, 0.0])
-            names.add('initial_pos')
-        names_sorted = sorted(names)
-        out: Dict[str, str] = {}
-        for i in range(len(names_sorted)):
-            for j in range(i + 1, len(names_sorted)):
-                a, b = names_sorted[i], names_sorted[j]
-                rel = PairwiseRelationshipDiscrete.relationship(tuple(pos_by_name[a]), tuple(pos_by_name[b]), anchor_ori=None, bin_system=CardinalBinsAllo())
-                code = encode_relation_codes(rel.direction.bin_label, rel.dist.bin_label)
-                out[make_pair_key(a, b)] = code
-        return out
+    # Removed; use room_to_ordered_relations directly
 
     @staticmethod
     def _relations_accuracies(pred: Dict[str, str], gt: Dict[str, str]) -> Tuple[float, float, float]:
@@ -369,11 +354,26 @@ class CognitiveMapManager:
         return dir_correct / tot, dist_correct / tot, both_correct / tot
 
     def _eval_relations(self, pred_relations: Dict[str, str], gt_room_state_full: BaseRoom, observed_set: set[str], assistant_response: str) -> RelationsCogMapTurnLog:
-        # Observed: include only observed names; do NOT add gates separately; include initial_pos; exclude agent
-        gt_relations_obs = self._compute_relations_from_br(gt_room_state_full, include_names=set(observed_set), include_initial_pos=True)
-        # Full: all names; include initial_pos; exclude agent
+        # Observed: include only observed names; include initial_pos at agent.init_pos; exclude agent
+        from ..utils.relationship_utils import room_to_ordered_relations
+        # Try to find agent initial pos from any Agent present in the full room state
+        agent_obj = next((o for o in gt_room_state_full.objects if isinstance(o, Agent)), None)
+        agent_init_pos = agent_obj.init_pos
+
+        gt_relations_obs = room_to_ordered_relations(
+            gt_room_state_full,
+            include_names=set(observed_set),
+            include_initial_pos=True,
+            agent_init_pos=agent_init_pos,
+        )
+        # Full: all names; include initial_pos at agent.init_pos; exclude agent
         all_names = {o.name for o in gt_room_state_full.objects if o.name != 'agent'}
-        gt_relations_full = self._compute_relations_from_br(gt_room_state_full, include_names=all_names, include_initial_pos=True)
+        gt_relations_full = room_to_ordered_relations(
+            gt_room_state_full,
+            include_names=all_names,
+            include_initial_pos=True,
+            agent_init_pos=agent_init_pos,
+        )
         dir_acc_obs, dist_acc_obs, overall_obs = self._relations_accuracies(pred_relations, gt_relations_obs)
         dir_acc_full, dist_acc_full, overall_full = self._relations_accuracies(pred_relations, gt_relations_full)
         return RelationsCogMapTurnLog(
@@ -399,17 +399,41 @@ class CognitiveMapManager:
             if single is None:
                 continue
             setattr(out, f"{single.type}_log", single)
-        # Consistency fields per turn: only local vs global
+        # Consistency fields per turn
         summary = ConsistencySummary()
         if out.local_log and out.global_log:
             cm = local_vs_global_consistency(
                 out.local_log.pred_room_state,
                 out.global_log.pred_room_state,
                 gt_agent,
-                allow_scale=bool(self.config.get('pos_allow_scale', True)),
+                allow_scale=bool(self.config.get('pos_allow_scale', False)),
                 pos_norm_L=self._pos_norm_L,
             )
             summary.local_vs_global = cm
+        # Rooms vs Global (only when both predicted)
+        if out.rooms_log and out.global_log:
+            avg, per_room = rooms_vs_global_consistency(
+                out.rooms_log.pred_rooms_state or {},
+                out.global_log.pred_room_state,
+                gt_room,
+                gt_agent,
+                self.entry_gate_by_room,
+                allow_scale=bool(self.config.get('pos_allow_scale', False)),
+                pos_norm_L=self._pos_norm_L,
+            )
+            summary.rooms_vs_global_avg = avg
+            summary.rooms_vs_global_per_room = per_room
+        # Map vs Relations consistency
+        if out.relations_log and out.global_log:
+            score = map_vs_relations_consistency(
+                out.relations_log.pred_relations or {},
+                out.global_log.pred_room_state,
+            )
+            summary.map_vs_relations = float(score)
+        # Relations self-consistency
+        if out.relations_log:
+            score_rel = relations_consistency(out.relations_log.pred_relations or {})
+            summary.relations_consistency = float(score_rel)
         out.consistency = summary
         return out
             
@@ -447,18 +471,23 @@ class CognitiveMapManager:
                 'cogmap_full_per_turn': per_turn_full,
             }
 
-        if scenario in ('active_evaluation', 'passive_evaluation', 'passive_exploration'):
-            # global correctness only
-            # Prefer passive_global_full when passive, else last_global_vs_gt_full
-            global_correctness = correctness.get('passive_global_full', {}) if 'passive' in scenario else correctness.get('last_global_vs_gt_full', {})
+        if scenario in ('active_evaluation', 'passive_evaluation'):
+            # Evaluation tasks: aggregate correctness from evaluation_tasks
             return {
                 'correctness': {
-                    'global_full': global_correctness
+                    'global_full': compute_evaluation_correctness_aggregates(env_data_list)
                 }
             }
 
-        # Fallback: return minimal correctness
-        return {'correctness': {'last_global_vs_gt_full': correctness.get('last_global_vs_gt_full', {})}}
+        if scenario == 'passive_exploration':
+            # passive: only correctness of global from exploration logs
+            return {
+                'correctness': {
+                    'global_full': correctness.get('passive_global_full', {})
+                }
+            }
+
+        raise ValueError(f"Invalid scenario: {scenario}")
     
     # register entry gates for active exploratoin
     def _register_active_entry_gate(self, gt_room) -> None:

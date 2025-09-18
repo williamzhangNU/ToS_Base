@@ -50,7 +50,7 @@ class Prompter:
         obs = {}
         room_desc = get_room_description(room, agent, with_topdown=self.config.prompt_config['topdown'])
         if self.config.render_mode == 'vision':
-            images = [self.image_handler.get_image('instruction'),self.image_handler.get_image('label')]
+            images = [self.image_handler.get_image('instruction'), self.image_handler.get_image('label')]
         else:
             observation_instructions = (
                 PairwiseRelationship.prompt()

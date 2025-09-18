@@ -19,8 +19,7 @@ class ExplorationTurnLog:
     action_counts: Dict[str, int]
     room_state: Optional['Room'] = None
     agent_state: Optional['Agent'] = None
-    information_gain: Optional[Dict[str, Any]] = None  # Information gain metrics
-    exploration_quality: Optional[float] = None
+    information_gain: Optional[float] = None  # Information gain (uses exploration quality metric)
 
     def to_dict(self):
         return {
@@ -31,7 +30,6 @@ class ExplorationTurnLog:
             "room_state": self.room_state.to_dict() if self.room_state else {},
             "agent_state": self.agent_state.to_dict() if self.agent_state else {},
             "information_gain": self.information_gain or 0.0,
-            "exploration_quality": self.exploration_quality or 0.0,
         }
 
 class ExplorationManager:
@@ -43,7 +41,7 @@ class ExplorationManager:
     """
     DEFAULT_EXP_SUMMARY = {"node_coverage": 0.0, "edge_coverage": 0.0, "n_exploration_steps": 0, "action_counts": {}}
     
-    def __init__(self, room: Room, agent: Agent, enable_information_gain: bool = False, grid_size: int | None = None, enable_exploration_quality: bool = True):
+    def __init__(self, room: Room, agent: Agent, enable_information_gain: bool = False, grid_size: int | None = None):
         self.base_room = room.copy()
         self.exploration_room = room.copy()
         self.agent = agent.copy()
@@ -83,23 +81,16 @@ class ExplorationManager:
         # Observed names (objects and gates) to gate Move() eligibility
         self.observed_items: Set[str] = set()
         
-        # Information gain control
+        # Information gain control (also controls exploration-quality-as-infogain)
         self.enable_information_gain = bool(enable_information_gain)
-        # Exploration quality control (per-turn when enabled)
-        self.enable_exploration_quality = bool(enable_exploration_quality)
         # Grid size for solver metrics (use provided or infer from mask; fallback 10)
         inferred_g = (max(self.exploration_room.mask.shape) if getattr(self.exploration_room, 'mask', None) is not None else 10)
         self.grid_size: int = int(inferred_g if grid_size is None else grid_size)
-        # Initialize spatial solver for information gain tracking (only when enabled)
+        # Spatial solver for info gain / quality
+        self.spatial_solver = None
         if self.enable_information_gain:
-            object_names = self.node_names + ['initial_pos']
-            self.spatial_solver = SpatialSolver(object_names, self.grid_size)
+            self.spatial_solver = SpatialSolver(self.node_names + ['initial_pos'], self.grid_size)
             self.spatial_solver.set_initial_position('initial_pos', (0, 0))
-            counts = self.spatial_solver.get_num_possible_positions()
-            self.previous_total_positions = sum(counts.values())
-        else:
-            self.spatial_solver = None
-            self.previous_total_positions = 0
         
     def _execute_and_update(self, action: BaseAction, **kwargs) -> ActionResult:
         """Execute action and update exploration state."""
@@ -302,17 +293,11 @@ class ExplorationManager:
     
     def _log_exploration(self, action_sequence: ActionSequence, action_results: List['ActionResult']) -> None:
         """Log exploration history and efficiency."""
-        # Calculate total information gain ratio for this turn (optional)
-        information_gain_ratio = None
+        # First ingest latest observations, then compute info gain as exploration quality
         if self.enable_information_gain:
-            for action_result in action_results:
-                if action_result.action_type in ('observe', 'query'):
-                    information_gain_ratio = self._calculate_single_action_information_gain(action_result)
-        else:
-            information_gain_ratio = 0.0
-
-        # Per-turn exploration quality (optional)
-        turn_quality = self._compute_exploration_quality() if self.enable_exploration_quality else 0.0
+            for ar in action_results:
+                self._calculate_single_action_information_gain(ar)
+        turn_quality = self._compute_exploration_quality() if self.enable_information_gain else 0.0
         
         # Log current turn with coverage snapshot
         self._update_exp_summary()
@@ -324,8 +309,7 @@ class ExplorationManager:
             action_counts=dict(self.exp_summary.get('action_counts', {})),
             room_state=self.exploration_room.copy(),
             agent_state=self.agent.copy(),
-            information_gain=information_gain_ratio if information_gain_ratio is not None else (self.turn_logs[-1].information_gain if self.turn_logs else 0.0),
-            exploration_quality=turn_quality
+            information_gain=turn_quality if turn_quality is not None else (self.turn_logs[-1].information_gain if self.turn_logs else 0.0),
         )
         self.turn_logs.append(turn_log)
     
@@ -336,8 +320,6 @@ class ExplorationManager:
         info_gain_list = [turn_log.information_gain for turn_log in self.turn_logs] if self.turn_logs else []
         acc_info_gain = sum(info_gain_list)
         avg_info_gain = acc_info_gain / len(self.turn_logs) if self.turn_logs else 0.0
-        # Latest exploration quality (optional, mirrors per-turn computation)
-        quality = self._compute_exploration_quality() if self.enable_exploration_quality else None
         self.exp_summary = {
             "node_coverage": node_cov,
             "edge_coverage": edge_cov,
@@ -348,37 +330,23 @@ class ExplorationManager:
             "info_gain_list": info_gain_list,
             "acc_info_gain": acc_info_gain,
             "avg_info_gain": avg_info_gain,
-            "exploration_quality": quality,
         }
         return self.exp_summary
     
     def _calculate_single_action_information_gain(self, action_result: 'ActionResult') -> float:
-        """Calculate information gain as negative log of ratio between current and previous total positions."""
+        """Ingest observation/query triples into the solver; return 0.0.
+        Keep simple: we use exploration quality as info gain elsewhere.
+        """
         if not self.enable_information_gain or (self.spatial_solver is None):
             return 0.0
-        # Store previous positions before processing the action
-        previous_positions = self.previous_total_positions
-        
-        # Only process observation actions that have relation triples
-        if action_result.action_type in ('observe', 'query'):
+        if getattr(action_result, 'action_type', None) in ('observe', 'query'):
             triples = action_result.data.get('relation_triples', []) if hasattr(action_result, 'data') else []
             if triples:
-                # Add observations to spatial solver
-                self.spatial_solver.add_observation(triples)
-        
-        # Calculate position count after action
-        counts = self.spatial_solver.get_num_possible_positions()
-        current_positions = sum(counts.values())
-        
-        # Update previous_total_positions for next calculation
-        self.previous_total_positions = current_positions
-        
-        # Calculate and return negative log of the ratio
-        if previous_positions > 0:
-            ratio = current_positions / previous_positions
-            return -np.log(ratio) if ratio > 0 else 0.0
-        else:
-            return 0.0
+                keep = set(self.spatial_solver.solver.variables.keys())
+                filt = [tr for tr in triples if tr.subject in keep and tr.anchor in keep]
+                if filt:
+                    self.spatial_solver.add_observation(filt)
+        return 0.0
 
     # === Exploration quality helpers ===
     def _full_grid_cell_count(self) -> int:

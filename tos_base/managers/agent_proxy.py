@@ -840,22 +840,20 @@ class AnalystAgentProxy(AgentProxy):
         return self.turns
 
 
-def get_agent_proxy(name: str, room: Room, agent: Agent, delegate: str | None = None, observer_delegate: str | None = None, metric: str | None = None, grid_size: int | None = None) -> AgentProxy:
-    name = (name or 'oracle').lower()
-    mapping = {
-        'oracle': OracleAgentProxy,
-        'strategist': StrategistAgentProxy,
-        'inquisitor': InquisitorAgentProxy,
-        'greedy_inquisitor': GreedyInquisitorAgentProxy,
-        'analyst': AnalystAgentProxy,
-        'observer_analyst': ObserverAnalystAgentProxy,
-        'candidate_planner': CandidatePlannerAgentProxy,
-    }
-    if name == 'analyst':
-        return mapping['analyst'](room, agent, grid_size=grid_size, delegate=(delegate or 'oracle'), observer_delegate=(observer_delegate or 'oracle'), metric=(metric or 'positions'))
-    if name == 'observer_analyst':
-        return mapping['observer_analyst'](room, agent, grid_size=grid_size, delegate=(delegate or 'oracle'), metric=(metric or 'positions'))
-    return mapping.get(name, OracleAgentProxy)(room, agent, grid_size=grid_size)
+def get_agent_proxy(name: str, room: Room, agent: Agent, grid_size: int | None = None) -> AgentProxy:
+    """Return one of the three supported proxies: 'scout', 'strategist', or 'oracle'.
+
+    - scout -> OracleAgentProxy (greedy rotations to quickly reveal nodes)
+    - strategist -> StrategistAgentProxy (sweep rotations)
+    - oracle -> OracleAgentProxy
+    """
+    assert name in ['scout', 'strategist', 'oracle'], f"Invalid agent proxy name: {name}"
+    if name == 'scout':
+        return OracleAgentProxy(room, agent, grid_size=grid_size)
+    elif name == 'strategist':
+        return AnalystAgentProxy(room, agent, delegate='candidate_planner', observer_delegate='strategist', grid_size=grid_size)
+    elif name == 'oracle':
+        return AnalystAgentProxy(room, agent, delegate='observer_analyst', observer_delegate='oracle', grid_size=grid_size)
 
 
 if __name__ == "__main__":
@@ -864,9 +862,9 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
 
-    def multiple_runs(n_runs: int, proxy_name: str, **kwargs):
-        action_counts, action_costs, edge_coverages, node_coverages = [], [], [], []
-        for seed in tqdm(range(1, 1 + n_runs), desc=f'Running experiments for {proxy_name}'):
+    def multiple_runs(n_runs: int, proxy_name: str):
+        action_counts, action_costs, edge_coverages, node_coverages, qualities = [], [], [], [], []
+        for seed in tqdm(range(n_runs), desc=f'Running experiments for {proxy_name}'):
             room, agent = RoomGenerator.generate_room(
                 room_size=[15, 15],
                 n_objects=8,
@@ -874,37 +872,37 @@ if __name__ == "__main__":
                 level=2,
                 main=4
             )
-            RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
-            proxy = get_agent_proxy(proxy_name, room, agent, metric='positions', **kwargs)
+            # RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
+            proxy = get_agent_proxy(proxy_name, room, agent)
             proxy.run()
             # print(proxy.to_text())
             summary = proxy.mgr.get_exp_summary()
-            quality = summary['exploration_quality']
+            quality = summary.get('avg_info_gain', 0.0)
             action_count, action_cost, edge_coverage, node_coverage = summary['action_counts'], summary['action_cost'], summary['edge_coverage'], summary['node_coverage']
         
             action_counts.append(action_count)
             action_costs.append(action_cost)
             edge_coverages.append(edge_coverage)
             node_coverages.append(node_coverage)
-        return action_counts, action_costs, edge_coverages, node_coverages
-
-
-
-
-    # action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(10, 'inquisitor')
-    # action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(10, proxy_name='analyst', delegate='observer_analyst', observer_delegate='oracle')
-    action_counts, action_costs, edge_coverages, node_coverages = multiple_runs(10, proxy_name='analyst', delegate='candidate_planner', observer_delegate='strategist')
+            qualities.append(quality)
+        return action_counts, action_costs, edge_coverages, node_coverages, qualities
 
     # Calculate average action counts per action type
-    avg_action_counts = defaultdict(float)
-    for action_count in action_counts:
-        for action_name, count in action_count.items():
-            avg_action_counts[action_name] += count
-    
-    for action_name in avg_action_counts:
-        avg_action_counts[action_name] /= len(action_counts)
-    
-    print(f"Average Action Counts: {avg_action_counts}")
-    print(f"Average Action Cost: {sum(action_costs) / len(action_costs)}")
-    print(f"Average Edge Coverage: {sum(edge_coverages) / len(edge_coverages)}")
-    print(f"Average Node Coverage: {sum(node_coverages) / len(node_coverages)}")
+    action_counts: list = []
+    action_costs: list = []
+    edge_coverages: list = []
+    node_coverages: list = []
+    qualities: list = []
+    action_counts, action_costs, edge_coverages, node_coverages, qualities = multiple_runs(10, 'strategist')
+    if action_counts:
+        avg_action_counts = defaultdict(float)
+        for action_count in action_counts:
+            for action_name, count in action_count.items():
+                avg_action_counts[action_name] += count
+        for action_name in avg_action_counts:
+            avg_action_counts[action_name] /= len(action_counts)
+        print(f"Average Action Counts: {avg_action_counts}")
+        print(f"Average Action Cost: {sum(action_costs) / len(action_costs)}")
+        print(f"Average Edge Coverage: {sum(edge_coverages) / len(edge_coverages)}")
+        print(f"Average Node Coverage: {sum(node_coverages) / len(node_coverages)}")
+        print(f"Average Quality: {sum(qualities) / len(qualities)}")

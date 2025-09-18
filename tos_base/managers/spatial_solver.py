@@ -14,7 +14,7 @@ from ..utils.relationship_utils import relationship_applies, generate_points_for
 @dataclass
 class Variable:
     name: str
-    domain: Set[Tuple[int, int]] = field(default_factory=set)
+    domain: Optional[Set[Tuple[int, int]]] = None
 
 
 @dataclass
@@ -75,7 +75,7 @@ class AC3Solver:
 
     def copy(self) -> 'AC3Solver':
         new_variables = {
-            name: Variable(name=name, domain=set(var.domain))
+            name: Variable(name=name, domain=(set(var.domain) if var.domain is not None else None))
             for name, var in self.variables.items()
         }
 
@@ -99,7 +99,8 @@ class AC3Solver:
         while work:
             var1_name, var2_name = work.pop()
             if self._revise(var1_name, var2_name):
-                if not self.variables[var1_name].domain:
+                d = self.variables[var1_name].domain
+                if d is not None and len(d) == 0:
                     raise ValueError(f"Domain is empty for {var1_name}")
                 # Add all incoming arcs to var1 (except the one we just processed)
                 for neighbor in self.adjacency[var1_name]:
@@ -109,7 +110,11 @@ class AC3Solver:
 
     def _revise(self, var1_name: str, var2_name: str) -> bool:
         revised = False
+        if self.variables[var1_name].domain is None:
+            return False
         var1_domain = self.variables[var1_name].domain.copy()
+        if self.variables[var2_name].domain is None:
+            return False
         for pos1 in var1_domain:
             if not self._has_support(var1_name, var2_name, pos1):
                 self.variables[var1_name].domain.remove(pos1)
@@ -131,6 +136,8 @@ class AC3Solver:
             return True
             
         var2_domain = self.variables[var2_name].domain
+        if var2_domain is None:
+            return True  # cannot decide yet; defer pruning
         # Residue fast path
         arc_key = (var1_name, var2_name)
         cached_map = self._residue.get(arc_key)
@@ -210,7 +217,7 @@ class AC3Solver:
             if not self._constraints_between(var1_name, k) and not self._constraints_between(var2_name, k):
                 continue
             domain_k = self.variables[k].domain
-            assert domain_k, f"Domain is empty for {k}"
+            assert domain_k is not None and len(domain_k) > 0, f"Domain is empty for {k}"
             supported = False
             for posk in domain_k:
                 if self._pair_constraints_satisfied(var1_name, pos1, k, posk) and \
@@ -230,16 +237,18 @@ class SpatialSolver:
 
     def __init__(self, all_object_names: List[str], grid_size: int):
         self.grid_size = int(grid_size)
-        variables = {name: Variable(name=name, domain=set()) for name in all_object_names}
+        variables = {name: Variable(name=name, domain=None) for name in all_object_names}
         self.solver = AC3Solver(variables, [])
 
     def set_initial_position(self, name: str, position: Tuple[int, int]):
         if name not in self.solver.variables:
-            self.solver.variables[name] = Variable(name=name, domain=set())
+            self.solver.variables[name] = Variable(name=name, domain=None)
         self.solver.variables[name].domain = {tuple(position)}
 
-    def add_observation(self, relation_triples: List[RelationTriple]):
-        """Add observations: seed domains cheaply, then solve all constraints."""
+    def add_observation(self, relation_triples: List[RelationTriple]) -> bool:
+        """Add observations: seed domains cheaply, then solve all constraints.
+        Returns True if all variables keep non-empty domains; False otherwise.
+        """
         new_constraints: List[Constraint] = []
         # 1) seeding from pairwise constraints only
         g = int(self.grid_size)
@@ -252,14 +261,18 @@ class SpatialSolver:
             if isinstance(t.relation, (PairwiseRelationship, PairwiseRelationshipDiscrete)):
                 s_dom = self.solver.variables[t.subject].domain
                 a_dom = self.solver.variables[t.anchor].domain
-                if not s_dom and 1 <= len(a_dom) <= 10:
+                # Initialized vs uninitialized: empty set means uninitialized for our solver; we use a sentinel None to mark uninitialized
+                if s_dom is not None and len(s_dom) == 0:
+                    # already unsatisfiable; cannot seed
+                    pass
+                if (s_dom is None) and isinstance(a_dom, set) and 1 <= len(a_dom) <= 10:
                     domain = set()
                     for anchor_pt in a_dom:
                         domain |= generate_points_for_relationship(anchor_pt, t.relation, x_rng, y_rng, t.orientation or (0, 1))
                     self.solver.variables[t.subject].domain = domain
             
         for t in relation_triples:
-            # ensure domains exist
+            # ensure domains exist only if uninitialized
             self._ensure_domain_initialized(t.subject)
             self._ensure_domain_initialized(t.anchor)
 
@@ -272,22 +285,37 @@ class SpatialSolver:
                 changed_arcs.add((c.var2_name, c.var1_name))
         
         if changed_arcs:
-            self.solver.propagate(changed_arcs)  # Only propagate from changed arcs
+            try:
+                self.solver.propagate(changed_arcs)  # Only propagate from changed arcs
+            except ValueError:
+                return False
+
+        # Check domains non-empty
+        for var in self.solver.variables.values():
+            if var.domain is not None and len(var.domain) == 0:
+                return False
+        return True
 
     def get_possible_positions(self) -> Dict[str, Set[Tuple[int, int]]]:
-        # Ensure unconstrained variables have full domain
+        # Ensure unconstrained variables have full domain (only those with None)
         for name in self.solver.variables:
             self._ensure_domain_initialized(name)
-        return {name: var.domain.copy() for name, var in self.solver.variables.items()}
+        return {name: (set(var.domain) if var.domain is not None else set()) for name, var in self.solver.variables.items()}
 
     def get_num_possible_positions(self) -> Dict[str, int]:
         """Return counts of possible positions for each variable without mutating domains.
 
-        If a variable's domain has not been initialized (empty set), return the
-        full grid cell count as its count.
+        If a variable's domain has not been initialized (None), return the
+        full grid cell count as its count. If initialized but empty, return 0.
         """
         full = self.grid_size ** 2
-        return {name: (len(var.domain) if var.domain else full) for name, var in self.solver.variables.items()}
+        out: Dict[str, int] = {}
+        for name, var in self.solver.variables.items():
+            if var.domain is None:
+                out[name] = full
+            else:
+                out[name] = len(var.domain)
+        return out
 
     def get_possible_relations(self, max_samples_per_var: int = 50,
                         perspective: Tuple[int, int] = (0, 1), bin_system=CardinalBinsAllo(), distance_bin_system=StandardDistanceBins(),
@@ -295,6 +323,11 @@ class SpatialSolver:
         # Possible relationship sets per unordered pair (discrete only)
         names = sorted(self.solver.variables.keys())
         rel_sets: Dict[Tuple[str, str], Set[str]] = {}
+
+        # Ensure all domains initialized if we need path-consistency checks
+        if path_consistent:
+            for n in names:
+                self._ensure_domain_initialized(n)
 
         def _sample(domain: Set[Tuple[int, int]], k: int) -> List[Tuple[int, int]]:
             if len(domain) <= k:
@@ -304,8 +337,8 @@ class SpatialSolver:
         for i in range(len(names)):
             for j in range(i + 1, len(names)):
                 a, b = names[i], names[j]
-                da = _sample(self.solver.variables[a].domain, max_samples_per_var)
-                db = _sample(self.solver.variables[b].domain, max_samples_per_var)
+                da = _sample(self.solver.variables[a].domain or set(), max_samples_per_var)
+                db = _sample(self.solver.variables[b].domain or set(), max_samples_per_var)
                 s: Set[str] = set()
                 for pa in da:
                     for pb in db:
@@ -318,7 +351,7 @@ class SpatialSolver:
         return rel_sets
 
     def _ensure_domain_initialized(self, name: str):
-        if not self.solver.variables[name].domain:
+        if self.solver.variables[name].domain is None:
             g = int(self.grid_size)
             self.solver.variables[name].domain = {(x, y) for x in range(-g, g + 1) for y in range(-g, g + 1)}
 
