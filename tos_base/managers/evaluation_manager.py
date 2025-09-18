@@ -52,7 +52,27 @@ class EvaluationManager:
     }
     
     def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent, history_manager=None):
-        self.eval_tasks = eval_tasks
+        # Expand tasks according to 'num' and exclude already completed ones (if history provided)
+        self.history_manager = history_manager
+        expanded: List[Dict[str, Any]] = []
+        for spec in eval_tasks:
+            ttype = spec['task_type']
+            num = int(spec.get('num', 1))
+            done_count = 0
+            if self.history_manager:
+                # use class name keys in history_manager (DirectionEvaluationTask etc.)
+                # but spec uses short name; map via EvalTaskType
+                try:
+                    from ..evaluation.task_types import EvalTaskType
+                    class_name = EvalTaskType.from_short_name(ttype).class_name
+                except Exception:
+                    class_name = ttype
+                done_count = self.history_manager.get_eval_counts().get(class_name, 0)
+            remaining = max(0, num - done_count)
+            for _ in range(remaining):
+                expanded.append({'task_type': ttype})
+
+        self.eval_tasks = expanded
         self.np_random = np_random
         self.room = room.copy()
         self.agent = agent.copy()
@@ -61,10 +81,9 @@ class EvaluationManager:
         
         # Initialize tasks
         self.tasks = []
-        for task_spec in eval_tasks:
+        for task_spec in self.eval_tasks:
             task_type = task_spec['task_type']
-            task_kwargs = task_spec.get('task_kwargs', {})
-            task = EvalTaskType.create_task(task_type, np_random, room, agent, task_kwargs, history_manager)
+            task = EvalTaskType.create_task(task_type, np_random, room, agent, {}, history_manager)
             self.tasks.append(task)
             self.results.append({
                 "task_type": task.__class__.__name__,
@@ -133,6 +152,10 @@ class EvaluationManager:
             "incorrect_count": incorrect_count,
             "unanswered_count": unanswered_count
         }
+
+    def check_and_prune_completed_tasks(self) -> bool:
+        """If no tasks to run, return True to signal finished."""
+        return len(self.tasks) == 0
     
     @staticmethod
     def aggregate_group_performance(env_data_list: List[Dict] = None) -> Dict[str, Any]:

@@ -2,7 +2,7 @@
 
 from typing import List, Tuple
 
-from .tasks import BaseEvaluationTask
+from .tasks import BaseEvaluationTask, retry_generate_question
 from ..actions.base import BaseAction
 from ..core.relationship import (
     PairwiseRelationshipDiscrete,
@@ -130,16 +130,12 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         rel = self._compute_discrete_rel(obj1.pos, obj2.pos, CardinalBinsAllo())
         return obj1, obj2, rel, self.QUESTION_TEMPLATE_DIR
 
+    @retry_generate_question
     def generate_question(self) -> str:
-        while True:
-            obj1, obj2, rel, template = self.generate_question_data()
-            choices, idx = self.generate_choices(rel)
-            question = self._finalize(template, obj1.name, obj2.name, choices, idx)
-            self.eval_data.id = hash(question)
-            if self.history_manager.has_question(self.eval_data.id):
-                continue
-            else:
-                break
+        obj1, obj2, rel, template = self.generate_question_data()
+        choices, idx = self.generate_choices(rel)
+        question = self._finalize(template, obj1.name, obj2.name, choices, idx)
+        self.eval_data.id = hash(question)
         return question
 
 
@@ -192,21 +188,15 @@ class PovEvaluationTask(DirectionEvaluationTask):
         self.np_random.shuffle(choices)
         return choices, choices.index(correct)
 
+    @retry_generate_question
     def generate_question(self) -> str:
-        while True:
-            target_obj, anchor, rel, template, is_fallback = self.generate_question_data()
-
-            if is_fallback:
-                choices, idx = self.generate_choices_pov_fallback()
-            else:
-                choices, idx = self.generate_choices(rel)
-
-            question = self._finalize(template, target_obj.name, anchor.name, choices, idx)
-            self.eval_data.id = hash(question)
-            if self.history_manager.has_question(self.eval_data.id):
-                continue
-            else:
-                break
+        target_obj, anchor, rel, template, is_fallback = self.generate_question_data()
+        if is_fallback:
+            choices, idx = self.generate_choices_pov_fallback()
+        else:
+            choices, idx = self.generate_choices(rel)
+        question = self._finalize(template, target_obj.name, anchor.name, choices, idx)
+        self.eval_data.id = hash(question)
         return question
 
 
@@ -281,23 +271,17 @@ class BackwardPovEvaluationTask(DirectionEvaluationTask):
         
         return choices, correct_idx
 
+    @retry_generate_question
     def generate_question(self) -> str:
-        while True:
-            target_obj, correct_anchor, spatial_relationship, anchor_idx, is_fallback = self.generate_question_data()
-            choices, correct_idx = self.generate_choices(target_obj, correct_anchor, anchor_idx, is_fallback)
-
-            # Format the question
-            choices_text, correct_label = self.format_choices(choices, correct_idx)
-            self.eval_data.question = self.QUESTION_TEMPLATE_BWD_POV.format(
-                obj_name=target_obj.name,
-                spatial_relationship=spatial_relationship,
-                choices_text=choices_text
-            )
-            self.eval_data.answer = correct_label
-            self.eval_data.choices = choices
-            self.eval_data.id = hash(self.eval_data.question)
-            if self.history_manager.has_question(self.eval_data.id):
-                continue
-            else:
-                break
+        target_obj, correct_anchor, spatial_relationship, anchor_idx, is_fallback = self.generate_question_data()
+        choices, correct_idx = self.generate_choices(target_obj, correct_anchor, anchor_idx, is_fallback)
+        choices_text, correct_label = self.format_choices(choices, correct_idx)
+        self.eval_data.question = self.QUESTION_TEMPLATE_BWD_POV.format(
+            obj_name=target_obj.name,
+            spatial_relationship=spatial_relationship,
+            choices_text=choices_text
+        )
+        self.eval_data.answer = correct_label
+        self.eval_data.choices = choices
+        self.eval_data.id = hash(self.eval_data.question)
         return self.eval_data.question

@@ -4,7 +4,7 @@ from typing import List, Tuple, Any
 import numpy as np
 from typing_extensions import override
 
-from .tasks import BaseEvaluationTask
+from .tasks import BaseEvaluationTask, retry_generate_question
 from ..core.object import Object
 from ..core.relationship import PairwiseRelationship
 from ..utils.utils import hash
@@ -100,25 +100,21 @@ class RotEvaluationTask(BaseEvaluationTask):
         return choices, choices.index(fmt(correct_answer))
 
     # ---------- main ----------
+    @retry_generate_question
     def generate_question(self) -> str:
-        while True:
-            self.turn_direction = self.np_random.choice(["clockwise", "counterclockwise"])
-            self.angle_eps = float(self.config.get("angle_eps", 30.0))
+        self.turn_direction = self.np_random.choice(["clockwise", "counterclockwise"])
+        self.angle_eps = float(self.config.get("angle_eps", 30.0))
 
-            correct_seq = self._gen_valid_sequence(self.turn_direction, self.angle_eps)
-            choices, idx = self.generate_choices(correct_seq)
-            choices_text, correct_label = self.format_choices(choices, idx)
+        correct_seq = self._gen_valid_sequence(self.turn_direction, self.angle_eps)
+        choices, idx = self.generate_choices(correct_seq)
+        choices_text, correct_label = self.format_choices(choices, idx)
 
-            self.eval_data.question = self.QUESTION_TEMPLATE.format(
-                turn_direction=self.turn_direction, choices_text=choices_text
-            )
-            self.eval_data.answer = correct_label
-            self.eval_data.choices = choices
-            self.eval_data.id = hash(self.eval_data.question)
-            if self.history_manager.has_question(self.eval_data.id):
-                continue
-            else:
-                break
+        self.eval_data.question = self.QUESTION_TEMPLATE.format(
+            turn_direction=self.turn_direction, choices_text=choices_text
+        )
+        self.eval_data.answer = correct_label
+        self.eval_data.choices = choices
+        self.eval_data.id = hash(self.eval_data.question)
         return self.eval_data.question
 
     @override
@@ -139,27 +135,23 @@ class RotDualEvaluationTask(RotEvaluationTask):
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
 
+    @retry_generate_question
     def generate_question(self) -> str:
-        while True:
-            self.turn_direction = self.np_random.choice(["clockwise", "counterclockwise"])
-            self.angle_eps = float(self.config.get("angle_eps", 30.0))
+        self.turn_direction = self.np_random.choice(["clockwise", "counterclockwise"])
+        self.angle_eps = float(self.config.get("angle_eps", 30.0))
 
-            correct_seq = self._gen_valid_sequence(self.turn_direction, self.angle_eps)
-            object_sequence = ", ".join(correct_seq)
+        correct_seq = self._gen_valid_sequence(self.turn_direction, self.angle_eps)
+        object_sequence = ", ".join(correct_seq)
 
-            choices, idx = self.generate_choices(self.turn_direction)
-            choices_text, correct_label = self.format_choices(choices, idx)
+        choices, idx = self.generate_choices(self.turn_direction)
+        choices_text, correct_label = self.format_choices(choices, idx)
 
-            self.eval_data.question = self.QUESTION_TEMPLATE.format(
-                object_sequence=object_sequence, choices_text=choices_text
-            )
-            self.eval_data.answer = correct_label
-            self.eval_data.choices = choices
-            self.eval_data.id = hash(self.eval_data.question)
-            if self.history_manager.has_question(self.eval_data.id):
-                continue
-            else:
-                break
+        self.eval_data.question = self.QUESTION_TEMPLATE.format(
+            object_sequence=object_sequence, choices_text=choices_text
+        )
+        self.eval_data.answer = correct_label
+        self.eval_data.choices = choices
+        self.eval_data.id = hash(self.eval_data.question)
         return self.eval_data.question
 
     def generate_choices(self, correct_answer: Any) -> Tuple[List[str], int]:

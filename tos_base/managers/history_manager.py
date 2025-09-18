@@ -12,13 +12,14 @@ from .. import (
     CognitiveMapManager,
 )
 class HistoryManager:
-    """Simple conversation history manager.
+    """Simple conversation history manager, one history manager for one run.
     Store only env turn logs in a single JSON file
     Directory structure: model_name/room_hash_key/vision_or_text/active_or_passive/
     Example: gpt-4o/1d54fa/vision/active/
     """
 
-    def __init__(self, observation_config:Dict, model_config:Dict ,room_dict: Dict, agent_dict: Dict, output_dir:str, override=False):
+    def __init__(self, observation_config:Dict, model_config:Dict ,room_dict: Dict, agent_dict: Dict, output_dir:str,
+                 exp_override: bool = False, eval_override: bool = False, cogmap_override: bool = False, all_override: bool = False):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.evaluation_turn_logs: Dict[str, Dict[str, Dict]] = {}
@@ -35,9 +36,20 @@ class HistoryManager:
             self.output_dir = os.path.join(self.output_dir, observation_config["proxy_agent"])
         self.exploration_path = os.path.join(self.output_dir, "exploration_turn_logs.json")
         self.evaluation_path = os.path.join(self.output_dir, "evaluation_turn_logs.json")
-        if override:
+
+        # Apply granular overrides
+        if all_override:
             if os.path.exists(self.output_dir):
                 shutil.rmtree(self.output_dir)
+        elif exp_override and observation_config['exp_type'] == 'active':
+            if os.path.exists(self.output_dir):
+                shutil.rmtree(self.output_dir)
+        elif eval_override:
+            if os.path.exists(self.evaluation_path):
+                try:
+                    os.remove(self.evaluation_path)
+                except Exception:
+                    pass
 
         self._load()
         os.makedirs(self.output_dir, exist_ok=True)
@@ -138,6 +150,14 @@ class HistoryManager:
             if question_id in questions:
                 return True
         return False
+
+    def get_eval_counts(self) -> Dict[str, int]:
+        """Return number of completed eval questions per task class name."""
+        return {task_type: len(questions or {}) for task_type, questions in self.evaluation_turn_logs.items()}
+
+    def get_existing_question_ids(self, task_type: str) -> List[str]:
+        """Return list of existing question ids for a given task class name."""
+        return list((self.evaluation_turn_logs.get(task_type) or {}).keys())
 
     @staticmethod
     def get_model_dir(output_dir: str, model_config: Dict) -> str:

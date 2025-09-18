@@ -3,7 +3,7 @@
 from typing import List, Tuple, Any
 import numpy as np
 
-from .tasks import BaseEvaluationTask
+from .tasks import BaseEvaluationTask, retry_generate_question
 from ..core.relationship import CardinalBinsAllo
 from ..utils.utils import hash
 
@@ -21,54 +21,50 @@ class FalseBeliefEvaluationTask(BaseEvaluationTask):
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
 
+    @retry_generate_question
     def generate_question(self) -> dict:
-        while True:
-            # 1) Pick a room with >= 3 objects AND >= 3 oriented objects; place agent randomly
-            rids = [int(r) for r in self.room.objects_by_room.keys() if isinstance(r, int) and r > 0]
-            self.np_random.shuffle(rids)
-            rid = -1
-            for r in rids:
-                names_r = self.room.objects_by_room.get(int(r), [])
-                objs_r = [self.room.get_object_by_name(n) for n in names_r]
-                if len(objs_r) >= 3 and sum(1 for o in objs_r if o.has_orientation) >= 3:
-                    rid = int(r); break
-            if rid == -1: raise ValueError("No room with >= 3 objects AND >= 3 oriented objects")
+        # 1) Pick a room with >= 3 objects AND >= 3 oriented objects; place agent randomly
+        rids = [int(r) for r in self.room.objects_by_room.keys() if isinstance(r, int) and r > 0]
+        self.np_random.shuffle(rids)
+        rid = -1
+        for r in rids:
+            names_r = self.room.objects_by_room.get(int(r), [])
+            objs_r = [self.room.get_object_by_name(n) for n in names_r]
+            if len(objs_r) >= 3 and sum(1 for o in objs_r if o.has_orientation) >= 3:
+                rid = int(r); break
+        if rid == -1: raise ValueError("No room with >= 3 objects AND >= 3 oriented objects")
 
-            xmin, xmax, ymin, ymax = self.room.get_boundary(room_id=rid)
-            coords = [(x, y) for x in range(xmin, xmax + 1) for y in range(ymin, ymax + 1)]
-            self.np_random.shuffle(coords)
-            pos = None
-            for p in coords:
-                if not self.room.get_cell_info(p[0], p[1])['object_name']:
-                    pos = p; break
-            if pos is None:
-                pos = self.room.get_random_point(self.np_random)
-            ori = self.np_random.choice([(0,1),(1,0),(0,-1),(-1,0)])
-            self.agent.pos, self.agent.ori, self.agent.room_id = np.array(pos), np.array(ori), int(rid)
+        xmin, xmax, ymin, ymax = self.room.get_boundary(room_id=rid)
+        coords = [(x, y) for x in range(xmin, xmax + 1) for y in range(ymin, ymax + 1)]
+        self.np_random.shuffle(coords)
+        pos = None
+        for p in coords:
+            if not self.room.get_cell_info(p[0], p[1])['object_name']:
+                pos = p; break
+        if pos is None:
+            pos = self.room.get_random_point(self.np_random)
+        ori = self.np_random.choice([(0,1),(1,0),(0,-1),(-1,0)])
+        self.agent.pos, self.agent.ori, self.agent.room_id = np.array(pos), np.array(ori), int(rid)
 
-            # 2) Apply one movement and one rotation (distinct objects if possible)
-            names = self.room.objects_by_room.get(int(rid), [])
-            objs = [self.room.get_object_by_name(n) for n in names]
-            moved_name = self._apply_movement(objs, rid)
-            oriented_objects = [o for o in objs if o.has_orientation and o.name != moved_name]
-            if len(oriented_objects) == 0:
-                oriented_objects = [o for o in objs if o.has_orientation]
-            rotated_name, deg = self._apply_rotation(oriented_objects)
+        # 2) Apply one movement and one rotation (distinct objects if possible)
+        names = self.room.objects_by_room.get(int(rid), [])
+        objs = [self.room.get_object_by_name(n) for n in names]
+        moved_name = self._apply_movement(objs, rid)
+        oriented_objects = [o for o in objs if o.has_orientation and o.name != moved_name]
+        if len(oriented_objects) == 0:
+            oriented_objects = [o for o in objs if o.has_orientation]
+        rotated_name, deg = self._apply_rotation(oriented_objects)
 
 
-            # 3) 360° observations and ask a 3-part question
-            observations = self._take_full_observations()
-            choices, correct_idx = self.generate_choices((moved_name, rotated_name, deg))
-            choices_text, correct_label = self.format_choices(choices, correct_idx)
-            self.eval_data.action = self.ACTION_TEMPLATE.format(observations=observations)
-            self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(choices_text=choices_text)
-            self.eval_data.answer = correct_label
-            self.eval_data.choices = choices
-            self.eval_data.id = hash(self.eval_data.question)
-            if self.history_manager.has_question(self.eval_data.id):
-                continue
-            else:
-                break
+        # 3) 360° observations and ask a 3-part question
+        observations = self._take_full_observations()
+        choices, correct_idx = self.generate_choices((moved_name, rotated_name, deg))
+        choices_text, correct_label = self.format_choices(choices, correct_idx)
+        self.eval_data.action = self.ACTION_TEMPLATE.format(observations=observations)
+        self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(choices_text=choices_text)
+        self.eval_data.answer = correct_label
+        self.eval_data.choices = choices
+        self.eval_data.id = hash(self.eval_data.question)
         return self.eval_data.question
 
     def _apply_movement(self, objs: List[Any], rid: int) -> str:
