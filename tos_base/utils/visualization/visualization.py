@@ -488,6 +488,30 @@ class HTMLGenerator:
                     # Store full content in hidden div
                     f.write(f"<div id='{local_id}_full' style='display:none'>{local_full}</div>\n")
                     f.write(f"<div id='{local_id}_short' style='display:none'>{local_short}...</div>\n")
+
+                # Display relations original response
+                relations_data = cogmap_log.get('relations', {})
+                if relations_data.get('original_response'):
+                    relations_response = relations_data['original_response']
+                    relations_short = escape(relations_response[:300]).replace("\n", "<br>")
+                    relations_full = escape(relations_response).replace("\n", "<br>")
+                    relations_id = f"cogmap_relations_{page_idx}_{t_idx}"
+                    f.write(f"<div id='{relations_id}' class='block cogmap-response expandable' onclick='toggleCogmapResponse(\"{relations_id}\")' data-expanded='false'><strong>🗺️ Relations Cognitive Map Response <span class='expand-hint'>(click to toggle)</span></strong><br><span class='content-text'>{relations_short}...</span></div>\n")
+                    # Store full content in hidden div
+                    f.write(f"<div id='{relations_id}_full' style='display:none'>{relations_full}</div>\n")
+                    f.write(f"<div id='{relations_id}_short' style='display:none'>{relations_short}...</div>\n")
+
+                # Display rooms original response
+                rooms_data = cogmap_log.get('rooms', {})
+                if rooms_data.get('original_response'):
+                    rooms_response = rooms_data['original_response']
+                    rooms_short = escape(rooms_response[:300]).replace("\n", "<br>")
+                    rooms_full = escape(rooms_response).replace("\n", "<br>")
+                    rooms_id = f"cogmap_rooms_{page_idx}_{t_idx}"
+                    f.write(f"<div id='{rooms_id}' class='block cogmap-response expandable' onclick='toggleCogmapResponse(\"{rooms_id}\")' data-expanded='false'><strong>🗺️ Rooms Cognitive Map Response <span class='expand-hint'>(click to toggle)</span></strong><br><span class='content-text'>{rooms_short}...</span></div>\n")
+                    # Store full content in hidden div
+                    f.write(f"<div id='{rooms_id}_full' style='display:none'>{rooms_full}</div>\n")
+                    f.write(f"<div id='{rooms_id}_short' style='display:none'>{rooms_short}...</div>\n")
             def _fmt_xy(v):
                 try:
                     return f"[{int(v[0])},{int(v[1])}]"

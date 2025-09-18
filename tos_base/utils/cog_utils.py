@@ -95,7 +95,7 @@ def evaluate_cognitive_maps_from_turnlogs(
                     # - For each turn: generate local and global
                     # - For final turn only: also generate rooms and relations
                     base_user = re.sub(r"You have a maximum of\s*\d+\s*exploration steps left.*", "", turn_log['user_message'], flags=re.DOTALL)
-                    is_last_exp = (turn_idx == len(turn_logs) - 1)
+                    is_last_exp = (turn_idx == len(turn_logs) - 2)
                     per_turn_types = ['local', 'global']
                     final_only_types = ['rooms', 'relations'] if is_last_exp else []
                     for map_type in per_turn_types + final_only_types:

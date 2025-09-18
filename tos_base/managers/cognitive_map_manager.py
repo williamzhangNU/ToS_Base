@@ -401,7 +401,7 @@ class CognitiveMapManager:
             setattr(out, f"{single.type}_log", single)
         # Consistency fields per turn
         summary = ConsistencySummary()
-        if out.local_log and out.global_log:
+        if out.local_log.extraction_success and out.global_log.extraction_success:
             cm = local_vs_global_consistency(
                 out.local_log.pred_room_state,
                 out.global_log.pred_room_state,
@@ -411,7 +411,7 @@ class CognitiveMapManager:
             )
             summary.local_vs_global = cm
         # Rooms vs Global (only when both predicted)
-        if out.rooms_log and out.global_log:
+        if out.rooms_log.extraction_success and out.global_log.extraction_success:
             avg, per_room = rooms_vs_global_consistency(
                 out.rooms_log.pred_rooms_state or {},
                 out.global_log.pred_room_state,
@@ -424,14 +424,14 @@ class CognitiveMapManager:
             summary.rooms_vs_global_avg = avg
             summary.rooms_vs_global_per_room = per_room
         # Map vs Relations consistency
-        if out.relations_log and out.global_log:
+        if out.relations_log.extraction_success and out.global_log.extraction_success:
             score = map_vs_relations_consistency(
                 out.relations_log.pred_relations or {},
                 out.global_log.pred_room_state,
             )
             summary.map_vs_relations = float(score)
         # Relations self-consistency
-        if out.relations_log:
+        if out.relations_log.extraction_success:
             score_rel = relations_consistency(out.relations_log.pred_relations or {})
             summary.relations_consistency = float(score_rel)
         out.consistency = summary
@@ -589,9 +589,8 @@ class CognitiveMapManager:
         local_sec = json_data.get('local') if isinstance(json_data, dict) else None
         return self._parse_section_to_baseroom(local_sec, "pred_local") if isinstance(local_sec, dict) else None
 
-    def _parse_rooms(self, json_data: Dict[str, Any]) -> Dict[str, BaseRoom]:
+    def _parse_rooms(self, rooms_sec: Dict[str, Any]) -> Dict[str, BaseRoom]:
         rooms_map: Dict[str, BaseRoom] = {}
-        rooms_sec = json_data.get('rooms') if isinstance(json_data, dict) else None
         if isinstance(rooms_sec, dict):
             for rid, sec in rooms_sec.items():
                 if isinstance(sec, dict):
@@ -615,7 +614,7 @@ class CognitiveMapManager:
         for g in gt_room.gates:
             objs.append(Object(name=g.name, pos=g.pos.copy(), ori=g.ori.copy(), has_orientation=True))
         # include agent
-        objs.append(Object(name='agent', pos=gt_agent.pos.copy(), ori=gt_agent.ori.copy(), has_orientation=True))
+        objs.append(Agent(name='agent', pos=gt_agent.pos.copy(), ori=gt_agent.ori.copy(), has_orientation=True))
         return BaseRoom(objects=objs, name='gt')
 
     def _build_gt_global_baseroom(self, gt_room: Room, gt_agent: Agent, observed_set: set[str]) -> BaseRoom:

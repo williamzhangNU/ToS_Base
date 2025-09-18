@@ -293,8 +293,6 @@ body {
 
 /* Fix nested dict overlapping in group-metrics sections (main page) */
 .group-metrics .dict-container {
-    width: 100%;
-    max-width: 100%;
     margin: 0;
     padding: 0;
     box-sizing: border-box;
@@ -302,8 +300,6 @@ body {
 }
 
 .group-metrics .dict-item {
-    width: 100%;
-    max-width: 100%;
     box-sizing: border-box;
     overflow: hidden;
     word-wrap: break-word;
@@ -311,8 +307,6 @@ body {
 }
 
 .group-metrics .dict-value.nested-dict {
-    width: 100%;
-    max-width: 100%;
     margin-top: 8px;
     padding: 8px;
     background: #ffffff;
@@ -324,8 +318,6 @@ body {
 }
 
 .group-metrics .dict-value.nested-dict .dict-container {
-    width: 100%;
-    max-width: 100%;
     margin: 0;
     padding: 0;
     box-sizing: border-box;
@@ -333,8 +325,6 @@ body {
 }
 
 .group-metrics .dict-value.nested-dict .dict-item {
-    width: 100%;
-    max-width: 100%;
     box-sizing: border-box;
     overflow: hidden;
     word-wrap: break-word;
@@ -342,8 +332,6 @@ body {
 }
 
 .group-metrics .dict-value.nested-dict .dict-value.nested-dict {
-    width: calc(100% - 16px);
-    max-width: calc(100% - 16px);
     margin: 4px 0 0 0;
     padding: 6px;
 }
@@ -599,7 +587,7 @@ body {
 
 /* Add minimal padding to prevent text clipping in right panel */
 .cogmap-box.side .dict-container {
-    padding: 0 8px;
+    padding: 0 6px;
     margin: 0;
 }
 
