@@ -197,7 +197,7 @@ class CognitiveMapManager:
         t = (map_type or "global").lower()
         json_dict = self._extract_json_from_text(assistant_response)
         if json_dict is None or gt_room is None:
-            return None
+            return BaseCogMapTurnLog(type=t, extraction_success=False, original_response=assistant_response, metrics=BaseCogMetrics.invalid())
         all_item_names = {o.name for o in gt_room.all_objects}
         observed_set: set[str] = set(all_item_names if observed_items is None else [str(x) for x in observed_items])
         visible_names = self._visible_object_names(gt_room, gt_agent)
@@ -439,7 +439,7 @@ class CognitiveMapManager:
             
 
     @staticmethod
-    def aggregate_group_performance(env_data_list: List[Dict], scenario: str = "active_exploration") -> Dict[str, Any]:
+    def aggregate_group_performance(env_data_list: List[Dict], exp_type: str = None) -> Dict[str, Any]:
         """Aggregate cognitive map metrics per scenario.
 
         scenario in {
@@ -452,42 +452,39 @@ class CognitiveMapManager:
         assert isinstance(env_data_list, list) and len(env_data_list) > 0, "env_data_list must be a non-empty list"
 
         # Always compute these once; then select portions
-        error = compute_error_aggregates(env_data_list)
         correctness = compute_correctness_aggregates(env_data_list)
-        consistency = compute_consistency_aggregates(env_data_list)
-        per_turn_update = calculate_cogmap_per_turn(env_data_list, mode='update')
-        per_turn_full = calculate_cogmap_per_turn(env_data_list, mode='full')
-
-        if scenario == 'active_exploration':
+        
+        if exp_type == 'active':
+            error = compute_error_aggregates(env_data_list)
+            consistency = compute_consistency_aggregates(env_data_list)
+            per_turn_update = calculate_cogmap_per_turn(env_data_list, mode='update')
+            per_turn_full = calculate_cogmap_per_turn(env_data_list, mode='full')
             return {
-                'error': error,
-                'correctness': {
-                    'last_global_vs_gt_full': correctness.get('last_global_vs_gt_full', {}),
-                    'per_turn_global_full': correctness.get('per_turn_global_full', {}),
-                    'per_turn_global_observed': correctness.get('per_turn_global_observed', {}),
+                'exploration': {
+                    'error': error,
+                    'correctness': {
+                        'last_global_vs_gt_full': correctness.get('last_global_vs_gt_full', {}),
+                    },
+                    'consistency': consistency
                 },
-                'consistency': consistency,
+                'evaluation': {
+                    'correctness': {
+                        'global_full': compute_evaluation_correctness_aggregates(env_data_list)
+                    },
+                },
                 'cogmap_update_per_turn': per_turn_update,
                 'cogmap_full_per_turn': per_turn_full,
             }
-
-        if scenario in ('active_evaluation', 'passive_evaluation'):
-            # Evaluation tasks: aggregate correctness from evaluation_tasks
+        elif exp_type == 'passive':
             return {
-                'correctness': {
-                    'global_full': compute_evaluation_correctness_aggregates(env_data_list)
+                'exploration': {
+                    'correctness': {
+                        'global_full': correctness.get('last_global_vs_gt_full', {})
+                    }
                 }
             }
 
-        if scenario == 'passive_exploration':
-            # passive: only correctness of global from exploration logs
-            return {
-                'correctness': {
-                    'global_full': correctness.get('passive_global_full', {})
-                }
-            }
-
-        raise ValueError(f"Invalid scenario: {scenario}")
+        raise ValueError(f"Invalid scenario: {exp_type}")
     
     # register entry gates for active exploratoin
     def _register_active_entry_gate(self, gt_room) -> None:
@@ -709,79 +706,7 @@ class CognitiveMapManager:
             allow_scale=bool(self.config.get('pos_allow_scale', True)),
             pos_norm_L=self._pos_norm_L,
         )
-        return MapCogMetrics(dir=float(m.get('dir', 0.0)), facing=float(m.get('facing', 0.0)), pos=float(m.get('pos', 0.0)), overall=float(m.get('overall', 0.0)))
-
-    def _calculate_dir_sim(self, pred_room: BaseRoom, gt_room: BaseRoom) -> float:
-        """Pairwise allocentric bin agreement over GT object pairs.
-
-        Missing predicted objects are counted as incorrect pairs.
-        """
-        pred = {o.name: o for o in pred_room.objects}
-        gt = {o.name: o for o in gt_room.objects}
-        names = sorted(gt.keys())
-        if len(names) < 2:
-            return 1.0
-        bin_system = CardinalBinsAllo()
-        tot = cor = 0.0
-        for i in range(len(names)):
-            for j in range(i + 1, len(names)):
-                a, b = gt[names[i]], gt[names[j]]
-                gt_rel = PairwiseRelationshipDiscrete.relationship(a.pos, b.pos, None, bin_system)
-                p1, p2 = pred.get(names[i]), pred.get(names[j])
-                if p1 is not None and p2 is not None:
-                    pr = PairwiseRelationshipDiscrete.relationship(p1.pos, p2.pos, None, bin_system)
-                    if pr.direction.bin_id == gt_rel.direction.bin_id:
-                        cor += 1.0
-                tot += 1.0
-        return cor / tot if tot else 0.0
-
-    def _calculate_facing_sim(self, pred_room: BaseRoom, gt_room: BaseRoom) -> float:
-        pred = {o.name: o for o in pred_room.objects}
-        gt = {o.name: o for o in gt_room.objects}
-        names = sorted(gt.keys())
-        tot = cor = 0.0
-        for name in names:
-            g = gt[name]
-            if not g.has_orientation:
-                continue
-            p = pred.get(name)
-            tot += 1.0
-            if p is not None and np.array_equal(p.ori, g.ori):
-                cor += 1.0
-        return cor / tot if tot else 1.0
-
-    def _calculate_pos_sim(self, pred_room: BaseRoom, gt_room: BaseRoom, allow_scale: bool = True) -> float:
-        """Position similarity with optional scale alignment and coverage penalty.
-
-        Given matched points P_pred and P_gt (same name ordering):
-        - If allow_scale: find s* that minimizes ||s*·P_pred − P_gt|| in least squares
-          s* = (Σ r_i·e_i) / (Σ e_i·e_i), where e_i from pred, r_i from gt
-        - RMSE = sqrt(mean(||s*·e_i − r_i||^2))
-        - Normalize by a global L computed once and convert to similarity via exp(−RMSE/L)
-
-        Similarity is exp(-RMSE/L) scaled by coverage = (#matched GT objects)/(#GT objects).
-        """
-        pred = {o.name: o for o in pred_room.objects}
-        gt = {o.name: o for o in gt_room.objects}
-        gt_names = sorted(gt.keys())
-        matched = [n for n in gt_names if n in pred]
-        if len(matched) == 0 or len(gt_names) == 0:
-            return 1.0
-        P1 = np.array([pred[n].pos for n in matched], dtype=float)
-        P2 = np.array([gt[n].pos for n in matched], dtype=float)
-        if allow_scale:
-            den = float((P1 * P1).sum())
-            if den == 0.0:
-                return 0.0
-            scale = float((P2 * P1).sum()) / den
-        else:
-            scale = 1.0
-        rmse = np.sqrt(((P1 * scale - P2) ** 2).sum(axis=1).mean())
-        L = float(self._pos_norm_L or 0.0)
-        base = float(np.exp(-rmse / L)) if L > 0 else 0.0
-        coverage = float(len(matched)) / float(len(gt_names))
-        return base * coverage
-
+        return m
 
     # =============================== Filters and preprocessing =============================== 
     def _filter_br_by_names(self, br: Optional[BaseRoom], keep: set[str]) -> BaseRoom:

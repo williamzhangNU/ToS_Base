@@ -137,19 +137,6 @@ def get_last_exploration_cogmap(env_data: Dict[str, Any]) -> Optional[Dict[str, 
 
 
 def compute_correctness_aggregates(env_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
-
-
-    # Passive global map (full) aggregated
-    passive_vals = []
-    for env_data in env_data_list:
-        cfg = (env_data.get('env_info') or {}).get('config') or {}
-        if cfg.get('exp_type') == 'passive':
-            turns = env_data.get('env_turn_logs') or []
-            if turns:
-                mm = (turns[0].get('cogmap_log') or {}).get('global', {}).get('metrics_full', {})
-                if mm:
-                    passive_vals.append(MapCogMetrics.from_dict(mm).to_dict())
-
     # Dataclass-based sample averaging
     last_global_vals = []
     last_rel_vals = []
@@ -162,9 +149,6 @@ def compute_correctness_aggregates(env_data_list: List[Dict[str, Any]]) -> Dict[
     return {
         'last_global_vs_gt_full': _avg_map_dicts(last_global_vals),
         'last_relations_vs_gt_full': _avg_rel_dicts(last_rel_vals),
-        'per_turn_global_full': calculate_cogmap_per_turn(env_data_list, mode='full'),
-        'per_turn_global_observed': calculate_cogmap_per_turn(env_data_list, mode='update'),
-        'passive_global_full': _avg_map_dicts(passive_vals),
     }
 
 

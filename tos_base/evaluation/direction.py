@@ -119,7 +119,6 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         )
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
-        self.eval_data.reasoning = self._generate_reasoning()
         return self.eval_data.question
 
     # ---------- allocentric ----------
@@ -281,6 +280,5 @@ class BackwardPovEvaluationTask(DirectionEvaluationTask):
         )
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
-        self.eval_data.reasoning = self._generate_reasoning()
         
         return self.eval_data.question

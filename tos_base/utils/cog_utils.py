@@ -52,8 +52,8 @@ def evaluate_cognitive_maps_from_turnlogs(
     all_messages_list = []
     all_env_ids = []
     env_id_to_location = {}  # Mapping from env_id to (env_idx, turn_idx, map_type)
-    env_cogmap_managers = {}  # Store CognitiveMapManager for each env
-    env_history_managers = {}  # Store HistoryManager for each env
+    env_cogmap_managers: Dict[int, CognitiveMapManager] = {}  # Store CognitiveMapManager for each env
+    env_history_managers: Dict[int, HistoryManager] = {}  # Store HistoryManager for each env
 
     env_id_counter = 0
     for env_idx, env_summary in enumerate(env_summarys):
@@ -94,7 +94,7 @@ def evaluate_cognitive_maps_from_turnlogs(
                     # Active exploration:
                     # - For each turn: generate local and global
                     # - For final turn only: also generate rooms and relations
-                    base_user = turn_log['user_message']
+                    base_user = re.sub(r"You have a maximum of\s*\d+\s*exploration steps left.*", "", turn_log['user_message'], flags=re.DOTALL)
                     is_last_exp = (turn_idx == len(turn_logs) - 1)
                     per_turn_types = ['local', 'global']
                     final_only_types = ['rooms', 'relations'] if is_last_exp else []

@@ -4,7 +4,7 @@ from typing import List, Tuple, Any
 import numpy as np
 from typing_extensions import override
 
-from .tasks import BaseEvaluationTask
+from .tasks import BaseEvaluationTask, EvaluationData
 from ..core.object import Object
 from ..core.relationship import PairwiseRelationship
 
@@ -113,7 +113,6 @@ class RotEvaluationTask(BaseEvaluationTask):
         )
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
-        self.eval_data.reasoning = self._generate_reasoning()
         return self.eval_data.question
 
     @override
@@ -150,7 +149,6 @@ class RotDualEvaluationTask(RotEvaluationTask):
         )
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
-        self.eval_data.reasoning = self._generate_reasoning()
         return self.eval_data.question
 
     def generate_choices(self, correct_answer: Any) -> Tuple[List[str], int]:

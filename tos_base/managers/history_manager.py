@@ -2,7 +2,7 @@ from typing import Optional, List, Dict
 import os
 import shutil
 import json
-import hashlib
+from ..utils.utils import hash
 from ..utils.room_utils import RoomPlotter
 from .. import (
     Agent,
@@ -54,7 +54,7 @@ class HistoryManager:
     def _generate_room_key(self, room_dict, agent_dict):
         room_str = json.dumps({**room_dict, **agent_dict}, sort_keys=True)
 
-        return hashlib.sha256(room_str.encode("utf-8")).hexdigest()[:16]
+        return hash(room_str)
         
     def _load(self):
         """Load env turn logs from JSON file"""
@@ -116,7 +116,7 @@ class HistoryManager:
     def has_cogmap_response(self, turn_idx: int = None) -> bool:
         """Check if cognitive map response exists for a specific turn (0-indexed)"""
         return (0 <= turn_idx < len(self.exploration_turn_logs) and
-                self.exploration_turn_logs[turn_idx].get('cogmap_log') is not None)
+                self.exploration_turn_logs[turn_idx].get('cogmap_log'))
 
     @staticmethod
     def get_model_dir(output_dir: str, model_config: Dict) -> str:
@@ -129,7 +129,7 @@ class HistoryManager:
         model_config.pop("max_retries", None)
         model_config.pop("timeout", None)
         model_config_str = json.dumps(model_config, sort_keys=True)
-        model_name = model_config['model_name'] + "_" + hashlib.sha256(model_config_str.encode("utf-8")).hexdigest()[:16]
+        model_name = model_config['model_name'] + "_" + hash(model_config_str)
         return os.path.join(output_dir, model_name)
     
     @staticmethod
@@ -203,13 +203,8 @@ class HistoryManager:
                 result["exp_summary"]["group_performance"][config_name] = ExplorationManager.aggregate_group_performance(env_data_list)
                 result["eval_summary"]["group_performance"][config_name] = EvaluationManager.aggregate_group_performance(env_data_list)
                 # Provide both exploration and evaluation cogmap summaries
-                exp_scenario = ("passive_exploration" if "passive" in config_name else "active_exploration")
-                eval_scenario = ("passive_evaluation" if "passive" in config_name else "active_evaluation")
-                result["cogmap_summary"]["group_performance"][config_name] = {
-                    "exploration": CognitiveMapManager.aggregate_group_performance(env_data_list, scenario=exp_scenario),
-                    "evaluation": CognitiveMapManager.aggregate_group_performance(env_data_list, scenario=eval_scenario),
-                }
-
+                exp_type = "active" if "active" in config_name else "passive"
+                result["cogmap_summary"]["group_performance"][config_name] = CognitiveMapManager.aggregate_group_performance(env_data_list, exp_type=exp_type)
         return result
 
     @staticmethod

@@ -63,7 +63,6 @@ class FalseBeliefEvaluationTask(BaseEvaluationTask):
         self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(choices_text=choices_text)
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
-        self.eval_data.reasoning = self._generate_reasoning()
         return self.eval_data.question
 
     def _apply_movement(self, objs: List[Any], rid: int) -> str:

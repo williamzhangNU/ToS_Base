@@ -3,16 +3,16 @@ import math
 import numpy as np
 from itertools import combinations
 
-from ...core.room import BaseRoom, Room
-from ...core.object import Agent
-from ...core.relationship import PairwiseRelationshipDiscrete, CardinalBinsAllo, StandardDistanceBins
+from ...core.room import BaseRoom, Room, Object
+from ...core.object import Agent 
+from ...core.relationship import RelationTriple, CardinalBinsAllo, StandardDistanceBins
 from ...managers.spatial_solver import SpatialSolver
 from .transforms import br_from_anchor_to_initial
 from .metrics import compute_map_metrics
 from .types import MapCogMetrics
 from ..relation_codes import (
-    decode_relation_codes, encode_relation_codes,
-    make_ordered_pair_key, parse_pair_key, invert_relation_codes_str,
+    decode_relation_codes, encode_relation_codes, discrete_relation_from_codes,
+    make_ordered_pair_key, parse_pair_key, invert_relation_codes_str, invert_pair_key
 )
 from ..relationship_utils import room_to_ordered_relations
 
@@ -83,7 +83,6 @@ def map_vs_relations_consistency(pred_relations: Dict, pred_global: BaseRoom | N
     matches = 0
     total = len(expected_relations)
 
-    from ..relation_codes import invert_pair_key
     for pair_key, expected_rel in expected_relations.items():
         # Accept exact order; if opposite provided, invert before compare
         predicted_rel = pred_relations.get(pair_key)
@@ -135,7 +134,6 @@ def relations_consistency(pred_relations: Dict) -> float:
     # Generate non-repetitive triples
 
     for name_a, name_b, name_c in combinations(all_names, 3):
-        from ..relation_codes import make_ordered_pair_key, invert_pair_key
         ab_key = make_ordered_pair_key(name_a, name_b); ba_key = invert_pair_key(ab_key)
         ac_key = make_ordered_pair_key(name_a, name_c); ca_key = invert_pair_key(ac_key)
         bc_key = make_ordered_pair_key(name_b, name_c); cb_key = invert_pair_key(bc_key)
@@ -176,12 +174,10 @@ def _check_triple_consistency(name_a: str, name_b: str, name_c: str,
     bc_dir, bc_dist = decode_relation_codes(bc_rel)
 
     # Build discrete relations from bins only (no grid distance checks)
-    from ..relation_codes import discrete_relation_from_codes
     ac_discrete_rel = discrete_relation_from_codes(ac_dir, ac_dist)
     bc_discrete_rel = discrete_relation_from_codes(bc_dir, bc_dist)
 
     # Add constraints: A relative to C, B relative to C
-    from ...core.relationship import RelationTriple
     relation_triples = [
         RelationTriple(subject=name_a, anchor=name_c, relation=ac_discrete_rel, orientation=(0, 1)),
         RelationTriple(subject=name_b, anchor=name_c, relation=bc_discrete_rel, orientation=(0, 1))
@@ -201,7 +197,6 @@ def _check_triple_consistency(name_a: str, name_b: str, name_c: str,
     )
 
     # Normalize keys to ordered lookup and code strings
-    from ..relation_codes import encode_relation_codes, decode_relation_codes
     ab_dir, ab_dist = decode_relation_codes(ab_rel)
     target = encode_relation_codes(ab_dir, ab_dist)
     # rel_sets uses unordered tuple keys (a,b). Check both and invert when needed
@@ -221,89 +216,6 @@ def _check_triple_consistency(name_a: str, name_b: str, name_c: str,
             return True
     return False
 
-def _get_representative_position_from_codes(dir_code: str, dist_code: str, invert: bool = False) -> tuple:
-    """Get a representative position from direction and distance codes.
-
-    Args:
-        dir_code: Direction code (N, S, E, W, etc.)
-        dist_code: Distance code (near, mid, far, etc.)
-        invert: If True, invert the direction
-
-    Returns:
-        A representative (x, y) position tuple, or None if invalid
-    """
-    from ...core.relationship import StandardDistanceBins
-
-    # Invert direction if needed
-    if invert:
-        inversion_map = {
-            'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E',
-            'NE': 'SW', 'SW': 'NE', 'NW': 'SE', 'SE': 'NW'
-        }
-        dir_code = inversion_map.get(dir_code.upper(), dir_code)
-
-    # Get a representative distance from the distance bin
-    distance_bin_system = StandardDistanceBins()
-    from ..relation_codes import _DIST_CODE_TO_LABEL
-    dist_label = _DIST_CODE_TO_LABEL.get(dist_code.lower())
-
-    if not dist_label:
-        return None
-
-    # Find the distance bin
-    for i, label in enumerate(distance_bin_system.LABELS):
-        if label.lower() == dist_label.lower():
-            dist_min, dist_max = distance_bin_system.BINS[i]
-            # Use middle of the range as representative distance
-            rep_distance = (dist_min + dist_max) / 2
-            break
-    else:
-        return None
-
-    # Define direction unit vectors
-    direction_vectors = {
-        'N': (0, 1), 'S': (0, -1), 'E': (1, 0), 'W': (-1, 0),
-        'NE': (1, 1), 'NW': (-1, 1), 'SE': (1, -1), 'SW': (-1, -1)
-    }
-
-    if dir_code.upper() not in direction_vectors:
-        return None
-
-    dx, dy = direction_vectors[dir_code.upper()]
-
-    # Normalize for diagonal directions
-    if dir_code.upper() in ['NE', 'NW', 'SE', 'SW']:
-        length = (dx**2 + dy**2)**0.5
-        dx, dy = dx/length, dy/length
-
-    # Calculate representative position
-    x = dx * rep_distance
-    y = dy * rep_distance
-
-    # Round to integer grid coordinates
-    return (round(x), round(y))
-
-
-def _invert_relation(relation_str: str) -> str:
-    """Invert a relation string by reversing its direction.
-
-    Args:
-        relation_str: Relation string like "(W, near)"
-
-    Returns:
-        Inverted relation string like "(E, near)"
-    """
-    dir_code, dist_code = decode_relation_codes(relation_str)
-
-    # Invert direction
-    inversion_map = {
-        'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E',
-        'NE': 'SW', 'SW': 'NE', 'NW': 'SE', 'SE': 'NW'
-    }
-    inverted_dir = inversion_map.get(dir_code.upper(), dir_code)
-
-    # Keep the same distance
-    return f"({inverted_dir}, {dist_code})"
 
 __all__ = [
     "compare_on_common_subset",
@@ -316,9 +228,6 @@ __all__ = [
 
 
 if __name__ == "__main__":
-    import numpy as np
-    from ...core.object import Object, Agent
-
     print("Testing consistency functions...")
 
     # Test 1: compare_on_common_subset

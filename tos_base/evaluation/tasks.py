@@ -21,7 +21,6 @@ from ..core.relationship import (
 class EvaluationData:
     question: str
     answer: str
-    reasoning: str
     task_type: str
     action: str = None
     choices: List[str] = None
@@ -65,7 +64,6 @@ class BaseEvaluationTask(ABC):
         self.eval_data = EvaluationData(
             question="",
             answer="",
-            reasoning="",
             action=None,
             task_type=self.__class__.__name__,
             choices=[]
@@ -80,16 +78,8 @@ class BaseEvaluationTask(ABC):
         return self.eval_data.question
     
     @property
-    def reasoning(self) -> str:
-        return self.eval_data.reasoning
-    
-    @property
     def choices(self) -> List[str]:
         return self.eval_data.choices
-    
-    def _generate_reasoning(self) -> str:
-        """Generate reasoning for the evaluation task"""
-        return f"Reasoning for {self.__class__.__name__}"
     
     def format_choices(self, choices: List[str], correct_index: int) -> Tuple[str, str]:
         """Format choices as lines and return (choices_text, correct_label)."""
@@ -118,7 +108,6 @@ class BaseEvaluationTask(ABC):
         return {
             'question': self.question,
             'answer': self.answer,
-            'reasoning': self.reasoning,
             'choices': self.choices,
         }
 

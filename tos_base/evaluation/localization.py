@@ -100,7 +100,6 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
         )
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
-        self.eval_data.reasoning = self._generate_reasoning()
         return self.eval_data.question
 
     def generate_choices(self, correct_answer: Tuple[Tuple[int, int], str]) -> Tuple[List[str], int]:
@@ -287,7 +286,6 @@ class ForwardLocEvaluationTask(BaseLocEvaluationTask):
         )
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
-        self.eval_data.reasoning = self._generate_reasoning()
         return self.eval_data.question
 
     def generate_choices(self, correct_answer: Any) -> Tuple[List[str], int]:
