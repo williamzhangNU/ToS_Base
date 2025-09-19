@@ -15,7 +15,7 @@ class E2AEvaluationTask(BaseEvaluationTask):
         "Treat your starting position as the origin (0, 0), and facing north.\n"
         "Consider the global map coordinates (x right, y up).\n"
         "Choose the option that correctly lists some objects with their coordinates and orientations.\n\n"
-        "Answer format: [obj at (x, y) facing orientation, ...] where orientation is north/east/south/west\n\n"
+        "Answer format: object: ((x, y), <facing direction>) for each object\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
@@ -44,7 +44,7 @@ class E2AEvaluationTask(BaseEvaluationTask):
             return pool[:k]
 
         # correct option
-        objs_c = pick_subset(4)
+        objs_c = pick_subset(3)
         correct_answer = [
             (o.name, tuple(map(int, o.pos)), self._get_orientation_string(o))
             for o in objs_c
@@ -79,7 +79,7 @@ class E2AEvaluationTask(BaseEvaluationTask):
             return out
 
         while len(choices) < 4:
-            objs = pick_subset(4)
+            objs = pick_subset(3)
             base = [(o.name, tuple(map(int, o.pos)), self._get_orientation_string(o)) for o in objs]
             coords, oris = [c for (_, c, _) in base], [r for (_, _, r) in base]
             mode = int(self.np_random.integers(0, 3))  # 0: pos, 1: ori, 2: both
@@ -103,8 +103,5 @@ class E2AEvaluationTask(BaseEvaluationTask):
         rel_items = []
         for name, abs_coord, orientation in answer:
             rx, ry = int(abs_coord[0]) - ox, int(abs_coord[1]) - oy
-            rel_items.append((name, (rx, ry), orientation))
-        return ", ".join([f"{name} at {coord} facing {orientation}" for name, coord, orientation in rel_items])
-
-
-
+            rel_items.append(f"{name}: (({rx}, {ry}), {orientation})")
+        return ", ".join(rel_items)

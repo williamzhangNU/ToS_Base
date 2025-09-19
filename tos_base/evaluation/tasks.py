@@ -128,29 +128,6 @@ class BaseEvaluationTask(ABC):
         return task_types.get(task_type, cls).from_dict(data)
 
 
-# ---- Decorator: retry question generation with max retries and history de-dup ----
-def retry_generate_question(func):
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        max_retry = int(self.config.get('max_retry', 10))
-        last_q = ""
-        for _ in range(max_retry):
-            q = func(self, *args, **kwargs)
-            # Ensure question field is populated
-            if isinstance(q, str) and q:
-                self.eval_data.question = q
-            q = self.eval_data.question
-            # Ensure ID exists for history checks
-            if not getattr(self.eval_data, 'id', None) or not self.eval_data.id:
-                from ..utils.utils import hash as _hash
-                self.eval_data.id = _hash(q)
-            # Accept if no history manager or not seen
-            hm = getattr(self, 'history_manager', None)
-            if not hm or not hm.has_question(self.eval_data.id):
-                return q
-            last_q = q
-        return last_q
-    return wrapper
 
     # ---- Shared helper: find a point that changes discrete pairwise relationships ----
     def _sample_point_with_discrete_change(
@@ -216,3 +193,29 @@ def retry_generate_question(func):
             action_results.append(RotateAction(90).execute(room, agent))
             action_results.append(ObserveAction().execute(room, agent, neglect_objects=neglect_objects or [], free_position=True))
         return action_results_to_text(action_results)
+
+
+
+# ---- Decorator: retry question generation with max retries and history de-dup ----
+def retry_generate_question(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        max_retry = int(self.config.get('max_retry', 10))
+        last_q = ""
+        for _ in range(max_retry):
+            q = func(self, *args, **kwargs)
+            # Ensure question field is populated
+            if isinstance(q, str) and q:
+                self.eval_data.question = q
+            q = self.eval_data.question
+            # Ensure ID exists for history checks
+            if not getattr(self.eval_data, 'id', None) or not self.eval_data.id:
+                from ..utils.utils import hash as _hash
+                self.eval_data.id = _hash(q)
+            # Accept if no history manager or not seen
+            hm = getattr(self, 'history_manager', None)
+            if not hm or not hm.has_question(self.eval_data.id):
+                return q
+            last_q = q
+        return last_q
+    return wrapper

@@ -285,3 +285,26 @@ class BackwardPovEvaluationTask(DirectionEvaluationTask):
         self.eval_data.choices = choices
         self.eval_data.id = hash(self.eval_data.question)
         return self.eval_data.question
+
+
+class DirectionPov(DirectionEvaluationTask):
+    """Allocentric bins with anchor's facing treated as north (normalize by anchor's orientation)."""
+    QUESTION_TEMPLATE_ANCHOR_NORTH = (
+        "Treat the {anchor_obj_name}'s facing as north.\n"
+        "From this normalized top-down view, what is the spatial relationship of {obj_name} relative to {anchor_obj_name}?\n"
+        "Each choice is \"<direction-bin>, <distance-bin>\" (allocentric).\n\n"
+        "Choose the correct answer:\n{choices_text}\n\n"
+        "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
+    )
+
+    def generate_question_data(self):
+        oriented_indices = [i for i, o in enumerate(self.room.objects) if o.has_orientation]
+        if oriented_indices:
+            anchor_idx = int(self.np_random.choice(oriented_indices))
+            anchor = self.room.objects[anchor_idx]
+            n = len(self.room.objects)
+            target_idx = int(self.np_random.choice([k for k in range(n) if k != anchor_idx]))
+            target_obj = self.room.objects[target_idx]
+            rel = self._compute_discrete_rel(target_obj.pos, anchor.pos, CardinalBinsAllo(), anchor_ori=anchor.ori)
+            return target_obj, anchor, rel, self.QUESTION_TEMPLATE_ANCHOR_NORTH
+        raise ValueError("No oriented objects in the room")

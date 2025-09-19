@@ -15,10 +15,11 @@ class EvalTaskType(Enum):
     ROT = ("rot", "RotEvaluationTask")
     ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
     POV = ("pov", "PovEvaluationTask")
+    DIR_ANCHOR = ("dir_anchor", "DirectionPov")
     E2A = ("e2a", "E2AEvaluationTask")
     FWD_LOC = ("fwd_loc", "ForwardLocEvaluationTask")
     BWD_LOC = ("bwd_loc", "BackwardLocEvaluationTask")
-    FALSE_BELIEF = ("false_belief", "FalseBeliefEvaluationTask")
+    FALSE_BELIEF = ("false_belief", "FalseBeliefDirectionPov")
     FWD_FOV = ("fwd_fov", "ForwardFOVEvaluationTask")
     BWD_NAV = ("bwd_nav", "BackwardNavEvaluationTask")
     BWD_POV = ("bwd_pov", "BackwardPovEvaluationTask")
@@ -41,11 +42,11 @@ class EvalTaskType(Enum):
     def get_task_map(cls) -> Dict[str, 'Type[BaseEvaluationTask]']:
         """Get mapping from short names to task classes."""
         # Import here to avoid circular imports
-        from .direction import DirectionEvaluationTask, PovEvaluationTask, BackwardPovEvaluationTask
+        from .direction import DirectionEvaluationTask, PovEvaluationTask, BackwardPovEvaluationTask, DirectionPov
         from .rotation import RotEvaluationTask, RotDualEvaluationTask
         from .e2a import E2AEvaluationTask
         from .localization import ForwardLocEvaluationTask, BackwardLocEvaluationTask
-        from .false_belief import FalseBeliefEvaluationTask
+        from .false_belief import FalseBeliefDirectionPov
         from .navigation_tasks import ForwardFOVEvaluationTask, BackwardNavEvaluationTask
         
         task_map = {
@@ -53,10 +54,11 @@ class EvalTaskType(Enum):
             cls.ROT.short_name: RotEvaluationTask,
             cls.ROT_DUAL.short_name: RotDualEvaluationTask,
             cls.POV.short_name: PovEvaluationTask,
+            cls.DIR_ANCHOR.short_name: DirectionPov,
             cls.E2A.short_name: E2AEvaluationTask,
             cls.FWD_LOC.short_name: ForwardLocEvaluationTask,
             cls.BWD_LOC.short_name: BackwardLocEvaluationTask,
-            cls.FALSE_BELIEF.short_name: FalseBeliefEvaluationTask,
+            cls.FALSE_BELIEF.short_name: FalseBeliefDirectionPov,
             cls.FWD_FOV.short_name: ForwardFOVEvaluationTask,
             cls.BWD_NAV.short_name: BackwardNavEvaluationTask,
             cls.BWD_POV.short_name: BackwardPovEvaluationTask,
@@ -102,7 +104,7 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
 
-    task_name = 'bwd_pov'
+    task_name = 'false_belief'
     for seed in tqdm(range(1, 2)):
         np_random = np.random.default_rng(seed)
         room, agent = RoomGenerator.generate_room(
