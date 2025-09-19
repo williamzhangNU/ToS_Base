@@ -401,7 +401,7 @@ class CognitiveMapManager:
             setattr(out, f"{single.type}_log", single)
         # Consistency fields per turn
         summary = ConsistencySummary()
-        if out.local_log.extraction_success and out.global_log.extraction_success:
+        if out.local_log and out.global_log and out.local_log.extraction_success and out.global_log.extraction_success:
             cm = local_vs_global_consistency(
                 out.local_log.pred_room_state,
                 out.global_log.pred_room_state,
@@ -411,7 +411,7 @@ class CognitiveMapManager:
             )
             summary.local_vs_global = cm
         # Rooms vs Global (only when both predicted)
-        if out.rooms_log.extraction_success and out.global_log.extraction_success:
+        if out.rooms_log and out.global_log and out.rooms_log.extraction_success and out.global_log.extraction_success:
             avg, per_room = rooms_vs_global_consistency(
                 out.rooms_log.pred_rooms_state or {},
                 out.global_log.pred_room_state,
@@ -424,14 +424,14 @@ class CognitiveMapManager:
             summary.rooms_vs_global_avg = avg
             summary.rooms_vs_global_per_room = per_room
         # Map vs Relations consistency
-        if out.relations_log.extraction_success and out.global_log.extraction_success:
+        if out.global_log and out.relations_log and out.relations_log.extraction_success and out.global_log.extraction_success:
             score = map_vs_relations_consistency(
                 out.relations_log.pred_relations or {},
                 out.global_log.pred_room_state,
             )
             summary.map_vs_relations = float(score)
         # Relations self-consistency
-        if out.relations_log.extraction_success:
+        if out.relations_log and out.relations_log.extraction_success:
             score_rel = relations_consistency(out.relations_log.pred_relations or {})
             summary.relations_consistency = float(score_rel)
         out.consistency = summary

@@ -280,8 +280,8 @@ class HistoryManager:
                     turn_log['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in turn_log['message_images']]
 
             # Process evaluation tasks
-            for task_questions in sample_data["evaluation_tasks"].values():
-                for question_data in task_questions.values():
+            for task in sample_data["evaluation_tasks"].values():
+                for question_data in task.values():
                     if question_data.get("room_image"):
                         question_data['room_image'] = os.path.relpath(question_data['room_image'], model_dir)
                     if question_data.get('message_images'):

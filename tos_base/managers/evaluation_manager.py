@@ -174,14 +174,14 @@ class EvaluationManager:
         for env_data in env_data_list:
             evaluation_tasks = env_data.get('evaluation_tasks', {})
 
-            for task_type, task_data in evaluation_tasks.items():
+            for task_type, task in evaluation_tasks.items():
                 if task_type not in task_metrics:
                     task_metrics[task_type] = {"total": 0, "correct": 0}
-
-                task_metrics[task_type]["total"] += 1
                 # Check if the evaluation task was answered correctly
-                if task_data['evaluation_log']['is_correct']:
-                    task_metrics[task_type]["correct"] += 1
+                for task_data in task.values():
+                    task_metrics[task_type]["total"] += 1
+                    if task_data['evaluation_log']['is_correct']:
+                        task_metrics[task_type]["correct"] += 1
 
         # Calculate overall metrics
         total_tasks = sum(metrics["total"] for metrics in task_metrics.values())
@@ -214,8 +214,7 @@ class EvaluationManager:
         self.current_index = 0
         self.results = []
     
-    def __len__(self):
-        return len(self.tasks)
+
 
 
 if __name__ == "__main__":
