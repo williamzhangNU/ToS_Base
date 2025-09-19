@@ -70,7 +70,7 @@ COGMAP_INSTRUCTION_ROOMS_ONLY = """\
 - Frame per room: must include "origin":"<gate_name>" where the origin gate is the first used to enter that room; +Y points into the room.
 - Content: include each room’s "objects" dict; DO NOT include the agent; DO NOT include the entry door.
 - Initial room: include it with origin at the initial position and orientation.
-- Facing: use "north|south|east|west".
+- Facing: use "+x|-x|+y|-y".
 
 Example:
 ```json
@@ -78,14 +78,14 @@ Example:
   "1": {
     "origin": "initial_pos",
     "objects": {
-      "chair": {"position": [1, 0], "facing": "north"},
-      "table": {"position": [2, 1], "facing": "west"}
+      "chair": {"position": [1, 0], "facing": "+y"},
+      "table": {"position": [2, 1], "facing": "-x"}
     }
   },
   "2": {
     "origin": "door",
     "objects": {
-      "sofa": {"position": [0, 2], "facing": "south"}
+      "sofa": {"position": [0, 2], "facing": "-y"}
     }
   }
 }

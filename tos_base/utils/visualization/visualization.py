@@ -450,24 +450,15 @@ class HTMLGenerator:
         global_log = cogmap_log.get("global", {})
         local_log = cogmap_log.get("local", {})
         rooms_log = cogmap_log.get("rooms", {})
+        relations_log = cogmap_log.get("relations", {})
 
         metrics_block = {
             "Global": global_log.get("metrics", {}) if global_log else {},
             "Global (Full)": global_log.get("metrics_full", {}) if global_log else {},
             "Local": local_log.get("metrics", {}) if local_log else {},
             "Rooms": rooms_log.get("metrics", {}) if rooms_log else {},
+            "Relations": relations_log.get("metrics", {}) if relations_log else {}
         }
-
-        # Add flat metrics for backward compatibility
-        flat_metrics = {k: v for k, v in {
-            "dir_sim": cogmap_log.get("dir_sim"),
-            "facing_sim": cogmap_log.get("facing_sim"),
-            "pos_sim": cogmap_log.get("pos_sim"),
-            "overall_sim": cogmap_log.get("overall_sim"),
-        }.items() if v is not None}
-
-        if flat_metrics:
-            metrics_block["Summary"] = flat_metrics
 
         if any(metrics_block.values()):
             f.write("<div class='block cogmap'><strong>🧠 Cognitive Map Metrics</strong>")
@@ -545,7 +536,9 @@ class HTMLGenerator:
                 self._render_expandable_block(f, env_log['user_message'], obs_id, "👤 Environment Observation")
 
             # Display assistant thinking and action
-            self._render_simple_block(f, env_log.get('assistant_think_message', ''), "🤔 Assistant Thinking", "think")
+            if env_log.get('assistant_think_message'):
+                think_id = f"think_{page_idx}_{t_idx}"
+                self._render_expandable_block(f, env_log['assistant_think_message'], think_id, "🤔 Assistant Thinking", "think")
             self._render_simple_block(f, env_log.get('assistant_parsed_message', ''), "💬 Assistant Action", "answer")
 
             # Display cognitive map original responses if available
@@ -592,9 +585,11 @@ class HTMLGenerator:
                     if eval_log.get('user_message'):
                         obs_id = f"obs_{page_idx}_{t_idx}_{question_idx}"
                         self._render_expandable_block(f, eval_log['user_message'], obs_id, "❓ Evaluation Question")
-
-                    # Display assistant thinking and action using helper functions
-                    self._render_simple_block(f, eval_log.get('assistant_think_message', ''), "🤔 Assistant Thinking", "think")
+                    # Display assistant thinking and action
+                    if eval_log.get('assistant_think_message'):
+                        think_id = f"think_{page_idx}_{t_idx}_{question_idx}"
+                        self._render_expandable_block(f, eval_log['assistant_think_message'], think_id, "🤔 Assistant Thinking", "think")
+                    
                     self._render_simple_block(f, eval_log.get('assistant_parsed_message', ''), "💬 Assistant Answer", "answer")
 
                     # Display evaluation results

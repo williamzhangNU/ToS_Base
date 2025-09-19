@@ -25,6 +25,7 @@ class EnvTurnLog:
     assistant_think_message: str = ""  # Think part of assistant message
     assistant_parsed_message: str = ""  # Parsed assistant action
     is_exploration_phase: bool = False
+    is_last_exp: bool = False
     exploration_log: Optional["ExplorationTurnLog"] = None
     evaluation_log: Optional["EvaluationTurnLog"] = None
     cogmap_log: Optional["CognitiveMapTurnLog"] = None
@@ -46,6 +47,7 @@ class EnvTurnLog:
             "assistant_parsed_message": self.assistant_parsed_message,
             "cogmap_response": self.cogmap_response,
             "is_exploration_phase": self.is_exploration_phase,
+            "is_last_exp": self.is_last_exp,
             "exploration_log": self.exploration_log.to_dict() if self.exploration_log else {},
             "evaluation_log": self.evaluation_log.to_dict() if self.evaluation_log else {},
             "cogmap_log": self.cogmap_log.to_dict() if self.cogmap_log else {},
