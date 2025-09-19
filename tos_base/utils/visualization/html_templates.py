@@ -395,12 +395,12 @@ body {
 }
 
 .turn-split h3 {
-    margin: 0 0 25px 0;
+    margin: 20px 0 15px 0;
+    padding-bottom: 8px;
     font-size: 18px;
     color: #2c3e50;
     font-weight: 600;
     border-bottom: 2px solid #3498db;
-    padding-bottom: 8px;
 }
 
 .turn-left {
@@ -430,16 +430,6 @@ body {
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     transition: transform 0.3s ease;
-}
-
-.message-image:hover {
-    transform: scale(1.02);
-}
-
-@media (min-width: 768px) {
-    .turn-split {
-        flex-direction: row;
-    }
 }
 
 .block {
@@ -481,10 +471,6 @@ body {
     transition: all 0.2s ease;
 }
 
-.block.user.expandable:hover {
-    transform: scale(1.02);
-    box-shadow: 0 4px 12px rgba(33, 150, 243, 0.2);
-}
 
 .expand-hint {
     font-size: 0.8em;
@@ -503,11 +489,6 @@ body {
 .block.think.expandable {
     cursor: pointer;
     transition: all 0.2s ease;
-}
-
-.block.think.expandable:hover {
-    transform: scale(1.02);
-    box-shadow: 0 4px 12px rgba(255, 152, 0, 0.2);
 }
 
 .block.answer {
@@ -539,10 +520,6 @@ body {
     transition: all 0.2s ease;
 }
 
-.block.cogmap-response.expandable:hover {
-    transform: scale(1.02);
-    box-shadow: 0 4px 12px rgba(255, 160, 0, 0.2);
-}
 
 /* Cognitive map layout */
 .cogmap-compare {
@@ -678,10 +655,6 @@ img.room {
     transition: transform 0.3s ease;
 }
 
-img.room:hover {
-    transform: scale(1.02);
-}
-
 h1 {
     margin-top: 60px;
     color: #fff;
@@ -703,20 +676,22 @@ h2 {
 
 h3 {
     color: #34495e;
-    margin-top: 25px;
+    margin: 25px 0 0 0;
+    padding: 0 0 8px 0;
     font-size: 1.4em;
     font-weight: 500;
     border-bottom: 1px solid #bdc3c7;
-    padding-bottom: 8px;
+    text-align: left;
 }
 
 h4 {
     color: #495057;
-    margin-top: 20px;
+    margin: 20px 0 0 0;
+    padding: 0 0 6px 0;
     font-size: 1.2em;
     font-weight: 500;
     border-bottom: 1px solid #dee2e6;
-    padding-bottom: 6px;
+    text-align: left;
 }
 
 h5 {
@@ -1146,6 +1121,133 @@ a:hover {
     font-size: 1.1em;
     font-weight: 600;
 }
+
+/* Question section styles for evaluation tasks - moved to later section */
+
+.question-section h4 {
+    color: #495057;
+    margin: 0 0 15px 0;
+    font-size: 1.1em;
+    font-weight: 600;
+    border-bottom: 1px solid #dee2e6;
+    padding-bottom: 8px;
+}
+
+/* Question content layout for side-by-side display */
+.question-content {
+    display: flex;
+    gap: 20px;
+    margin-top: 20px; /* Increased margin from title */
+}
+
+.question-left {
+    flex: 2;
+    min-width: 0; /* Prevent overflow */
+    overflow: hidden; /* Contain content */
+    position: relative; /* For z-index context */
+}
+
+.question-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    min-width: 0; /* Prevent overflow */
+    overflow: hidden; /* Contain content */
+    position: relative; /* For z-index context */
+}
+
+/* Fix expandable content to prevent container expansion */
+.block.expandable .content-text {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    max-width: 100%;
+}
+
+.block.expandable[data-expanded='true'] .content-text {
+    max-height: 300px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    word-break: break-word;
+    white-space: pre-wrap;
+}
+
+
+
+/* Add spacing for turn sections */
+.turn-split {
+    margin-top: 40px; /* Much more space between turns */
+    margin-bottom: 30px; /* Space after each turn */
+    clear: both; /* Clear any floating elements */
+}
+
+.turn-split:first-child {
+    margin-top: 20px; /* Less space for first turn */
+}
+
+.turn-split:first-child h3 {
+    margin-top: 5px; /* Less top margin for first turn title */
+}
+
+/* Ensure turn content doesn't overflow, but allow hover expansion */
+.turn-content {
+    overflow: hidden;
+    position: relative;
+}
+
+.turn-left {
+    overflow: hidden;
+    position: relative;
+}
+
+
+/* Evaluation task specific styling */
+.eval-task {
+    margin-top: 50px; /* Much more space for evaluation sections */
+    margin-bottom: 40px; /* Space after evaluation sections */
+    clear: both; /* Clear any floating elements */
+}
+
+.eval-task h3 {
+    margin: 0 0 30px 0; /* Remove top margin, increase bottom */
+    padding: 20px 0; /* More padding around evaluation title */
+    border-bottom: 2px solid #2196f3;
+    color: #1565c0;
+    font-size: 1.4em; /* Larger font for evaluation titles */
+    font-weight: 600;
+    line-height: 1.4; /* Better line height */
+    word-wrap: break-word; /* Allow title to wrap if needed */
+    overflow-wrap: break-word;
+}
+
+/* Question section improvements */
+.question-section {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    margin: 20px 0; /* Increased margin between questions */
+    padding: 18px; /* Slightly more padding */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    overflow: hidden; /* Prevent content from breaking out */
+    position: relative;
+}
+
+/* Simple question section styling - no special hover effects */
+
+/* Responsive design for question layout */
+@media (max-width: 768px) {
+    .question-content {
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .question-left,
+    .question-right {
+        flex: 1;
+    }
+}
+
 """
 
 JAVASCRIPT_CODE = """

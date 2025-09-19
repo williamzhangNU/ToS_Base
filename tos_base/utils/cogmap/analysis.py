@@ -73,13 +73,13 @@ def calculate_cogmap_per_turn(env_data_list: List[Dict[str, Any]], mode: str = "
             turn_to_metrics[turn_idx].append(m)
 
     max_turn = max(turn_to_metrics.keys()) if turn_to_metrics else -1
-    per_turn_avg = [MapCogMetrics.average(turn_to_metrics[i]) if i in turn_to_metrics else MapCogMetrics.invalid() for i in range(max_turn + 1)]
+    per_turn_avg = [MapCogMetrics.average(turn_to_metrics[i]) if i in turn_to_metrics else MapCogMetrics.invalid() for i in range(max_turn)]
 
     return {
-        'dir': [float(m.dir) if m.valid else 0.0 for m in per_turn_avg],
-        'facing': [float(m.facing) if m.valid else 0.0 for m in per_turn_avg],
-        'pos': [float(m.pos) if m.valid else 0.0 for m in per_turn_avg],
-        'overall': [float(m.overall) if m.valid else 0.0 for m in per_turn_avg],
+        'dir': [float(m.dir) if m.valid else None for m in per_turn_avg],
+        'facing': [float(m.facing) if m.valid else None for m in per_turn_avg],
+        'pos': [float(m.pos) if m.valid else None for m in per_turn_avg],
+        'overall': [float(m.overall) if m.valid else None for m in per_turn_avg],
     }
 
 

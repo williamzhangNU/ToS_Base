@@ -20,6 +20,8 @@ def compare_on_common_subset(a: BaseRoom | None, b: BaseRoom | None, allow_scale
     if a is None or b is None:
         return MapCogMetrics.invalid()
     names_a = {o.name for o in a.objects}
+    if not names_a:
+        return MapCogMetrics(dir=1.0, facing=1.0, overall=1.0, pos=1.0)  # No objects in A, trivially perfect
     names_b = {o.name for o in b.objects}
     names = names_a & names_b
     if not names:
@@ -43,13 +45,17 @@ def rooms_vs_global_consistency(pred_rooms: Dict[str, BaseRoom], pred_global: Ba
     vals: List[MapCogMetrics] = []
     for rid, room_br in sorted(pred_rooms.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else kv[0]):
         gate_name = entry_gate_by_room.get(int(rid))
-        if not gate_name:
+        if gate_name:
+            g = next((gg for gg in room.gates if gg.name == gate_name), None)
+            if g is None:
+                continue
+            gate_pos = g.pos
+            gate_ori = g.get_ori_for_room(int(rid))
+        elif int(rid) == 1:
+            gate_pos = agent.init_pos
+            gate_ori = agent.init_ori
+        else:
             continue
-        g = next((gg for gg in room.gates if gg.name == gate_name), None)
-        if g is None:
-            continue
-        gate_pos = g.pos
-        gate_ori = g.get_ori_for_room(int(rid))
         room_in_initial = br_from_anchor_to_initial(room_br, gate_pos, gate_ori, agent)
         m = compare_on_common_subset(room_in_initial, pred_global, allow_scale=allow_scale, pos_norm_L=pos_norm_L)
         if m.valid:

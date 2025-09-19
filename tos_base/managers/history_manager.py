@@ -19,7 +19,7 @@ class HistoryManager:
     """
 
     def __init__(self, observation_config:Dict, model_config:Dict ,room_dict: Dict, agent_dict: Dict, output_dir:str,
-                 exp_override: bool = False, eval_override: bool = False, cogmap_override: bool = False, all_override: bool = False):
+                 exp_override: bool = False, eval_override: bool = False, cogmap_override: bool = False, all_override: bool = False, task_type: str = None):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.evaluation_turn_logs: Dict[str, Dict[str, Dict]] = {}
@@ -44,14 +44,11 @@ class HistoryManager:
         elif exp_override and observation_config['exp_type'] == 'active':
             if os.path.exists(self.output_dir):
                 shutil.rmtree(self.output_dir)
-        elif eval_override:
-            if os.path.exists(self.evaluation_path):
-                try:
-                    os.remove(self.evaluation_path)
-                except Exception:
-                    pass
 
         self._load()
+        if eval_override:
+            if task_type in self.evaluation_turn_logs:
+                self.evaluation_turn_logs[task_type] = {}
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(os.path.join(self.output_dir, "images"), exist_ok=True)
         if not os.path.exists(model_config_path):
@@ -280,8 +277,8 @@ class HistoryManager:
                     turn_log['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in turn_log['message_images']]
 
             # Process evaluation tasks
-            for task_questions in sample_data["evaluation_tasks"].values():
-                for question_data in task_questions.values():
+            for task in sample_data["evaluation_tasks"].values():
+                for question_data in task.values():
                     if question_data.get("room_image"):
                         question_data['room_image'] = os.path.relpath(question_data['room_image'], model_dir)
                     if question_data.get('message_images'):
