@@ -51,8 +51,10 @@ def compute_pos_sim(pred_room: BaseRoom, gt_room: BaseRoom, allow_scale: bool, p
     gt = {o.name: o for o in gt_room.objects}
     gt_names = sorted(gt.keys())
     matched = [n for n in gt_names if n in pred]
-    if len(matched) == 0 or len(gt_names) == 0:
+    if len(gt_names) == 0:
         return 1.0
+    elif len(matched) == 0:
+        return 0.0
     P1 = np.array([pred[n].pos for n in matched], dtype=float)
     P2 = np.array([gt[n].pos for n in matched], dtype=float)
     if allow_scale:
@@ -63,7 +65,7 @@ def compute_pos_sim(pred_room: BaseRoom, gt_room: BaseRoom, allow_scale: bool, p
     else:
         scale = 1.0
     rmse = np.sqrt(((P1 * scale - P2) ** 2).sum(axis=1).mean())
-    L = float(pos_norm_L or 0.0)
+    L = float(pos_norm_L or float(np.sqrt((P2 ** 2).sum(axis=1).mean())))
     base = float(np.exp(-rmse / L)) if L > 0 else 0.0
     coverage = float(len(matched)) / float(len(gt_names))
     return base * coverage

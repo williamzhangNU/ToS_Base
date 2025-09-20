@@ -13,7 +13,7 @@ def parse_llm_response(text: str, enable_think: bool = True) -> Tuple[str, str, 
     answer_match = re.search(answer_pattern, text, re.DOTALL)
 
     think_content = think_match.group(1).strip() if think_match else ""
-    answer_content = (answer_match.group(1).strip() if answer_match else text).strip()
+    answer_content = answer_match.group(1).strip() if answer_match else ""
 
     if not enable_think:
         return "", answer_content, bool(answer_content)

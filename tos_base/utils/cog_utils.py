@@ -107,11 +107,12 @@ def evaluate_cognitive_maps_from_turnlogs(
                         all_env_ids.append(env_id_counter)
                         env_id_counter += 1
 
-                # like false belief task
-                elif not turn_log['is_exploration_phase'] and turn_log.get('evaluation_log') and turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('action'):
-                    target_turn_idx = turn_idx
+                # only effective for false belief task
+                elif not turn_log['is_exploration_phase'] and 'falsebelief' in turn_log.get('evaluation_log', {}).get('task_type', '').lower():
+                    assert turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('action')
                     assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
-                    base_user = re.sub(r'## Evaluation Question.*', '', turn_log.get['user_message'],  flags=re.DOTALL) + turn_log['evaluation_log']['evaluation_data']['action']
+                    target_turn_idx = turn_idx
+                    base_user = re.sub(r'## Evaluation Question.*', '', turn_log['user_message'],  flags=re.DOTALL) + turn_log['evaluation_log']['evaluation_data']['action']
 
                     # Evaluation tasks: only global (correctness)
                     map_type = 'global'
@@ -175,12 +176,16 @@ def evaluate_cognitive_maps_from_turnlogs(
             cogmap_log = None
             if responses_by_type and turn_log.get('room_state') and turn_log.get('agent_state'):
                 # Reconstruct Room and Agent states from turn log
-                room_state = Room.from_dict(turn_log['room_state'])
-                agent_state = Agent.from_dict(turn_log['agent_state'])
-
-                # Get observed items
                 observed_items = turn_log['observed_items'] if env_config.get('exp_type') == 'active' else [obj.name for obj in room_state.all_objects]
 
+                if not turn_log.get('is_exploration_phase', True) and 'falsebelief' in turn_log.get('evaluation_log', {}).get('task_type', '').lower():
+                    responses_by_type['false_belief'] = responses_by_type['global']
+                    observed_items = [turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('kwargs', {}).get('rotated_object')]
+
+                room_state = Room.from_dict(turn_log['room_state'])
+                agent_state = Agent.from_dict(turn_log['agent_state'])
+                
+                # Get observed items
                 # Evaluate cognitive maps using selected responses
                 cogmap_log = cognitive_map_manager.evaluate_cogmaps(
                     responses_by_type,

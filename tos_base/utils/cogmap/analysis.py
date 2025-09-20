@@ -169,6 +169,16 @@ def get_last_exploration_cogmap(env_data: Dict[str, Any]) -> Optional[Dict[str, 
             return t.get('cogmap_log')
     return None
 
+def get_false_belief_metrics(env_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return the false belief accuracy if present."""
+    false_belief_metrics = []
+    eval_tasks = env_data.get('evaluation_tasks') or {}
+    for task_log in eval_tasks.values():
+        for question in task_log.values():
+            cogmap_log = question.get('cogmap_log')
+            if cogmap_log:
+                false_belief_metrics.append(cogmap_log['false_belief']['metrics'])
+    return false_belief_metrics
 
 def compute_correctness_aggregates(env_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
     vals = [compute_correctness_per_sample(s) for s in env_data_list]

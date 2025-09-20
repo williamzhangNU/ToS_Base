@@ -42,6 +42,7 @@ from ..utils.cogmap.analysis import (
     calculate_cogmap_per_turn,
     compute_evaluation_correctness_aggregates,
     get_last_exploration_cogmap,
+    get_false_belief_metrics,
     avg_nested_dicts,
 )
 
@@ -137,6 +138,7 @@ class CognitiveMapTurnLog:
     local_log: Optional[LocalCogMapTurnLog] = None
     rooms_log: Optional[RoomsCogMapTurnLog] = None
     relations_log: Optional[RelationsCogMapTurnLog] = None
+    false_belief_log: Optional[BaseCogMapTurnLog] = None
     consistency: Optional[ConsistencySummary] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -149,6 +151,8 @@ class CognitiveMapTurnLog:
             out["rooms"] = self.rooms_log.to_dict()
         if self.relations_log:
             out["relations"] = self.relations_log.to_dict()
+        if self.false_belief_log:
+            out["false_belief"] = self.false_belief_log.to_dict()
         if self.consistency:
             out["consistency"] = self.consistency.to_dict()
         return out
@@ -204,6 +208,11 @@ class CognitiveMapManager:
             full_global = transform_baseroom(self._baseroom_from_gt(gt_room, gt_agent), gt_agent.init_pos, gt_agent.init_ori)
             self._ensure_pos_norm_L(gt_room, gt_agent)
             return self._eval_global(pred_global_br, gt_global_br, full_global, assistant_response)
+        
+        if t == "false_belief":
+            pred_global_br = self._preprocess_predicted(json_dict, observed_set, visible_names, gt_room, gt_agent, map_type)
+            gt_global_br = self._build_gt_global_baseroom(gt_room, gt_agent, observed_set)
+            return self._eval_false_belief(pred_global_br, gt_global_br, assistant_response)
 
         if t == "local":
             pred_local_br = self._preprocess_predicted(json_dict, observed_set, visible_names, gt_room, gt_agent, map_type)
@@ -243,6 +252,33 @@ class CognitiveMapManager:
             gt_room_state_full=gt_room_state_full,
             gt_json_full=gt_json_full,
             metrics_full=metrics_full,
+        )
+
+    def _eval_false_belief(self, pred_global_br: BaseRoom, gt_global_br: BaseRoom, assistant_response: str) -> BaseCogMapTurnLog:
+        """Evaluate false belief task - check if one object in observed_items has correct orientation."""
+        # Create name-to-object mappings for comparison
+        pred_objects = {o.name: o for o in pred_global_br.objects}
+        gt_objects = {o.name: o for o in gt_global_br.objects}
+        metrics = BaseCogMetrics(0)
+        for name in gt_objects:
+            gt_obj = gt_objects[name]
+            pred_obj = pred_objects.get(name)
+
+            # Only check objects that have orientation
+            if gt_obj.has_orientation and pred_obj is not None:
+                if np.array_equal(pred_obj.ori, gt_obj.ori):
+                    metrics = BaseCogMetrics(1.0)  
+                    break
+ 
+        pred_json = self.baseroom_to_json(pred_global_br, include_gates=True)
+
+        return BaseCogMapTurnLog(
+            type="false_belief",
+            extraction_success=True,
+            original_response=assistant_response,
+            pred_json=pred_json,
+            pred_room_state=pred_global_br,
+            metrics=metrics,
         )
 
     def _eval_local(self, pred_local_br: BaseRoom, gt_local_br: BaseRoom, assistant_response: str) -> LocalCogMapTurnLog:
@@ -478,7 +514,7 @@ class CognitiveMapManager:
         # Use shared helper to find last exploration cogmap
         
         last = get_last_exploration_cogmap(env_data)
-
+        false_belief_metrics = get_false_belief_metrics(env_data)
         # Error: average local/global metrics over turns
         def _avg_maps(dicts: List[Dict[str, Any]], path: List[str]) -> MapCogMetrics:
             mats: List[MapCogMetrics] = []
@@ -547,9 +583,7 @@ class CognitiveMapManager:
                 'consistency': consistency,
             },
             'evaluation': {
-                'correctness': {
-                    'global_full': correctness['last_global_vs_gt_full']
-                }
+                'false_belief_acc': BaseCogMetrics.average([BaseCogMetrics.from_dict(m) for m in false_belief_metrics]).to_dict(),
             },
             'cogmap_update_per_turn': per_turn_update,
             'cogmap_full_per_turn': per_turn_full,
@@ -656,7 +690,7 @@ class CognitiveMapManager:
             if not isinstance(obj_info, dict):
                 continue
             position = obj_info.get('position')
-            if not isinstance(position, list) or len(position) != 2:
+            if not isinstance(position, list) or len(position) != 2 or not all(isinstance(x, (int, float, str)) for x in position):
                 continue
             pos = np.array([float(position[0]), float(position[1])])
             facing = obj_info.get('facing', None)
@@ -823,12 +857,10 @@ class CognitiveMapManager:
                     if not should_keep:
                         continue
                     name = preferred_key
-                # drop confidence
-                new_info = {k: v for k, v in info.items() if k != "confidence" and k != "origin"}
                 # normalize facing
-                if anchor_ori is not None and "facing" in new_info:
-                    new_info["facing"] = _norm_face_local(new_info["facing"], anchor_ori)
-                out[name] = new_info
+                if anchor_ori is not None and "facing" in info:
+                    info["facing"] = _norm_face_local(info["facing"], anchor_ori)
+                out[name] = info
             return out
 
         def _should_keep_key(key: str, keep_set: set) -> tuple[bool, str]:
@@ -850,6 +882,10 @@ class CognitiveMapManager:
             jd = _norm_map(jd, keep)
             return self._parse_section_to_baseroom(jd, "pred_global") or BaseRoom(objects=[], name="pred_global")
 
+        if map_type == "false_belief":
+            # keep all objects
+            jd = _norm_map(jd, observed)
+            return self._parse_section_to_baseroom(jd, "pred_false_belief") or BaseRoom(objects=[], name="pred_false_belief")
         # --- Local: drop origin + keep only visible objects ---
         if map_type == "local":
             if "objects" in jd:
@@ -941,8 +977,7 @@ def test_evaluate_cogmaps():
     with open(json_file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    # Select the second-to-last turn (index -2)
-    turn_log = data[-2]
+    turn_log = data[4]
 
     print(f"Selected turn number: {turn_log.get('turn_number', 'Unknown')}")
     print(f"Total turns available: {len(data)}")
