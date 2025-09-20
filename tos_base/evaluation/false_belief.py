@@ -92,6 +92,7 @@ class FalseBeliefDirectionPov(DirectionPov):
         self.eval_data.action = self.ACTION_TEMPLATE.format(observations=observations)
         self.eval_data.question = self.eval_data.action + question
         self.eval_data.id = hash(self.eval_data.question)
+        self.eval_data.kwargs = {"rotated_object": anchor.name, "rotation_degrees": deg}
         return self.eval_data.question
 
 # class FalseBeliefEvaluationTask(BaseEvaluationTask):

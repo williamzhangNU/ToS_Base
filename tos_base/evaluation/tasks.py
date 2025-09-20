@@ -26,6 +26,7 @@ class EvaluationData:
     task_type: str
     action: str = None
     choices: List[str] = None
+    kwargs: Dict = None
 
     def __post_init__(self):
         # Lazy import to avoid circular dependency during module import
@@ -48,6 +49,7 @@ class EvaluationData:
             'answer': self.answer,
             'task_type': self.task_type,
             'choices': self.choices,
+            'kwargs': self.kwargs,
         }
 
     @classmethod
@@ -72,7 +74,8 @@ class BaseEvaluationTask(ABC):
             answer="",
             action=None,
             task_type=self.__class__.__name__,
-            choices=[]
+            choices=[],
+            kwargs={},
         )
 
     @property

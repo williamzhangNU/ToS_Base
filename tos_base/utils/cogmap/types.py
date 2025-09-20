@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+import numpy as np
 
 
 @dataclass
@@ -14,7 +15,24 @@ class BaseCogMetrics:
     def invalid(cls):
         return cls(overall=0.0, valid=False)
 
-
+    @staticmethod
+    def from_dict(d: Dict[str, float]) -> 'BaseCogMetrics':
+        if not isinstance(d, dict) or not d:
+            return BaseCogMetrics.invalid()
+        return BaseCogMetrics(
+            overall=float(d.get('overall', 0.0)),
+            valid=True,
+        )
+    @staticmethod
+    def average(items: List['BaseCogMetrics']) -> 'BaseCogMetrics':
+        valid_items = [i for i in items if isinstance(i, BaseCogMetrics) and i.valid]
+        if not valid_items:
+            return BaseCogMetrics.invalid()
+        return BaseCogMetrics(
+            overall=float(np.mean([i.overall for i in valid_items])),
+            valid=True,
+        )
+    
 @dataclass
 class MapCogMetrics(BaseCogMetrics):
     dir: float = 0.0
@@ -66,7 +84,6 @@ class MapCogMetrics(BaseCogMetrics):
         valid_items = [i for i in items if isinstance(i, MapCogMetrics) and i.valid]
         if not valid_items:
             return MapCogMetrics.invalid()
-        import numpy as np
         return MapCogMetrics(
             dir=float(np.mean([i.dir for i in valid_items])),
             facing=float(np.mean([i.facing for i in valid_items])),
