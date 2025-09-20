@@ -19,6 +19,7 @@ class ExplorationTurnLog:
     edge_coverage: float
     step: int
     action_counts: Dict[str, int]
+    is_action_fail: bool = False
     room_state: Optional['Room'] = None
     agent_state: Optional['Agent'] = None
     information_gain: Optional[float] = None  # Information gain (uses exploration quality metric)
@@ -29,6 +30,7 @@ class ExplorationTurnLog:
             "node_coverage": self.node_coverage,
             "edge_coverage": self.edge_coverage,
             "step": self.step,
+            "is_action_fail": self.is_action_fail,
             "action_counts": dict(self.action_counts),
             "room_state": self.room_state.to_dict() if self.room_state else {},
             "agent_state": self.agent_state.to_dict() if self.agent_state else {},
@@ -128,42 +130,38 @@ class ExplorationManager:
         assert result.success, f"Action {action} with kwargs {kwargs} failed: {result.message}"
         return result
 
-    def execute_action_sequence(self, action_sequence: ActionSequence) -> Tuple[Dict[str, Any], List[ActionResult]]:
+    def execute_action_sequence(self, action_sequence: ActionSequence) -> List[ActionResult]:
         """
         Execute a sequence of motion actions followed by a final action.
         If any motion action fails, execute an observe action and end.
-        Returns info and list of action results.
+        Returns list of action results.
         """
         assert action_sequence.final_action, "Action sequence requires a final action."
 
-        info = {}
         action_results = []
         
         # Execute motion actions
         for action in action_sequence.motion_actions:
             result = self._execute_and_update(action)
             action_results.append(result)
-            info.update(result.data)
             if not result.success:
                 # On failure, perform an observe action and end
                 obs_result = self._execute_and_update(ObserveAction())
                 obs_result.message = f"Subsequent actions are skipped due to failure, instead an observe is executed: {obs_result.message}"
                 action_results.append(obs_result)
                 assert obs_result.success, f"Observe action failed: {obs_result.message}"
-                info.update(obs_result.data)
-                self._log_exploration(action_sequence, action_results)
-                return info, action_results
+                self._log_exploration(action_results, is_action_fail=True)
+                return action_results
 
         # Execute final action
         final_action = action_sequence.final_action
         result = self._execute_and_update(final_action)
         action_results.append(result)
         assert result.success, f"Final action {final_action} failed: {result.message}"
-        info.update(result.data)
 
         # Always log before return
-        self._log_exploration(action_sequence, action_results)
-        return info, action_results
+        self._log_exploration(action_results)
+        return action_results
     
     def finish_exploration(self, return_to_origin: bool = True) -> Room:
         """Complete exploration and return final room state."""
@@ -206,6 +204,8 @@ class ExplorationManager:
             'avg_edge_coverage': _avg_key('last_edge_coverage'),
             'avg_exploration_steps': _avg_key('n_exploration_steps'),
             'avg_action_cost': _avg_key('action_cost'),
+            'avg_action_fail_ratio': _avg_key('action_fail_ratio'),
+            'avg_valid_action_ratio': _avg_key('valid_action_ratio'),
             'avg_final_information_gain': _avg_key('final_information_gain'),
             'infogain_per_turn': avg_lists([p.get('information_gain_per_turn') or [] for p in pre]),
         }
@@ -259,6 +259,7 @@ class ExplorationManager:
         - action counts
         - per-turn information gain and final information gain
         - exploration steps
+        - is_action_fail and is_valid_action proportions
         """
         env_turn_logs = env_data.get('env_turn_logs', [])
         last_exp = None
@@ -307,6 +308,25 @@ class ExplorationManager:
                     if ig is not None:
                         info_gain_list.append(ig)
         final_infogain = (info_gain_list[-1] if info_gain_list else 0.0)
+
+        # Calculate proportions of is_action_fail and is_valid_action across all turns
+        total_turns = len(env_turn_logs)
+        action_fail_count = 0
+        valid_action_count = 0
+
+        for t in env_turn_logs:
+            # Count is_action_fail from exploration_log
+            if t.get('is_exploration_phase', False) and t.get('exploration_log'):
+                if t['exploration_log'].get('is_action_fail', False):
+                    action_fail_count += 1
+
+            # Count is_valid_action from info
+            if t.get('info', {}).get('is_valid_action', True):  # Default to True if not present
+                valid_action_count += 1
+
+        action_fail_ratio = action_fail_count / total_turns if total_turns > 0 else 0.0
+        valid_action_ratio = valid_action_count / total_turns if total_turns > 0 else 0.0
+
         return {
             'last_node_coverage': node_cov,
             'last_edge_coverage': edge_cov,
@@ -315,6 +335,8 @@ class ExplorationManager:
             'action_cost': action_cost,
             'information_gain_per_turn': info_gain_list or [],
             'final_information_gain': final_infogain,
+            'action_fail_ratio': action_fail_ratio,
+            'valid_action_ratio': valid_action_ratio,
         }
     
     # No passive history generation here; proxies produce text histories directly.
@@ -361,7 +383,7 @@ class ExplorationManager:
 
 
     
-    def _log_exploration(self, action_sequence: ActionSequence, action_results: List['ActionResult']) -> None:
+    def _log_exploration(self, action_results: List['ActionResult'], is_action_fail = False) -> None:
         """Log exploration history and efficiency."""
         # First ingest latest observations, then compute info gain as exploration quality
         if self.enable_information_gain:
@@ -378,6 +400,7 @@ class ExplorationManager:
             node_coverage=self.exp_summary.get('node_coverage', 0.0),
             edge_coverage=self.exp_summary.get('edge_coverage', 0.0),
             step=step_idx,
+            is_action_fail=is_action_fail,
             action_counts=dict(self.exp_summary.get('action_counts', {})),
             room_state=self.exploration_room.copy(),
             agent_state=self.agent.copy(),

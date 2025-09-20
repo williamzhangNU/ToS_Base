@@ -493,11 +493,11 @@ if __name__ == "__main__":
 
     # Observe
     seq = ActionSequence.parse("Actions: [Observe()]")
-    info, results = mgr.execute_action_sequence(seq)
+    results = mgr.execute_action_sequence(seq)
     print('Observe ->', results[0].message)
 
     # Query (initial-frame coordinates)
     seq = ActionSequence.parse("Actions: [Query(table)]")
-    info, results = mgr.execute_action_sequence(seq)
+    results = mgr.execute_action_sequence(seq)
     print('Query ->', "; ".join(r.message for r in results))
     print('Counts:', mgr.action_counts, 'Cost:', mgr.action_cost)

@@ -44,6 +44,7 @@ class EvaluationData:
         return {
             'id': self.id,
             'question': self.question,
+            'action': self.action,
             'answer': self.answer,
             'task_type': self.task_type,
             'choices': self.choices,

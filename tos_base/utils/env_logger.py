@@ -34,7 +34,6 @@ class EnvTurnLog:
     room_image: Optional[str] = None
     message_images: List[str] = field(default_factory=list)
     observed_items: List[str] = field(default_factory=list)
-    cogmap_response: Optional[str] = None
     info: Dict[str, Any] = field(default_factory=dict)
 
     
@@ -45,7 +44,6 @@ class EnvTurnLog:
             "assistant_raw_message": self.assistant_raw_message,
             "assistant_think_message": self.assistant_think_message,
             "assistant_parsed_message": self.assistant_parsed_message,
-            "cogmap_response": self.cogmap_response,
             "is_exploration_phase": self.is_exploration_phase,
             "is_last_exp": self.is_last_exp,
             "exploration_log": self.exploration_log.to_dict() if self.exploration_log else {},

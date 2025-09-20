@@ -474,6 +474,7 @@ class HTMLGenerator:
             metrics.update({
                 "node_coverage": exp_log.get('node_coverage'),
                 "edge_coverage": exp_log.get('edge_coverage'),
+                "is_action_fail": exp_log.get('is_action_fail'),
                 "step": exp_log.get('step'),
                 "action_counts": exp_log.get('action_counts'),
                 "information_gain": exp_log.get('information_gain')
@@ -591,7 +592,9 @@ class HTMLGenerator:
                         self._render_expandable_block(f, eval_log['assistant_think_message'], think_id, "🤔 Assistant Thinking", "think")
                     
                     self._render_simple_block(f, eval_log.get('assistant_parsed_message', ''), "💬 Assistant Answer", "answer")
-
+                    if eval_log.get('cogmap_log'):
+                        self._render_cogmap_responses(f, eval_log['cogmap_log'], page_idx, t_idx)
+                        self._render_cogmap_metrics(f, eval_log['cogmap_log'], page_idx, t_idx)
                     # Display evaluation results
                     if eval_log.get('evaluation_log'):
                         eval_info = eval_log['evaluation_log']

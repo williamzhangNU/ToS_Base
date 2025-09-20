@@ -52,30 +52,23 @@ class EvaluationManager:
     }
     
     def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent, history_manager=None, seed: int | None = None):
-        # Expand tasks according to 'num' and exclude already completed ones (if history provided)
+        # Take only the first task if count allows
         self.history_manager = history_manager
-        expanded: List[Dict[str, Any]] = []
-        counts = self.history_manager.get_eval_counts() if self.history_manager else {}
-        for spec in eval_tasks:
+        self.eval_tasks = []
+        if eval_tasks:
+            spec = eval_tasks[0]
             ttype = spec['task_type']
-            num = int(spec.get('num', 1))
+            num = int(spec.pop('num', 1))
+
+            counts = self.history_manager.get_eval_counts() if self.history_manager else {}
             done_count = 0
             if counts:
-                # use class name keys in history_manager (DirectionEvaluationTask etc.)
-                # but spec uses short name; map via EvalTaskType
-                try:
-                    class_name = EvalTaskType.from_short_name(ttype).class_name
-                except Exception:
-                    class_name = ttype
+                class_name = EvalTaskType.from_short_name(ttype).class_name
                 done_count = counts.get(class_name, 0)
-            remaining = max(0, num - done_count)
-            for _ in range(remaining):
-                expanded.append({'task_type': ttype})
 
-        self.eval_tasks = expanded
+            if num > done_count:
+                self.eval_tasks = [spec]
         self.np_random = np_random
-        self.room = room.copy()
-        self.agent = agent.copy()
         self.results = []
         self.turn_logs: List[EvaluationTurnLog] = []
         self.seed = seed
@@ -88,7 +81,7 @@ class EvaluationManager:
             task_rng = np.random.default_rng(
                 (int(self.seed) + idx * 1000003) % (2**32)
             ) if self.seed is not None else np_random
-            task = EvalTaskType.create_task(task_type, task_rng, room, agent, {}, history_manager)
+            task = EvalTaskType.create_task(task_type, task_rng, room.copy(), agent.copy(), {}, history_manager)
             self.tasks.append(task)
             self.results.append({
                 "task_type": task.__class__.__name__,
@@ -124,7 +117,7 @@ class EvaluationManager:
             user_answer=answer,
             is_correct=correct,
             room_state=task.room,
-            agent_state=self.agent,
+            agent_state=task.agent,
             evaluation_info=info,
             evaluation_data=task.eval_data
         )

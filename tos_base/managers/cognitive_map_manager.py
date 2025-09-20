@@ -656,7 +656,7 @@ class CognitiveMapManager:
             if not isinstance(obj_info, dict):
                 continue
             position = obj_info.get('position')
-            if not isinstance(position, list) or len(position) != 2:
+            if not isinstance(position, list) or len(position) != 2 or not all(isinstance(x, (int, float, str)) for x in position):
                 continue
             pos = np.array([float(position[0]), float(position[1])])
             facing = obj_info.get('facing', None)
@@ -823,12 +823,10 @@ class CognitiveMapManager:
                     if not should_keep:
                         continue
                     name = preferred_key
-                # drop confidence
-                new_info = {k: v for k, v in info.items() if k != "confidence" and k != "origin"}
                 # normalize facing
-                if anchor_ori is not None and "facing" in new_info:
-                    new_info["facing"] = _norm_face_local(new_info["facing"], anchor_ori)
-                out[name] = new_info
+                if anchor_ori is not None and "facing" in info:
+                    info["facing"] = _norm_face_local(info["facing"], anchor_ori)
+                out[name] = info
             return out
 
         def _should_keep_key(key: str, keep_set: set) -> tuple[bool, str]:
@@ -941,8 +939,7 @@ def test_evaluate_cogmaps():
     with open(json_file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    # Select the second-to-last turn (index -2)
-    turn_log = data[-2]
+    turn_log = data[4]
 
     print(f"Selected turn number: {turn_log.get('turn_number', 'Unknown')}")
     print(f"Total turns available: {len(data)}")
