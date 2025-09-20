@@ -11,6 +11,13 @@ from .. import (
     ExplorationManager,
     CognitiveMapManager,
 )
+
+# -------- Filenames (constants) --------
+EXPLORATION_LOG_BASENAME = "exploration_turn_logs.json"
+EVALUATION_LOG_BASENAME = "evaluation_turn_logs.json"
+CONFIG_BASENAME = "config.json"
+METRICS_BASENAME = "metrics.json"
+IMAGES_DIRNAME = "images"
 class HistoryManager:
     """Simple conversation history manager, one history manager for one run.
     Store only env turn logs in a single JSON file
@@ -34,8 +41,10 @@ class HistoryManager:
         model_config_path = os.path.join(self.model_path, "model_config.json")
         if observation_config['exp_type'] == 'passive':
             self.output_dir = os.path.join(self.output_dir, observation_config["proxy_agent"])
-        self.exploration_path = os.path.join(self.output_dir, "exploration_turn_logs.json")
-        self.evaluation_path = os.path.join(self.output_dir, "evaluation_turn_logs.json")
+        self.exploration_path = os.path.join(self.output_dir, EXPLORATION_LOG_BASENAME)
+        self.evaluation_path = os.path.join(self.output_dir, EVALUATION_LOG_BASENAME)
+        self.config_path = os.path.join(self.output_dir, CONFIG_BASENAME)
+        self.metrics_path = os.path.join(self.output_dir, METRICS_BASENAME)
 
         # Apply granular overrides
         if all_override:
@@ -50,10 +59,13 @@ class HistoryManager:
             if task_type in self.evaluation_turn_logs:
                 self.evaluation_turn_logs[task_type] = {}
         os.makedirs(self.output_dir, exist_ok=True)
-        os.makedirs(os.path.join(self.output_dir, "images"), exist_ok=True)
+        os.makedirs(os.path.join(self.output_dir, IMAGES_DIRNAME), exist_ok=True)
         if not os.path.exists(model_config_path):
             with open(model_config_path, "w") as f:
                 json.dump(model_config, f, ensure_ascii=False, indent=2)
+
+        # Save per-sample config/meta for convenience
+        self._write_config(observation_config, model_config, room_dict, agent_dict)
 
 
     def is_history_exist(self):
@@ -81,6 +93,10 @@ class HistoryManager:
                 json.dump(self.exploration_turn_logs, f, ensure_ascii=False, indent=2)
         with open(self.evaluation_path, "w") as f:
             json.dump(self.evaluation_turn_logs, f, ensure_ascii=False, indent=2)
+        # Also compute and save metrics for this sample
+        metrics = self._compute_sample_metrics()
+        with open(self.metrics_path, "w") as f:
+            json.dump(metrics, f, ensure_ascii=False, indent=2)
 
 
     
@@ -92,7 +108,7 @@ class HistoryManager:
         if turn_log['is_exploration_phase']:
             assert not self.is_history_exist()
             if turn_log['room_state'] and turn_log['agent_state']:
-                img_path = os.path.join(self.output_dir, "images", f"room_turn_{turn_log['turn_number']}.png")
+                img_path = os.path.join(self.output_dir, IMAGES_DIRNAME, f"room_turn_{turn_log['turn_number']}.png")
                 RoomPlotter.plot(Room.from_dict(turn_log['room_state']), Agent.from_dict(turn_log['agent_state']), mode='img', save_path=img_path)
                 turn_log['room_image'] = img_path
             #invalid
@@ -104,7 +120,7 @@ class HistoryManager:
             task_type = turn_log['evaluation_log']['task_type']
             question_id = turn_log['evaluation_log']['evaluation_data']['id']
 
-            img_path = os.path.join(self.output_dir, "images", f"room_{task_type}_{question_id}.png")
+            img_path = os.path.join(self.output_dir, IMAGES_DIRNAME, f"room_{task_type}_{question_id}.png")
             RoomPlotter.plot(Room.from_dict(turn_log['room_state']), Agent.from_dict(turn_log['agent_state']), mode='img', save_path=img_path)
             turn_log['room_image'] = img_path
 
@@ -192,7 +208,7 @@ class HistoryManager:
             # Collect subdirectories containing log files
             subdirs: List[str] = []
             for root, _, files in os.walk(sample_path):
-                if "exploration_turn_logs.json" in files or "evaluation_turn_logs.json" in files:
+                if EXPLORATION_LOG_BASENAME in files or EVALUATION_LOG_BASENAME in files:
                     subdirs.append(root)
 
             # Skip if subdirs is empty (invalid sample)
@@ -245,13 +261,17 @@ class HistoryManager:
     @staticmethod
     def _load_sample_data(combo_path: str, sample_key: str, save_images: bool, model_dir: str) -> Optional[Dict]:
         """Load data from a single sample's combination directory"""
-        exploration_file = os.path.join(combo_path, "exploration_turn_logs.json")
-        evaluation_file = os.path.join(combo_path, "evaluation_turn_logs.json")
+        exploration_file = os.path.join(combo_path, EXPLORATION_LOG_BASENAME)
+        evaluation_file = os.path.join(combo_path, EVALUATION_LOG_BASENAME)
+        config_file = os.path.join(combo_path, CONFIG_BASENAME)
+        metrics_file = os.path.join(combo_path, METRICS_BASENAME)
 
         sample_data = {
             "sample_id": sample_key,
             "env_turn_logs": [],  # Only exploration turn logs
             "evaluation_tasks": {},  # Separate storage for evaluation tasks
+            "config": {},
+            "metrics": {},
         }
 
         # Load exploration turn logs
@@ -266,6 +286,14 @@ class HistoryManager:
                 evaluation_logs = json.load(f)
             # Store each evaluation task separately
             sample_data["evaluation_tasks"] = evaluation_logs if evaluation_logs else {}
+
+        # Load config and metrics if present
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                sample_data["config"] = json.load(f)
+        if os.path.exists(metrics_file):
+            with open(metrics_file, 'r') as f:
+                sample_data["metrics"] = json.load(f)
 
         # Process image paths if save_images is enabled
         if save_images:
@@ -285,4 +313,26 @@ class HistoryManager:
                         question_data['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in question_data['message_images']]
 
         return sample_data if sample_data["env_turn_logs"] or sample_data["evaluation_tasks"] else None
+
+    # --------- Helpers: write config and metrics ---------
+    def _write_config(self, observation_config: Dict, model_config: Dict, room_dict: Dict, agent_dict: Dict) -> None:
+        cfg = {
+            "observation_config": observation_config,
+            "model_config": model_config,
+            "room_dict": room_dict,
+            "agent_dict": agent_dict,
+        }
+        with open(self.config_path, "w") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+    def _compute_sample_metrics(self) -> Dict:
+        env_data = {
+            "env_turn_logs": self.exploration_turn_logs,
+            "evaluation_tasks": self.evaluation_turn_logs,
+        }
+        return {
+            "exploration": ExplorationManager.aggregate_per_sample(env_data),
+            "evaluation": EvaluationManager.aggregate_per_sample(env_data),
+            "cogmap": CognitiveMapManager.aggregate_per_sample(env_data, exp_type=self.exp_type),
+        }
 

@@ -3,6 +3,7 @@ Simple image handler for spatial environments
 """
 import os
 import json
+import re
 import numpy as np
 from typing import Dict, Union
 from PIL import Image
@@ -31,10 +32,14 @@ class ImageHandler:
         self.name_2_cam_id['agent'] = 'agent'
     
     def _load_data(self, base_dir: str, seed: int = None) -> tuple:
-        """Load JSON data from selected subdirectory."""
-        subdirs = sorted([d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))])
-        data_idx = (seed % len(subdirs)) if seed is not None else np.random.randint(0, len(subdirs))
-        image_dir = os.path.join(base_dir, subdirs[data_idx])
+        """Load JSON data from a 'runNN' subdirectory (sorted by NN)."""
+        subdirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+        runs = [d for d in subdirs if re.fullmatch(r"run(\d+)", d)]
+        assert runs, "No runNN folders found"
+        runs.sort(key=lambda d: int(re.match(r"run(\d+)", d).group(1)))
+        idx = (seed if seed is not None else np.random.randint(0, len(runs))) % len(runs)
+        image_dir = os.path.join(base_dir, runs[idx])
+        print(f'[DEBUG] Loading data from {image_dir}')
         
         with open(os.path.join(image_dir, "meta_data.json"), 'r') as f:
             json_data = json.load(f)

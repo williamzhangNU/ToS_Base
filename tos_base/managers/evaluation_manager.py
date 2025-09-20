@@ -162,52 +162,59 @@ class EvaluationManager:
         """If no tasks to run, return True to signal finished."""
         return len(self.tasks) == 0
     
+    # ---------------- Aggregations ----------------
     @staticmethod
-    def aggregate_group_performance(env_data_list: List[Dict] = None) -> Dict[str, Any]:
-        """Calculate evaluation performance for a group from env_data_list."""
-        if not env_data_list:
-            return {"avg_accuracy": 0.0, "avg_correct_rate": 0.0, "avg_incorrect_rate": 0.0, "avg_unanswered_rate": 0.0}
-
-        # Calculate metrics from evaluation tasks of each sample
-        task_metrics = {}  # task_type -> {"total": count, "correct": count}
-
-        for env_data in env_data_list:
-            evaluation_tasks = env_data.get('evaluation_tasks', {})
-
-            for task_type, task in evaluation_tasks.items():
-                if task_type not in task_metrics:
-                    task_metrics[task_type] = {"total": 0, "correct": 0}
-                # Check if the evaluation task was answered correctly
-                for task_data in task.values():
-                    task_metrics[task_type]["total"] += 1
-                    if task_data['evaluation_log']['is_correct']:
-                        task_metrics[task_type]["correct"] += 1
-
-        # Calculate overall metrics
-        total_tasks = sum(metrics["total"] for metrics in task_metrics.values())
-        total_correct = sum(metrics["correct"] for metrics in task_metrics.values())
-
-        if total_tasks == 0:
-            return {"avg_accuracy": 0.0, "avg_correct_rate": 0.0, "avg_incorrect_rate": 0.0, "avg_unanswered_rate": 0.0, "task_metrics": {}}
-
-        total_incorrect = total_tasks - total_correct
-
-        result = {
-            "avg_accuracy": total_correct / total_tasks,
-            "avg_correct_rate": total_correct / total_tasks,
-            "avg_incorrect_rate": total_incorrect / total_tasks,
-            "task_metrics": {}
+    def aggregate_per_sample(env_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Aggregate evaluation metrics within one sample (counts and accuracy)."""
+        tasks = env_data.get('evaluation_tasks') or {}
+        per_task = {}
+        for task_type, questions in tasks.items():
+            n_total = len(questions)
+            n_correct = sum(1 for q in questions.values() if q.get('evaluation_log', {}).get('is_correct'))
+            per_task[task_type] = {
+                'n_total': n_total,
+                'n_correct': n_correct,
+                'avg_accuracy': (n_correct / n_total) if n_total else 0.0,
+            }
+        total = sum(v['n_total'] for v in per_task.values())
+        correct = sum(v['n_correct'] for v in per_task.values())
+        return {
+            'overall': {'n_total': total, 'n_correct': correct, 'avg_accuracy': (correct / total) if total else 0.0},
+            'per_task': per_task,
         }
 
-        # Add per-task metrics
-        for task_type, metrics in task_metrics.items():
-            result["task_metrics"][task_type] = {
-                "accuracy": metrics["correct"] / metrics["total"] if metrics["total"] > 0 else 0.0,
-                "total_count": metrics["total"],
-                "correct_count": metrics["correct"]
-            }
+    @staticmethod
+    def aggregate_group_performance(env_data_list: List[Dict] = None) -> Dict[str, Any]:
+        """Group aggregation; use precomputed per-sample metrics or reuse per-sample aggregation."""
+        if not env_data_list:
+            return {'avg_accuracy': 0.0, 'task_metrics': {}}
 
-        return result
+        # Ensure per-sample metrics exist on each env_data
+        for s in env_data_list:
+            metrics = s.get('metrics')
+            if metrics is None or not isinstance(metrics, dict):
+                s['metrics'] = {}
+                metrics = s['metrics']
+            ev = metrics.get('evaluation')
+            if not isinstance(ev, dict) or not ev:
+                metrics['evaluation'] = EvaluationManager.aggregate_per_sample(s)
+
+        per_samples = [((s.get('metrics') or {}).get('evaluation') or {}) for s in env_data_list]
+
+        total_count = sum(int(m['overall'].get('n_total', 0)) for m in per_samples)
+        total_correct = sum(int(m['overall'].get('n_correct', 0)) for m in per_samples)
+        agg_task: Dict[str, Dict[str, int]] = {}
+        for m in per_samples:
+            for t, tm in (m.get('per_task') or {}).items():
+                d = agg_task.setdefault(t, {'total': 0, 'correct': 0})
+                d['total'] += int(tm.get('n_total', 0))
+                d['correct'] += int(tm.get('n_correct', 0))
+        task_metrics = {t: {
+            'accuracy': (v['correct'] / v['total']) if v['total'] else 0.0,
+            'total_count': v['total'],
+            'correct_count': v['correct'],
+        } for t, v in agg_task.items()}
+        return {'avg_accuracy': (total_correct / total_count) if total_count else 0.0, 'task_metrics': task_metrics}
     
     def reset(self):
         """Reset to start."""

@@ -4,6 +4,8 @@ from typing import List, Tuple, Dict, Any, Optional, Set
 import numpy as np
 from dataclasses import dataclass
 from collections import defaultdict
+from ..utils.cogmap.analysis import avg_lists
+import random
 
 from ..core.object import Agent
 from ..actions import *
@@ -20,6 +22,7 @@ class ExplorationTurnLog:
     room_state: Optional['Room'] = None
     agent_state: Optional['Agent'] = None
     information_gain: Optional[float] = None  # Information gain (uses exploration quality metric)
+    possible_positions: Optional[Dict[str, List[List[int]]]] = None  # Sampled possible positions per object
 
     def to_dict(self):
         return {
@@ -30,6 +33,7 @@ class ExplorationTurnLog:
             "room_state": self.room_state.to_dict() if self.room_state else {},
             "agent_state": self.agent_state.to_dict() if self.agent_state else {},
             "information_gain": self.information_gain or 0.0,
+            "possible_positions": self.possible_positions or {},
         }
 
 class ExplorationManager:
@@ -40,7 +44,8 @@ class ExplorationManager:
     - Graph-related metrics default to safe zeros.
     """
     DEFAULT_EXP_SUMMARY = {"node_coverage": 0.0, "edge_coverage": 0.0, "n_exploration_steps": 0, "action_counts": {}}
-    
+    MAX_POSSIBLE_POSITIONS_PER_OBJECT: int = 200
+    DEFAULT_ACTION_COUNTS = {'move': 0, 'rotate': 0, 'return': 0, 'observe': 0, 'term': 0, 'forced_term': 0, 'query': 0}
     def __init__(self, room: Room, agent: Agent, enable_information_gain: bool = False, grid_size: int | None = None):
         self.base_room = room.copy()
         self.exploration_room = room.copy()
@@ -76,7 +81,7 @@ class ExplorationManager:
         self.known_edges: Set[frozenset] = set()
 
         # Action counts and costs
-        self.action_counts: Dict[str, int] = {}
+        self.action_counts: Dict[str, int] = self.DEFAULT_ACTION_COUNTS.copy()
         self.action_cost: int = 0
         # Observed names (objects and gates) to gate Move() eligibility
         self.observed_items: Set[str] = set()
@@ -174,48 +179,47 @@ class ExplorationManager:
     
     @staticmethod
     def aggregate_group_performance(env_data_list: List[Dict] = None) -> Dict[str, Any]:
-        """Calculate exploration performance for a group from env_data_list."""
+        """Calculate exploration performance for a group from env_data_list.
+        Prefer using precomputed per-sample metrics if present.
+        """
         if not env_data_list:
-            return {"avg_coverage": 0.0, "avg_exploration_steps": 0.0, "avg_node_coverage": 0.0, "avg_edge_coverage": 0.0}
+            return {}
 
-        # Calculate metrics from last exploration log of each sample
-        node_coverages = []
-        edge_coverages = []
-        exploration_steps = []
+        # Ensure per-sample metrics exist on each env_data
+        for s in env_data_list:
+            metrics = s.get('metrics')
+            if metrics is None or not isinstance(metrics, dict):
+                s['metrics'] = {}
+                metrics = s['metrics']
+            exp = metrics.get('exploration')
+            if not isinstance(exp, dict) or not exp:
+                metrics['exploration'] = ExplorationManager.aggregate_per_sample(s)
 
-        for env_data in env_data_list:
-            env_turn_logs = env_data.get('env_turn_logs', [])
+        pre = [((s.get('metrics') or {}).get('exploration') or {}) for s in env_data_list]
 
-            # Find the last exploration turn that has actual exploration log data
-            last_exploration_log = None
-            for turn_log in reversed(env_turn_logs):
-                if turn_log.get('is_exploration_phase', False):
-                    exploration_log = turn_log.get('exploration_log', {})
-                    if exploration_log:  # Only use if exploration_log is not empty
-                        last_exploration_log = exploration_log
-                        break
+        def _avg_key(k: str) -> float:
+            vals = [p.get(k) for p in pre if isinstance(p.get(k), (int, float))]
+            return (sum(vals) / len(vals)) if vals else 0.0
 
-            if last_exploration_log:
-                node_coverages.append(last_exploration_log.get('node_coverage', 0.0))
-                edge_coverages.append(last_exploration_log.get('edge_coverage', 0.0))
-                exploration_steps.append(last_exploration_log.get('step', 0))
+        result = {
+            'avg_node_coverage': _avg_key('last_node_coverage'),
+            'avg_edge_coverage': _avg_key('last_edge_coverage'),
+            'avg_exploration_steps': _avg_key('n_exploration_steps'),
+            'avg_action_cost': _avg_key('action_cost'),
+            'avg_final_information_gain': _avg_key('final_information_gain'),
+            'infogain_per_turn': avg_lists([p.get('information_gain_per_turn') or [] for p in pre]),
+        }
 
-        n = len(node_coverages) if node_coverages else 1
-        result = {}
-
-        # Only add metrics to result if they have valid data
-        if exploration_steps:
-            result["avg_exploration_steps"] = sum(exploration_steps) / n
-        if node_coverages:
-            result["avg_node_coverage"] = sum(node_coverages) / n
-        if edge_coverages:
-            result["avg_edge_coverage"] = sum(edge_coverages) / n
-
-        # Calculate average infogain per turn across all samples
-        infogain_per_turn = ExplorationManager._calculate_infogain_per_turn(env_data_list)
-        if infogain_per_turn is not None:
-            result["infogain_per_turn"] = infogain_per_turn
-
+        # Average action counts
+        agg_counts: Dict[str, float] = {}
+        n = len(pre)
+        for p in pre:
+            for a, c in (p.get('action_counts') or {}).items():
+                agg_counts[a] = agg_counts.get(a, 0.0) + float(c)
+        if agg_counts:
+            for a in list(agg_counts.keys()):
+                agg_counts[a] /= n
+            result['avg_action_counts'] = agg_counts
         return result
     
     @staticmethod
@@ -246,6 +250,72 @@ class ExplorationManager:
                 avg_infogains.append(PAD)
         
         return avg_infogains
+
+    @staticmethod
+    def aggregate_per_sample(env_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Aggregate exploration metrics within a single sample.
+        - node/edge coverage (last)
+        - total action cost
+        - action counts
+        - per-turn information gain and final information gain
+        - exploration steps
+        """
+        env_turn_logs = env_data.get('env_turn_logs', [])
+        last_exp = None
+        for t in reversed(env_turn_logs):
+            if t.get('is_exploration_phase', False) and t.get('exploration_log'):
+                last_exp = t['exploration_log']
+                break
+        node_cov = last_exp.get('node_coverage', 0.0) if last_exp else 0.0
+        edge_cov = last_exp.get('edge_coverage', 0.0) if last_exp else 0.0
+        steps = last_exp.get('step', 0) if last_exp else 0
+        # Approximate action counts and cost: derive from last turn summary fields if present
+        default_counts = ExplorationManager.DEFAULT_ACTION_COUNTS.copy()
+        action_counts = (last_exp.get('action_counts') if last_exp and ('action_counts' in last_exp) else {}) or {}
+        # ensure default keys exist
+        for k in default_counts:
+            action_counts[k] = int(action_counts.get(k, 0))
+        # Compute action cost if not present using known costs
+        action_cost = last_exp.get('action_cost') if last_exp and ('action_cost' in last_exp) else None
+        if action_cost is None and action_counts:
+            # default costs aligned with action classes
+            default_costs = {
+                'move': 0,
+                'rotate': 0,
+                'return': 0,
+                'observe': 1,
+                'term': 0,
+                'forced_term': 0,
+                'query': 2,
+            }
+            action_cost = 0
+            for k, v in action_counts.items():
+                c = default_costs.get(k.lower(), 0)
+                try:
+                    action_cost += int(v) * int(c)
+                except Exception:
+                    continue
+        if action_cost is None:
+            action_cost = 0
+        info_gain_list = last_exp.get('info_gain_list') if last_exp else None
+        if info_gain_list is None:
+            # rebuild from per-turn logs
+            info_gain_list = []
+            for t in env_turn_logs:
+                if t.get('is_exploration_phase', False):
+                    ig = (t.get('exploration_log') or {}).get('information_gain')
+                    if ig is not None:
+                        info_gain_list.append(ig)
+        final_infogain = (info_gain_list[-1] if info_gain_list else 0.0)
+        return {
+            'last_node_coverage': node_cov,
+            'last_edge_coverage': edge_cov,
+            'n_exploration_steps': steps,
+            'action_counts': action_counts,
+            'action_cost': action_cost,
+            'information_gain_per_turn': info_gain_list or [],
+            'final_information_gain': final_infogain,
+        }
     
     # No passive history generation here; proxies produce text histories directly.
     
@@ -298,6 +368,8 @@ class ExplorationManager:
             for ar in action_results:
                 self._calculate_single_action_information_gain(ar)
         turn_quality = self._compute_exploration_quality() if self.enable_information_gain else 0.0
+        # Snapshot possible positions per object (only initialized/observed ones), with sampling
+        possible_positions = self._get_possible_positions_snapshot(self.MAX_POSSIBLE_POSITIONS_PER_OBJECT) if self.enable_information_gain else {}
         
         # Log current turn with coverage snapshot
         self._update_exp_summary()
@@ -310,6 +382,7 @@ class ExplorationManager:
             room_state=self.exploration_room.copy(),
             agent_state=self.agent.copy(),
             information_gain=turn_quality if turn_quality is not None else (self.turn_logs[-1].information_gain if self.turn_logs else 0.0),
+            possible_positions=possible_positions,
         )
         self.turn_logs.append(turn_log)
     
@@ -332,6 +405,28 @@ class ExplorationManager:
             "avg_info_gain": avg_info_gain,
         }
         return self.exp_summary
+
+    def _get_possible_positions_snapshot(self, max_per_obj: Optional[int] = None) -> Dict[str, List[List[int]]]:
+        """Return sampled possible positions for each observed object (exclude 'initial_pos')."""
+        try:
+            variables = self.spatial_solver.solver.variables if self.spatial_solver else {}
+        except Exception:
+            return {}
+        snapshot: Dict[str, List[List[int]]] = {}
+        for name, var in variables.items():
+            if name == 'initial_pos':
+                continue
+            # Only include objects that have been observed at least once
+            if name not in self.observed_items:
+                continue
+            dom = getattr(var, 'domain', None)
+            if dom is None or len(dom) == 0:
+                continue
+            pts = list(dom)
+            if max_per_obj is not None and len(pts) > int(max_per_obj):
+                pts = random.sample(pts, int(max_per_obj))
+            snapshot[name] = [list(p) for p in pts]
+        return snapshot
     
     def _calculate_single_action_information_gain(self, action_result: 'ActionResult') -> float:
         """Ingest observation/query triples into the solver; return 0.0.

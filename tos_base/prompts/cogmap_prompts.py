@@ -13,7 +13,6 @@ Represent the scene as a JSON map.
 ### Schema (shared)
 - position: [x, y] integers (or integer-like)
 - facing: use cardinal words ("north|south|east|west") for global/rooms frames; use axis signs ("+x|-x|+y|-y") for local frames
-- confidence (optional): one of "high" (certain), "medium" (estimated), "low" (unknown). Omit if unknown.
 
 ### General rules (shared)
 - Coordinate frame MUST be explicit in the content.
@@ -36,8 +35,8 @@ COGMAP_INSTRUCTION_GLOBAL_ONLY = """\
 Example:
 ```json
 {
-    "agent": {"position": [2, 3], "facing": "east", "confidence": "high"},
-    "chair": {"position": [2, 4], "facing": "north", "confidence": "medium"},
+    "agent": {"position": [2, 3], "facing": "east"},
+    "chair": {"position": [2, 4], "facing": "north"}
 }
 ```
 """
@@ -56,7 +55,7 @@ Example:
 {
     "origin": "agent",
     "objects": {
-      "chair": {"position": [0, 1], "facing": "-x", "confidence": "high"}
+      "chair": {"position": [0, 1], "facing": "-x"}
     }
 }
 ```

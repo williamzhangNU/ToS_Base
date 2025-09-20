@@ -32,6 +32,7 @@ from ..utils.cogmap.consistency import (
     rooms_vs_global_consistency,
     map_vs_relations_consistency,
     relations_consistency,
+    stability,
 )
 from ..utils.cogmap.types import BaseCogMetrics, MapCogMetrics, RelationMetrics, ConsistencySummary
 from ..utils.cogmap.analysis import (
@@ -40,8 +41,9 @@ from ..utils.cogmap.analysis import (
     compute_consistency_aggregates,
     calculate_cogmap_per_turn,
     compute_evaluation_correctness_aggregates,
+    get_last_exploration_cogmap,
+    avg_nested_dicts,
 )
-
 
 
 @dataclass
@@ -428,41 +430,149 @@ class CognitiveMapManager:
             'active': error + consistency + correctness,
             'passive': correctness (global only),
         }
+        Prefer precomputed per-sample metrics when available.
         """
         assert isinstance(env_data_list, list) and len(env_data_list) > 0, "env_data_list must be a non-empty list"
 
-        # Always compute these once; then select portions
-        correctness = compute_correctness_aggregates(env_data_list)
-        
+        # Ensure per-sample metrics exist on each env_data
+        for s in env_data_list:
+            metrics = s.get('metrics')
+            if metrics is None or not isinstance(metrics, dict):
+                s['metrics'] = {}
+                metrics = s['metrics']
+            cm = metrics.get('cogmap')
+            if not isinstance(cm, dict) or not cm:
+                metrics['cogmap'] = CognitiveMapManager.aggregate_per_sample(s, exp_type=exp_type)
+
+        pre_list = [((s.get('metrics') or {}).get('cogmap') or {}) for s in env_data_list]
         if exp_type == 'active':
-            error = compute_error_aggregates(env_data_list)
-            consistency = compute_consistency_aggregates(env_data_list)
-            per_turn_update = calculate_cogmap_per_turn(env_data_list, mode='update')
-            per_turn_full = calculate_cogmap_per_turn(env_data_list, mode='full')
+            exploration = avg_nested_dicts([m.get('exploration') or {} for m in pre_list])
+            evaluation = avg_nested_dicts([m.get('evaluation') or {} for m in pre_list])
+            update_turn = avg_nested_dicts([{'cogmap_update_per_turn': m.get('cogmap_update_per_turn') or {}} for m in pre_list]).get('cogmap_update_per_turn', {})
+            full_turn = avg_nested_dicts([{'cogmap_full_per_turn': m.get('cogmap_full_per_turn') or {}} for m in pre_list]).get('cogmap_full_per_turn', {})
             return {
-                'exploration': {
-                    'error': error,
-                    'correctness': correctness,
-                    'consistency': consistency
-                },
-                'evaluation': {
-                    'correctness': {
-                        'global_full': compute_evaluation_correctness_aggregates(env_data_list)
-                    },
-                },
-                'cogmap_update_per_turn': per_turn_update,
-                'cogmap_full_per_turn': per_turn_full,
+                'exploration': exploration,
+                'evaluation': evaluation if evaluation else {'correctness': {}},
+                'cogmap_update_per_turn': update_turn,
+                'cogmap_full_per_turn': full_turn,
             }
-        elif exp_type == 'passive':
+        if exp_type == 'passive':
+            exploration = avg_nested_dicts([m.get('exploration') or {} for m in pre_list])
+            return {'exploration': {'correctness': {'global_full': (exploration.get('correctness') or {}).get('global_full', {})}}}
+
+        # Default: average nested
+        return avg_nested_dicts(pre_list)
+
+    @staticmethod
+    def aggregate_per_sample(env_data: Dict[str, Any], exp_type: str | None = None) -> Dict[str, Any]:
+        """Aggregate cognitive-map metrics within a single sample.
+        Returns exploration error/correctness/consistency and per-turn global metrics.
+        """
+        # Helper: get exploration turns' cogmap logs
+        turn_logs = env_data.get('env_turn_logs') or []
+        cog_logs = []
+        for t in turn_logs:
+            if t.get('is_exploration_phase', False) and t.get('cogmap_log'):
+                cog_logs.append(t['cogmap_log'])
+
+        # Use shared helper to find last exploration cogmap
+        
+        last = get_last_exploration_cogmap(env_data)
+
+        # Error: average local/global metrics over turns
+        def _avg_maps(dicts: List[Dict[str, Any]], path: List[str]) -> MapCogMetrics:
+            mats: List[MapCogMetrics] = []
+            for d in dicts:
+                cur = d
+                ok = True
+                for key in path:
+                    if isinstance(cur, dict) and key in cur:
+                        cur = cur[key]
+                    else:
+                        ok = False
+                        break
+                if ok and isinstance(cur, dict):
+                    m = MapCogMetrics.from_dict(cur)
+                    if m.valid:
+                        mats.append(m)
+            return MapCogMetrics.average(mats) if mats else MapCogMetrics.invalid()
+
+        error = {
+            'local_vs_gt_local_avg': _avg_maps(cog_logs, ['local', 'metrics']).to_dict(),
+            'global_vs_gt_global_avg': _avg_maps(cog_logs, ['global', 'metrics']).to_dict(),
+        }
+
+        # Correctness: last global_full and relations_full
+        correctness = {
+            'last_global_vs_gt_full': MapCogMetrics.from_dict((((last or {}).get('global') or {}).get('metrics_full') or {})).to_dict(),
+            'last_relations_vs_gt_full': RelationMetrics.from_dict((((last or {}).get('relations') or {}).get('metrics_full') or {})).to_dict(),
+        }
+
+        # Consistency
+        # local_vs_global average over turns
+        def _avg_consistency_lvsg(dicts: List[Dict[str, Any]]) -> MapCogMetrics:
+            mats: List[MapCogMetrics] = []
+            for d in dicts:
+                cm = (d.get('consistency') or {}).get('local_vs_global') or {}
+                m = MapCogMetrics.from_dict(cm)
+                if m.valid:
+                    mats.append(m)
+            return MapCogMetrics.average(mats) if mats else MapCogMetrics.invalid()
+
+        cons_last = (last or {}).get('consistency') or {}
+        consistency = {
+            'local_vs_global_avg': _avg_consistency_lvsg(cog_logs).to_dict(),
+            'rooms_vs_global_last': MapCogMetrics.from_dict(((cons_last.get('rooms_vs_global') or {}).get('average') or {})).to_dict(),
+            'map_vs_relations_last': float(cons_last.get('map_vs_relations', 0.0) or 0.0),
+            'relations_consistency_last': float(cons_last.get('relations_consistency', 0.0) or 0.0),
+            'stability_avg': MapCogMetrics.average(stability(env_data)).to_dict(),
+        }
+
+        # Per-turn global metrics (concise helper)
+        per_turn_update, per_turn_full = CognitiveMapManager.compute_per_turn_global_metrics(cog_logs)
+
+        if exp_type == 'passive':
             return {
                 'exploration': {
                     'correctness': {
-                        'global_full': correctness.get('last_global_vs_gt_full', {})
+                        'global_full': correctness['last_global_vs_gt_full']
                     }
                 }
             }
 
-        raise ValueError(f"Invalid scenario: {exp_type}")
+        return {
+            'exploration': {
+                'error': error,
+                'correctness': correctness,
+                'consistency': consistency,
+            },
+            'evaluation': {
+                'correctness': {
+                    'global_full': correctness['last_global_vs_gt_full']
+                }
+            },
+            'cogmap_update_per_turn': per_turn_update,
+            'cogmap_full_per_turn': per_turn_full,
+        }
+
+    @staticmethod
+    def compute_per_turn_global_metrics(cog_logs: List[Dict[str, Any]]) -> Tuple[Dict[str, List[float]], Dict[str, List[float]]]:
+        """Return (update, full) per-turn global metric lists."""
+        per_turn_update = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
+        per_turn_full = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
+        for d in cog_logs:
+            g = d.get('global') or {}
+            mu = MapCogMetrics.from_dict(g.get('metrics') or {})
+            mf = MapCogMetrics.from_dict(g.get('metrics_full') or {})
+            per_turn_update['dir'].append(float(mu.dir) if mu.valid else None)
+            per_turn_update['facing'].append(float(mu.facing) if mu.valid else None)
+            per_turn_update['pos'].append(float(mu.pos) if mu.valid else None)
+            per_turn_update['overall'].append(float(mu.overall) if mu.valid else None)
+            per_turn_full['dir'].append(float(mf.dir) if mf.valid else None)
+            per_turn_full['facing'].append(float(mf.facing) if mf.valid else None)
+            per_turn_full['pos'].append(float(mf.pos) if mf.valid else None)
+            per_turn_full['overall'].append(float(mf.overall) if mf.valid else None)
+        return per_turn_update, per_turn_full
     
     # register entry gates for active exploratoin
     def _register_active_entry_gate(self, gt_room) -> None:

@@ -223,12 +223,70 @@ def _check_triple_consistency(name_a: str, name_b: str, name_c: str,
     return False
 
 
+def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 5,
+              allow_scale: bool = False, pos_norm_L: float | None = None) -> List[MapCogMetrics]:
+    """Per-adjacent-turn stability using predicted vs GT global maps on unchanged objects.
+
+    For each adjacent exploration turn (t-1 -> t):
+    - Select objects with small domain-size change based on possible_positions between t-1 and t
+    - Compare current predicted global map vs current GT global (restricted to selected objects)
+
+    Returns a list of MapCogMetrics (one per adjacent pair). Invalid metric for missing data.
+    """
+    # Normalize input to a list of exploration turns
+    if isinstance(env_data_or_logs, dict):
+        logs = env_data_or_logs.get('env_turn_logs', []) or []
+    else:
+        logs = env_data_or_logs or []
+
+    expl = [t for t in logs if t.get('is_exploration_phase')]
+    out: List[MapCogMetrics] = []
+    if len(expl) <= 1:
+        return out
+
+    def _filter_room(br: BaseRoom, keep: set[str]) -> BaseRoom:
+        objs = [o for o in br.objects if o.name in keep]
+        return BaseRoom(objects=objs, name=br.name)
+
+    for i in range(1, len(expl)):
+        prev_log = expl[i - 1]
+        curr_log = expl[i]
+        prev_pp: Dict[str, List[List[int]]] = (prev_log.get('exploration_log') or {}).get('possible_positions') or {}
+        curr_pp: Dict[str, List[List[int]]] = (curr_log.get('exploration_log') or {}).get('possible_positions') or {}
+
+        # Need current predicted and GT global rooms
+        g_curr = ((curr_log.get('cogmap_log') or {}).get('global') or {})
+        pred_curr = BaseRoom.from_dict((g_curr.get('pred_room_state')) or {})
+        gt_curr = BaseRoom.from_dict((g_curr.get('gt_room_state_full') or g_curr.get('gt_room_state')) or {})
+
+        if not prev_pp or not curr_pp or pred_curr is None or gt_curr is None:
+            out.append(MapCogMetrics.invalid())
+            continue
+
+        # Select unchanged objects based on domain-size change
+        selected: set[str] = set()
+        for name, prev_pts in prev_pp.items():
+            if name in curr_pp and abs(len(prev_pts) - len(curr_pp[name])) < int(threshold):
+                selected.add(name)
+        if not selected:
+            out.append(MapCogMetrics.invalid())
+            continue
+
+        # Restrict rooms to selected objects and compare
+        pred_sel = _filter_room(pred_curr, selected)
+        gt_sel = _filter_room(gt_curr, selected)
+        out.append(compare_on_common_subset(pred_sel, gt_sel, allow_scale=allow_scale, pos_norm_L=pos_norm_L))
+
+    return out
+
+
 __all__ = [
     "compare_on_common_subset",
     "local_vs_global_consistency",
     "rooms_vs_global_consistency",
     "map_vs_relations_consistency",
     "relations_consistency",
+    "stability",
 ]
 
 

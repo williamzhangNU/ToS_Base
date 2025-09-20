@@ -11,8 +11,9 @@ from ..core.relationship import (
 from .prompts import *
 
 class Prompter:
-    # Add FORMAT_PROMPT for backward compatibility
-    FORMAT_PROMPT = "Always output: <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text."
+    # Strict format prompts
+    FORMAT_PROMPT_THINK = "Always output: <think> [Your thoughts] </think> <answer> [your answer] </answer>. You must strictly follow this format with no extra text."
+    FORMAT_PROMPT_ANSWER_ONLY = "Always output: <answer> [your answer] </answer>. You must strictly follow this format with no extra text."
 
     # Add image prompt constants
     TOPDOWN_PROMPT = "\n\nTopdown view: {placeholder}\n{object_info}"
@@ -22,6 +23,8 @@ class Prompter:
         self.config = config
         self.image_handler = image_handler
         self.np_random = np_random
+        self.enable_think = bool(self.config.prompt_config.get('enable_think', True))
+        self.FORMAT_PROMPT = self.FORMAT_PROMPT_THINK if self.enable_think else self.FORMAT_PROMPT_ANSWER_ONLY
 
     def _get_topdown_prompt(self, prompt_template: str, room) -> str:
         """Generate topdown view prompt with object information."""
