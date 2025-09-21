@@ -51,63 +51,62 @@ class Prompter:
         Generates the initial observation prompt based on the exploration type.
         """
         obs = {}
-        room_desc = get_room_description(room, agent, with_topdown=self.config.prompt_config['topdown'])
-        if self.config.render_mode == 'vision':
-            images = [self.image_handler.get_image('instruction'), self.image_handler.get_image('label')]
-        
-        # Build observation instruction text (used in both text and vision modes)
+        is_vision, is_active = self.config.render_mode == 'vision', self.config.exp_type == 'active'
+        topdown = self.config.prompt_config['topdown']
+
+        room_desc = get_room_description(room, agent, with_topdown=topdown)
+
         observation_instructions = (
             PairwiseRelationship.prompt()
             + f"\n{DegreeRel.prompt()}"
             + f"\n{OrientationRel.prompt()}"
             + f"\n{PairwiseRelationshipDiscrete.prompt()}"
-            + f"\n{ProximityRelationship.prompt()}"
         )
-        if self.config.exp_type == 'active':
-            exp_instructions = ActionSequence.get_usage_instructions() + f"\n\nYou have a maximum of {self.config.max_exp_steps} exploration steps."   
-            if self.config.render_mode == 'vision':
-                if self.config.prompt_config['topdown']:
-                    room_desc += self._get_topdown_prompt(self.TOPDOWN_PROMPT, room)
-                    images.append(self.image_handler.get_image('topdown'))
+        if not is_vision:
+            observation_instructions += f"\n{ProximityRelationship.prompt()}"
 
-                obs_str = ACTIVE_INSTRUCTION_VISION.format(
-                    room_info=room_desc,
-                    exp_instructions=exp_instructions,
-                    image_placeholder=self.config.image_placeholder,
-                    observation_instructions=observation_instructions,
-                )
+        exp_instructions = ActionSequence.get_usage_instructions()
+        if is_active:
+            exp_instructions += f"\n\nYou have a maximum of {self.config.max_exp_steps} exploration steps."
 
-                obs['multi_modal_data'] = {self.config.image_placeholder: images}
-            else:
-                obs_str = ACTIVE_INSTRUCTION_TEXT.format(
-                    room_info=room_desc,
-                    exp_instructions=exp_instructions,
-                    observation_instructions=observation_instructions,
-                )
-
-        else:
-            exp_history_str = f"## Exploration History\n{exp_history['obs_str']}" if not self.config.prompt_config["topdown"] else ""
-            if self.config.render_mode == 'vision':
-                if self.config.prompt_config['topdown']:
+        images = None
+        if is_vision:
+            images = [self.image_handler.get_image('instruction'), self.image_handler.get_image('label')]
+            if is_active and topdown:
+                room_desc += self._get_topdown_prompt(self.TOPDOWN_PROMPT, room)
+                images.append(self.image_handler.get_image('topdown'))
+            if not is_active:
+                if topdown:
                     images.append(self.image_handler.get_image('topdown'))
                 else:
                     images.extend(exp_history['multi_modal_data'][self.config.image_placeholder])
 
-                obs_str = PASSIVE_INSTRUCTION_VISION.format(
-                    room_info=room_desc,
-                    exp_history=exp_history_str,
-                    image_placeholder=self.config.image_placeholder,
-                    observation_instructions=observation_instructions,
-                )
-                obs['multi_modal_data'] = {self.config.image_placeholder: images}
-            else:
-                obs_str = PASSIVE_INSTRUCTION_TEXT.format(
-                    room_info=room_desc,
-                    exp_history=exp_history_str,
-                    observation_instructions=observation_instructions,
-                )
+        exp_history_str = ""
+        if not is_active:
+            exp_history_str = f"## Exploration History\n{exp_history['obs_str']}" if not topdown else ""
 
+        template = (
+            ACTIVE_INSTRUCTION_VISION if is_active and is_vision else
+            ACTIVE_INSTRUCTION_TEXT if is_active else
+            PASSIVE_INSTRUCTION_VISION if is_vision else
+            PASSIVE_INSTRUCTION_TEXT
+        )
+
+        fmt_kwargs = {
+            'room_info': room_desc,
+            'observation_instructions': observation_instructions,
+            'exp_instructions': exp_instructions,
+        }
+        if not is_active:
+            fmt_kwargs['exp_history'] = exp_history_str
+        if is_vision:
+            fmt_kwargs['image_placeholder'] = self.config.image_placeholder
+
+        obs_str = template.format(**fmt_kwargs)
+        if not is_active:
             obs_str += f"\n{self.get_evaluation_prompt(eval_manager)}"
+        if is_vision:
+            obs['multi_modal_data'] = {self.config.image_placeholder: images}
 
         obs['obs_str'] = obs_str + "\n" + self.FORMAT_PROMPT
         return obs

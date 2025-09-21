@@ -104,12 +104,12 @@ class EgoFrontBins:
     def prompt(cls) -> str:
         lines = [
             "Egocentric angle bins (0° is front):",
-            "[-45°,-22.5°)→front-left",
-            "[-22.5°,0°)→front-slight-left",
-            "0°→front",
-            "(0°,22.5°]→front-slight-right",
-            "(22.5°,45°]→front-right",
-            "otherwise→beyond-fov",
+            "\t-[-45°,-22.5°)→front-left",
+            "\t-[-22.5°,0°)→front-slight-left",
+            "\t-0°→front",
+            "\t-(0°,22.5°]→front-slight-right",
+            "\t-(22.5°,45°]→front-right",
+            "\t-otherwise→beyond-fov",
         ]
         return "\n".join(lines)
 
@@ -131,9 +131,10 @@ class _CardinalBinsBase:
 
     @classmethod
     def prompt(cls) -> str:
-        header = "Cardinal angle bins:"
-        parts = [f"[{lo}°,{hi}°]→{label}" for (lo, hi), label in zip(cls.BINS, cls.LABELS)]
-        return "\n".join([header] + parts)
+        lines = ["Cardinal angle bins (45° each):"]
+        for i, (lo, hi) in enumerate(cls.BINS):
+            lines.append(f"\t-({lo}°,{hi}°]→{cls.LABELS[i]}")
+        return "\n".join(lines)
 
 
 class CardinalBinsAllo(_CardinalBinsBase):
@@ -285,7 +286,11 @@ class OrientationRel:
 
     @classmethod
     def prompt(cls) -> str:
-        return "Orientation: facing forward/back/right/left; gates report wall side."
+        return (
+            "Orientation: forward/back/right/left (ego) or north/east/south/west (allo).\n"
+            "When agent faces north: forward = north, right = east, etc.\n"
+            "Gate's orientation: report wall position (e.g., 'on left wall')."
+        )
 
     @classmethod
     def transform(cls, pair: DirPair, orientation: tuple) -> DirPair:

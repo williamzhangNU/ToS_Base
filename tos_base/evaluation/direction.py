@@ -290,8 +290,8 @@ class BackwardPovEvaluationTask(DirectionEvaluationTask):
 class DirectionPov(DirectionEvaluationTask):
     """Allocentric bins with anchor's facing treated as north (normalize by anchor's orientation)."""
     QUESTION_TEMPLATE_ANCHOR_NORTH = (
-        "Treat the {anchor_obj_name}'s facing as north.\n"
-        "From this normalized top-down view, what is the spatial relationship of {obj_name} relative to {anchor_obj_name}?\n"
+        "Assume the {anchor_obj_name}'s facing is called \"north\" (a relative reference frame, not true north).\n"
+        "Based on this assumption, what is the spatial relationship of {obj_name} relative to {anchor_obj_name}?\n"
         "Each choice is \"<direction-bin>, <distance-bin>\" (allocentric).\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"

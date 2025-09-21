@@ -259,7 +259,12 @@ class ObserveAction(ObserveBase):
         pairwise_answer, relationships, pairwise_relation_triples = self._collect_obj_observations(agent=agent, visible_objects=visible_objects, anchor_name=anchor_name, discrete=True)
         local_answer, local_relationships, local_relation_triples = self._collect_local_relationships(agent, visible_objects, anchor_name)
 
-        final_answer = f"{pairwise_answer}" + ((f"\nSuppose your current orientation is north, relations among close objects in your FOV:\n{local_answer}") if local_answer else "")
+        final_answer = pairwise_answer
+        if local_answer:
+            final_answer += (
+                "\nAssume your current facing direction is called \"north\" (a relative reference frame, not true north)."
+                f"Based on this orientation, mutually close object relations in your FOV:\n{local_answer}"
+            )
         return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe', {
             'answer': final_answer,
             'visible_objects': [obj.name for obj in visible_objects],

@@ -3,7 +3,6 @@
 import numpy as np
 
 from .tasks import retry_generate_question
-from ..actions.base import BaseAction
 from ..core.relationship import CardinalBinsAllo, StandardDistanceBins, PairwiseRelationshipDiscrete, OrientationRel
 from ..utils.utils import hash
 from .direction import DirectionPov
@@ -14,7 +13,7 @@ from .direction import DirectionPov
 # ---- New task: rotate one oriented object, then ask DirectionPov using it as anchor ----
 class FalseBeliefDirectionPov(DirectionPov):
     ACTION_TEMPLATE = (
-        "You move to a new location facing north and observe:\n{observations}\n\n"
+        "Facing north in one room, you note some objects' orientation:\n{observations}\n\n"
     )
 
     @retry_generate_question
@@ -30,45 +29,18 @@ class FalseBeliefDirectionPov(DirectionPov):
         rotations = {0: [[1, 0], [0, 1]], 90: [[0, -1], [1, 0]], 180: [[-1, 0], [0, -1]], 270: [[0, 1], [-1, 0]]}
         anchor.ori = anchor.ori @ rotations[deg]
 
-        # 2) Pick a north-facing vantage changed objects in FOV (incl. anchor)
-        rid = getattr(anchor, 'room_id', 0)
-        rid = int(rid)
-        xmin, xmax, ymin, ymax = self.room.get_boundary(room_id=rid)
-        coords = [(x, y) for x in range(xmin, xmax + 1) for y in range(ymin, ymax + 1)
-                  if not self.room.get_cell_info(x, y)['object_name']]
-        # prioritize below anchor (north-facing FOV)
-        below = [(x, y) for (x, y) in coords if y < int(anchor.pos[1])]
-        self.np_random.shuffle(below)
+        # 2) Observe facing north; report all oriented objects in the same room
         tmp_agent = self.agent.copy()
-        observations = ""
-        for (x, y) in below:
-            tmp_agent.pos = np.array((x, y))
-            tmp_agent.ori = np.array((0, 1))
-            tmp_agent.room_id = rid
-            if not BaseAction._is_visible(tmp_agent, anchor):
-                continue
-            # visible objects in FOV
-            vis = [o for o in self.room.objects if BaseAction._is_visible(tmp_agent, o)]
-            if anchor in vis:
-                # build simplified observation: up to 4, only facing strings
-                def dist2(o):
-                    d = o.pos - tmp_agent.pos
-                    return float(d[0]*d[0] + d[1]*d[1])
-                def facing_str(o):
-                    op = OrientationRel.get_relative_orientation(tuple(o.ori), tuple(tmp_agent.ori))
-                    return OrientationRel.to_string(op, 'ego', 'orientation')
-                others = [o for o in vis if o is not anchor]
-                others.sort(key=dist2)
-                selected = [anchor] + others[:3]
-                observations = "\n".join([f"{o.name}: {facing_str(o)}" for o in selected])
-                # adopt this vantage
-                self.agent = tmp_agent.copy()
-                break
-        else:
-            raise ValueError("No suitable vantage with changed object in FOV")
+        tmp_agent.ori = np.array((0, 1))
+        rid = int(getattr(anchor, 'room_id', getattr(self.agent, 'room_id', 0)))
+        objs = [o for o in self.room.objects if o.has_orientation and int(getattr(o, 'room_id', -1)) == rid and o.name != anchor.name][:4] + [anchor]
+        objs.sort(key=lambda o: o.name)
+        def facing(o):
+            op = OrientationRel.get_relative_orientation(tuple(o.ori), tuple(tmp_agent.ori))
+            return OrientationRel.to_string(op, 'ego', 'orientation')
+        observations = "\n".join(f"{o.name}: {facing(o)}" for o in objs)
 
         # 3) Ask DirectionPov with this rotated object as anchor A
-        n = len(self.room.objects)
         target_candidates = [i for i, o in enumerate(self.room.objects) if o is not anchor]
         target = self.room.objects[int(self.np_random.choice(target_candidates))]
         rel = self._compute_discrete_rel(target.pos, anchor.pos, CardinalBinsAllo(), anchor_ori=anchor.ori)
