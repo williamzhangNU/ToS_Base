@@ -4,7 +4,7 @@ from typing import List, Tuple, Dict, Any, Optional, Set
 import numpy as np
 from dataclasses import dataclass
 from collections import defaultdict
-from ..utils.cogmap.analysis import avg_lists
+ 
 import random
 
 from ..core.object import Agent
@@ -207,7 +207,7 @@ class ExplorationManager:
             'avg_action_fail_ratio': _avg_key('action_fail_ratio'),
             'avg_valid_action_ratio': _avg_key('valid_action_ratio'),
             'avg_final_information_gain': _avg_key('final_information_gain'),
-            'infogain_per_turn': avg_lists([p.get('information_gain_per_turn') or [] for p in pre]),
+            'infogain_per_turn': ExplorationManager._avg_lists_carry_forward([p.get('information_gain_per_turn') or [] for p in pre]),
         }
 
         # Average action counts
@@ -227,7 +227,7 @@ class ExplorationManager:
         """Calculate average information gain for each turn across all samples."""
         # Collect all turn information gains by turn index
         turn_infogains = defaultdict(list)  # turn_index -> list of infogain values
-        PAD = 0.0
+        PAD = None
         
         for env_data in env_data_list:
             env_turn_logs = env_data.get('env_turn_logs', [])
@@ -247,9 +247,35 @@ class ExplorationManager:
                 avg_infogain = sum(turn_infogains[turn_idx]) / len(turn_infogains[turn_idx])
                 avg_infogains.append(avg_infogain)
             else:
-                avg_infogains.append(PAD)
+                # carry forward last average if available, else 0.0
+                if avg_infogains:
+                    avg_infogains.append(avg_infogains[-1])
+                else:
+                    avg_infogains.append(0.0)
         
         return avg_infogains
+
+    @staticmethod
+    def _avg_lists_carry_forward(list_of_lists: List[List[float]]) -> List[float]:
+        if not list_of_lists:
+            return []
+        max_len = max((len(lst) for lst in list_of_lists), default=0)
+        if max_len == 0:
+            return []
+        padded: List[List[float]] = []
+        for lst in list_of_lists:
+            if not lst:
+                padded.append([0.0] * max_len)
+                continue
+            last = lst[-1]
+            if len(lst) < max_len:
+                lst = lst + [last] * (max_len - len(lst))
+            padded.append(lst)
+        out: List[float] = []
+        for i in range(max_len):
+            vals = [lst[i] for lst in padded if isinstance(lst[i], (int, float))]
+            out.append((sum(vals) / len(vals)) if vals else 0.0)
+        return out
 
     @staticmethod
     def aggregate_per_sample(env_data: Dict[str, Any]) -> Dict[str, Any]:

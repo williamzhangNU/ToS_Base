@@ -17,6 +17,7 @@ from ..core.relationship import (
     PairwiseRelationshipDiscrete,
     StandardDistanceBins,
 )
+from ..utils.utils import hash
 
 @dataclass
 class EvaluationData:
@@ -205,7 +206,6 @@ def retry_generate_question(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         max_retry = int(self.config.get('max_retry', 10))
-        last_q = ""
         for _ in range(max_retry):
             q = func(self, *args, **kwargs)
             # Ensure question field is populated
@@ -214,12 +214,10 @@ def retry_generate_question(func):
             q = self.eval_data.question
             # Ensure ID exists for history checks
             if not getattr(self.eval_data, 'id', None) or not self.eval_data.id:
-                from ..utils.utils import hash as _hash
-                self.eval_data.id = _hash(q)
+                self.eval_data.id = hash(q)
             # Accept if no history manager or not seen
             hm = getattr(self, 'history_manager', None)
             if not hm or not hm.has_question(self.eval_data.id):
                 return q
-            last_q = q
-        return last_q
+        raise Exception('Failed to generate question')
     return wrapper

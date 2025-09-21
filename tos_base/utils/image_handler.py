@@ -41,7 +41,6 @@ class ImageHandler:
         runs.sort(key=lambda d: int(re.match(r"run(\d+)", d).group(1)))
         idx = (seed if seed is not None else np.random.randint(0, len(runs))) % len(runs)
         image_dir = os.path.join(base_dir, runs[idx])
-        print(f'[DEBUG] Loading data from {image_dir}')
         
         with open(os.path.join(image_dir, "meta_data.json"), 'r') as f:
             json_data = json.load(f)
