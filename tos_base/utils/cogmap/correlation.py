@@ -18,8 +18,20 @@ def compute_correlation_metrics(env_data_list: Dict, exp_type: str = 'active') -
     if exp_type == 'passive':
         return {}
 
+    # First pass: collect all existing task names
+    all_task_names = set()
+    for s in env_data_list:
+        metrics = s.get('metrics')
+        evaluation_metric = metrics.get('evaluation')
+        if isinstance(evaluation_metric, dict):
+            per_task = evaluation_metric.get('per_task', {})
+            all_task_names.update(per_task.keys())
+
     last_global_vs_gt_fulls = []
-    evaluation_metric_list = {}
+    evaluation_metric_list = {'avg_accuracy': []}
+    # Initialize all task names with empty lists
+    for task_name in all_task_names:
+        evaluation_metric_list[task_name] = []
     last_infogains = []
 
     for s in env_data_list:
@@ -44,17 +56,16 @@ def compute_correlation_metrics(env_data_list: Dict, exp_type: str = 'active') -
             # Extract evaluation metrics
             # Overall accuracy
             avg_accuracy = evaluation_metric.get('overall', {}).get('avg_accuracy')
-            if 'avg_accuracy' not in evaluation_metric_list:
-                evaluation_metric_list['avg_accuracy'] = []
-            evaluation_metric_list['avg_accuracy'].append(float(avg_accuracy))
+            evaluation_metric_list['avg_accuracy'].append(float(avg_accuracy) if avg_accuracy is not None else None)
 
-            # Accuracy for each task
+            # Accuracy for each task - fill missing tasks with None
             per_task = evaluation_metric.get('per_task', {})
-            for task_name, task_metrics in per_task.items():
-                task_acc = task_metrics.get('accuracy', 0.0)
-                if task_name not in evaluation_metric_list:
-                    evaluation_metric_list[task_name] = []
-                evaluation_metric_list[task_name].append(float(task_acc))
+            for task_name in all_task_names:
+                if task_name in per_task:
+                    task_acc = per_task[task_name].get('accuracy', 0.0)
+                    evaluation_metric_list[task_name].append(float(task_acc))
+                else:
+                    evaluation_metric_list[task_name].append(None)
 
             # Add information gain data
             if isinstance(last_infogain, (int, float)) and not np.isnan(last_infogain):
@@ -81,19 +92,22 @@ def compute_correlation_metrics(env_data_list: Dict, exp_type: str = 'active') -
 def calculate_pearson_correlation(x: List[float], y: List[float]) -> Dict[str, Any]:
     assert len(x) == len(y), "Length of x and y must be the same"
     try:
-        corr_coef, p_value = pearsonr(x, y)
+        # Filter out None values and corresponding x values
+        valid_pairs = [(xi, yi) for xi, yi in zip(x, y) if yi is not None and not np.isnan(xi) and not np.isnan(yi)]
+        x_valid, y_valid = zip(*valid_pairs)
+        corr_coef, p_value = pearsonr(x_valid, y_valid)
         return {
             'pearson_r': float(corr_coef),
             'p_value': float(p_value),
             'significant': bool(p_value < 0.05),
-            'n_samples': len(x)
+            'n_samples': len(valid_pairs)
         }
     except Exception as e:
         return {
             'pearson_r': None,
             'p_value': None,
             'significant': False,
-            'n_samples': len(x),
+            'n_samples': 0,
             'error': str(e)
         }
 
