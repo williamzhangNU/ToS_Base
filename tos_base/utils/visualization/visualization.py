@@ -114,63 +114,42 @@ class HTMLGenerator:
             f.write(f"<div class='stat-item'>📊 Samples: {sample_count}</div>\n")
             f.write("</div>\n")
 
-            # Text metrics section (without plots)
-            f.write("<div class='text-metrics-section'>\n")
+            # Config metrics section with three-column layout
+            f.write("<div class='metrics-section'>\n")
+            f.write("<div class='metrics-grid'>\n")
 
-            # Group exploration performance (text only)
-            if self.exp_summary.get("group_performance", {}).get(gname):
-                exp_group = self.exp_summary["group_performance"][gname]
-                f.write("<div class='group-metrics'>")
-                f.write("<strong>Exploration:</strong>")
-                # Display exploration metrics but exclude the infogain_per_turn list
+            # Group exploration performance
+            exp_group = self.exp_summary.get("group_performance", {}).get(gname)
+            if exp_group:
                 exp_group_filtered = {k: v for k, v in exp_group.items() if k != "infogain_per_turn"}
-                f.write(VisualizationHelper.dict_to_html(exp_group_filtered))
-                f.write("</div>\n")
+                if exp_group_filtered:
+                    f.write("<div class='metrics-box exploration'>\n")
+                    f.write("<h4>🔍 Exploration</h4>\n")
+                    f.write(VisualizationHelper.dict_to_html(exp_group_filtered))
+                    f.write("</div>\n")
 
             # Group evaluation performance
-            if self.eval_summary.get("group_performance", {}).get(gname):
-                eval_group = self.eval_summary["group_performance"][gname]
-                f.write("<div class='group-metrics'>")
-                f.write("<strong>Evaluation:</strong>")
+            eval_group = self.eval_summary.get("group_performance", {}).get(gname)
+            if eval_group:
+                f.write("<div class='metrics-box evaluation'>\n")
+                f.write("<h4>✅ Evaluation</h4>\n")
                 f.write(VisualizationHelper.dict_to_html(eval_group))
                 f.write("</div>\n")
 
-            # Group cognitive map performance (text only)
-            if self.cogmap_summary.get("group_performance", {}).get(gname):
-                cogmap_group = self.cogmap_summary["group_performance"][gname]
-                f.write("<div class='group-metrics'>")
-                f.write("<strong>Cognitive Map:</strong>")
-
+            # Group cognitive map performance
+            cogmap_group = self.cogmap_summary.get("group_performance", {}).get(gname)
+            if cogmap_group:
                 # Display main cognitive map metrics (exclude per_turn data)
                 main_metrics = {k: v for k, v in cogmap_group.items()
                                if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn"]}
+                if main_metrics:
+                    f.write("<div class='metrics-box cogmap'>\n")
+                    f.write("<h4>🧠 Cognitive Map</h4>\n")
+                    f.write(VisualizationHelper.dict_to_html(main_metrics))
+                    f.write("</div>\n")
 
-                # Check if we need 75/25 layout or single column
-                items = list(main_metrics.items())
-                total_items = len(items)
-                left_count = max(1, int(total_items * 0.75)) if total_items > 1 else total_items
-                right_metrics = dict(items[left_count:]) if left_count < total_items else {}
-
-                # Create layout class based on content
-                layout_class = "cogmap-compare" if right_metrics else "cogmap-compare single-column"
-                f.write(f"<div class='{layout_class}'>")
-
-                # Left side - Main cognitive map metrics
-                f.write("<div class='cogmap-box side'>")
-                left_metrics = dict(items[:left_count])
-                f.write(VisualizationHelper.dict_to_html(left_metrics))
-                f.write("</div>")
-
-                # Right side - Only if has content
-                if right_metrics:
-                    f.write("<div class='cogmap-box side'>")
-                    f.write(VisualizationHelper.dict_to_html(right_metrics))
-                    f.write("</div>")
-
-                f.write("</div>")  # End cogmap-compare
-                f.write("</div>\n")
-
-            f.write("</div>\n")  # End text-metrics-section
+            f.write("</div>\n")  # End metrics-grid
+            f.write("</div>\n")  # End metrics-section
 
             # Plots section (separate from text)
             f.write("<div class='plots-section'>\n")
@@ -258,10 +237,70 @@ class HTMLGenerator:
             running_page += 1
         f.write("</ul>\n</section>\n")
 
+    def generate_sample_metrics(self, f, entry: Dict, sample_name: str) -> None:
+        """Generate sample-level metrics visualization"""
+        metrics = entry.get("metrics", {})
+        if not metrics:
+            return
+
+        f.write("<div class='metrics-section'>\n")
+        f.write("<h3>📊 Sample Metrics</h3>\n")
+
+        # Create a three-column layout for exploration, evaluation, and cogmap metrics
+        f.write("<div class='metrics-grid'>\n")
+
+        # Helper function to filter out per_turn keys
+        def filter_per_turn_keys(data):
+            if not isinstance(data, dict):
+                return data
+            return {k: v for k, v in data.items() if "per_turn" not in k}
+
+        # Exploration metrics
+        exploration_metrics = metrics.get("exploration", {})
+        if exploration_metrics:
+            filtered_exploration = filter_per_turn_keys(exploration_metrics)
+            if filtered_exploration:
+                f.write("<div class='metrics-box exploration'>\n")
+                f.write("<h4>🔍 Exploration</h4>\n")
+                f.write(VisualizationHelper.dict_to_html(filtered_exploration))
+                f.write("</div>\n")
+
+        # Evaluation metrics
+        evaluation_metrics = metrics.get("evaluation", {})
+        if evaluation_metrics:
+            filtered_evaluation = filter_per_turn_keys(evaluation_metrics)
+            if filtered_evaluation:
+                f.write("<div class='metrics-box evaluation'>\n")
+                f.write("<h4>✅ Evaluation</h4>\n")
+                f.write(VisualizationHelper.dict_to_html(filtered_evaluation))
+                f.write("</div>\n")
+
+        # Cognitive map metrics
+        cogmap_metrics = metrics.get("cogmap", {})
+        if cogmap_metrics:
+            filtered_cogmap = filter_per_turn_keys(cogmap_metrics)
+            if filtered_cogmap:
+                f.write("<div class='metrics-box cogmap'>\n")
+                f.write("<h4>🧠 Cognitive Map</h4>\n")
+                f.write(VisualizationHelper.dict_to_html(filtered_cogmap))
+                f.write("</div>\n")
+
+        f.write("</div>\n")  # End metrics-grid
+        f.write("</div>\n")  # End metrics-section
+
     def generate_cognitive_map_charts(self, f, entry: Dict, sample_name: str) -> None:
-        """Generate cognitive map charts for a sample - only global level"""
+        """Generate cognitive map charts and information gain chart in a single row"""
         # Extract cognitive map data from environment turn logs
         env_turn_logs = entry.get("env_turn_logs", [])
+
+        # Extract information gain data from exploration turns
+        infogain_per_turn = []
+        for turn_log in env_turn_logs:
+            if turn_log.get('is_exploration_phase', False):
+                exploration_log = turn_log.get('exploration_log', {})
+                infogain = exploration_log.get('information_gain')
+                if infogain is not None:
+                    infogain_per_turn.append(infogain)
 
         # Prepare data structures for global cognitive maps only
         cogmap_update_data = {"dir": [], "facing": [], "pos": [], "overall": []}
@@ -303,10 +342,16 @@ class HTMLGenerator:
                     for metric in ['dir', 'facing', 'pos', 'overall']:
                         cogmap_full_data[metric].append(None)
 
-        # Generate plots for global level only
+        # Generate plots
+        infogain_plot = None
         update_plot = None
         full_plot = None
 
+        # Information gain plot
+        if infogain_per_turn:
+            infogain_plot = create_infogain_plot(infogain_per_turn, sample_name)
+
+        # Cognitive map plots
         if any(cogmap_update_data.values()):
             title = f"{sample_name} - Global (Update)"
             update_plot = create_cogmap_metrics_plot(cogmap_update_data, title)
@@ -315,12 +360,18 @@ class HTMLGenerator:
             title = f"{sample_name} - Global (Full)"
             full_plot = create_cogmap_metrics_plot(cogmap_full_data, title)
 
-        # Display the plots in horizontal layout
-        if update_plot or full_plot:
+        # Display all three plots in horizontal layout
+        if infogain_plot or update_plot or full_plot:
             f.write("<div class='cognitive-map-charts'>\n")
-            f.write("<h3>🧠 Cognitive Map Metrics (Global)</h3>\n")
+            f.write("<h3>📊 Performance Charts</h3>\n")
             f.write("<div class='plots-row'>\n")
             f.write("<div class='three-plots-grid'>\n")
+
+            if infogain_plot:
+                f.write("<div class='plot-item'>\n")
+                f.write("<h6>Information Gain per Turn</h6>\n")
+                f.write(f"<img src='{infogain_plot}' alt='Information Gain per Turn' class='plot-image'>\n")
+                f.write("</div>\n")
 
             if update_plot:
                 f.write("<div class='plot-item'>\n")
@@ -390,7 +441,10 @@ class HTMLGenerator:
         from io import StringIO
         output = StringIO()
 
-        # Generate Cognitive Map plots at the top
+        # Generate Sample Metrics at the top
+        self.generate_sample_metrics(output, entry, f"{combo} {sample_id}")
+
+        # Generate Performance Charts (Information Gain + Cognitive Map plots)
         self.generate_cognitive_map_charts(output, entry, f"{combo} {sample_id}")
 
         # Display initial room image if available

@@ -1424,6 +1424,123 @@ a:hover {
     }
 }
 
+/* Metrics Section */
+.metrics-section {
+    margin: 20px 0;
+    padding: 20px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 12px;
+    border: 1px solid #dee2e6;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.metrics-section h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    color: #495057;
+    font-weight: 600;
+    text-align: center;
+    font-size: 1.3em;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    align-items: start;
+}
+
+@media (max-width: 1024px) {
+    .metrics-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+}
+
+@media (min-width: 1025px) and (max-width: 1400px) {
+    .metrics-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+.metrics-box {
+    background: #ffffff;
+    border-radius: 10px;
+    padding: 15px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    border: 1px solid #e9ecef;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.metrics-box:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.metrics-box h4 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: 1.1em;
+    font-weight: 600;
+    color: #495057;
+    border-bottom: 2px solid #e9ecef;
+    padding-bottom: 8px;
+}
+
+.metrics-box.exploration h4 {
+    color: #28a745;
+    border-bottom-color: #28a745;
+}
+
+.metrics-box.evaluation h4 {
+    color: #007bff;
+    border-bottom-color: #007bff;
+}
+
+.metrics-box.cogmap h4 {
+    color: #6f42c1;
+    border-bottom-color: #6f42c1;
+}
+
+.metrics-box .dict-container {
+    margin: 0;
+    padding: 0;
+}
+
+.metrics-box .dict-item {
+    margin: 6px 0;
+    padding: 4px 0;
+    border-bottom: 1px solid #f8f9fa;
+}
+
+.metrics-box .dict-item:last-child {
+    border-bottom: none;
+}
+
+.metrics-box .dict-key {
+    font-weight: 500;
+    color: #495057;
+}
+
+.metrics-box .dict-value {
+    margin-left: 8px;
+}
+
+.metrics-box .dict-value.number {
+    font-weight: 600;
+    color: #495057;
+}
+
+.metrics-box .dict-value.true {
+    color: #28a745;
+    font-weight: 600;
+}
+
+.metrics-box .dict-value.false {
+    color: #dc3545;
+    font-weight: 600;
+}
+
 """
 
 JAVASCRIPT_CODE = """
