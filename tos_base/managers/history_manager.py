@@ -2,6 +2,8 @@ from typing import Optional, List, Dict
 import os
 import shutil
 import json
+
+from ..utils.cogmap.correlation import compute_correlation_metrics
 from ..utils.utils import hash
 from ..utils.room_utils import RoomPlotter
 from .. import (
@@ -25,8 +27,8 @@ class HistoryManager:
     Example: gpt-4o/1d54fa/vision/active/
     """
 
-    def __init__(self, observation_config:Dict, model_config:Dict ,room_dict: Dict, agent_dict: Dict, output_dir:str,
-                 exp_override: bool = False, eval_override: bool = False, cogmap_override: bool = False, all_override: bool = False, task_type: str = None):
+    def __init__(self, observation_config: Dict, model_config: Dict , room_dict: Dict, agent_dict: Dict, output_dir:str,
+                 eval_override: bool = False, all_override: bool = False, task_type: str = None):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.evaluation_turn_logs: Dict[str, Dict[str, Dict]] = {}
@@ -36,9 +38,9 @@ class HistoryManager:
             self.model_path,
             self._generate_room_key(room_dict, agent_dict),
             observation_config['render_mode'],
-            observation_config['exp_type']
+            observation_config['exp_type'],
+            "think" if observation_config['prompt_config']["enable_think"] else "nothink",
         ))
-        model_config_path = os.path.join(self.model_path, "model_config.json")
         if observation_config['exp_type'] == 'passive':
             self.output_dir = os.path.join(self.output_dir, observation_config["proxy_agent"])
         self.exploration_path = os.path.join(self.output_dir, EXPLORATION_LOG_BASENAME)
@@ -50,9 +52,6 @@ class HistoryManager:
         if all_override:
             if os.path.exists(self.output_dir):
                 shutil.rmtree(self.output_dir)
-        elif exp_override and observation_config['exp_type'] == 'active':
-            if os.path.exists(self.output_dir):
-                shutil.rmtree(self.output_dir)
 
         self._load()
         if eval_override:
@@ -60,9 +59,6 @@ class HistoryManager:
                 self.evaluation_turn_logs[task_type] = {}
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(os.path.join(self.output_dir, IMAGES_DIRNAME), exist_ok=True)
-        if not os.path.exists(model_config_path):
-            with open(model_config_path, "w") as f:
-                json.dump(model_config, f, ensure_ascii=False, indent=2)
 
         # Save per-sample config/meta for convenience
         self._write_config(observation_config, model_config, room_dict, agent_dict)
@@ -240,7 +236,8 @@ class HistoryManager:
             "samples": samples,
             "exp_summary": {"group_performance": {}},
             "eval_summary": {"group_performance": {}},
-            "cogmap_summary": {"group_performance": {}}
+            "cogmap_summary": {"group_performance": {}},
+            "correlation": {"group_performance": {}},
         }
 
         # Aggregate performance for each config combination across all samples
@@ -256,6 +253,7 @@ class HistoryManager:
                 # Provide both exploration and evaluation cogmap summaries
                 exp_type = "active" if "active" in config_name else "passive"
                 result["cogmap_summary"]["group_performance"][config_name] = CognitiveMapManager.aggregate_group_performance(env_data_list, exp_type=exp_type)
+                result["correlation"]["group_performance"][config_name] = compute_correlation_metrics(env_data_list, exp_type=exp_type)
         return result
 
     @staticmethod

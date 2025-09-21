@@ -996,6 +996,10 @@ a:hover {
         grid-template-columns: 1fr;
     }
 
+    .plots-grid {
+        grid-template-columns: 1fr;
+    }
+
     /* Stack cognitive map layout vertically on mobile */
     .cogmap-compare {
         grid-template-columns: 1fr;
@@ -1023,6 +1027,13 @@ a:hover {
 .three-plots-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-top: 15px;
+}
+
+.plots-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: 20px;
     margin-top: 15px;
 }
@@ -1248,6 +1259,320 @@ a:hover {
     }
 }
 
+/* JSON Display Styles with Collapsible Functionality */
+.json-container {
+    margin: 15px 0;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    overflow: hidden;
+}
+
+.json-header {
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+    padding: 12px 15px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.json-header strong {
+    color: #1565c0;
+    font-weight: 600;
+    display: block;
+}
+
+.json-content {
+    /* Always visible, no transition needed */
+}
+
+/* Global layout - three columns */
+.json-compare.global {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+}
+
+/* Local layout - two columns */
+.json-compare.local {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+}
+
+.json-box {
+    background: white;
+    border: none;
+    padding: 15px;
+    margin: 0;
+    min-height: 200px;
+}
+
+.json-box.left {
+    border-right: 1px solid #dee2e6;
+}
+
+.json-box.middle {
+    border-right: 1px solid #dee2e6;
+    border-left: none;
+}
+
+.json-box.right {
+    border-left: none;
+}
+
+.json-box strong {
+    display: block;
+    color: #495057;
+    font-weight: 600;
+    margin-bottom: 10px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #e9ecef;
+    font-size: 0.9em;
+}
+
+.json-content-inner {
+    background: #f8f9fa;
+    border-radius: 4px;
+    padding: 10px;
+    border: 1px solid #e9ecef;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.json-content-inner pre {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #495057;
+    background: transparent;
+    border: none;
+    padding: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-x: auto;
+}
+
+.empty-json {
+    color: #6c757d;
+    font-style: italic;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    border: 1px dashed #dee2e6;
+    text-align: center;
+    font-size: 0.9em;
+}
+
+/* Color coding for different JSON types */
+.json-box:has(strong:contains("Predicted")) .json-content-inner {
+    border-left: 3px solid #17a2b8;
+}
+
+.json-box:has(strong:contains("Ground Truth (Observed)")) .json-content-inner {
+    border-left: 3px solid #28a745;
+}
+
+.json-box:has(strong:contains("Ground Truth (Full)")) .json-content-inner {
+    border-left: 3px solid #ffc107;
+}
+
+.json-box:has(strong:contains("Ground Truth")) .json-content-inner {
+    border-left: 3px solid #28a745;
+}
+
+/* Fallback for browsers that don't support :has() */
+.json-box.predicted .json-content-inner {
+    border-left: 3px solid #17a2b8;
+}
+
+.json-box.gt-observed .json-content-inner {
+    border-left: 3px solid #28a745;
+}
+
+.json-box.gt-full .json-content-inner {
+    border-left: 3px solid #ffc107;
+}
+
+.json-box.gt .json-content-inner {
+    border-left: 3px solid #28a745;
+}
+
+/* Responsive design for JSON displays */
+@media (max-width: 1024px) {
+    .json-compare.global {
+        grid-template-columns: 1fr;
+    }
+
+    .json-compare.local {
+        grid-template-columns: 1fr;
+    }
+
+    .json-box.left,
+    .json-box.middle {
+        border-right: none;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .json-box.right {
+        border-left: none;
+        border-top: none;
+    }
+
+    .json-box:last-child {
+        border-bottom: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .json-content-inner {
+        max-height: 300px;
+        font-size: 10px;
+    }
+
+    .json-box {
+        padding: 12px;
+        min-height: 150px;
+    }
+}
+
+/* Metrics Section */
+.metrics-section {
+    margin: 20px 0;
+    padding: 20px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 12px;
+    border: 1px solid #dee2e6;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.metrics-section h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    color: #495057;
+    font-weight: 600;
+    text-align: center;
+    font-size: 1.3em;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    align-items: start;
+}
+
+.metrics-grid.four-columns {
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+}
+
+@media (max-width: 1024px) {
+    .metrics-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    .metrics-grid.four-columns {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (min-width: 1025px) and (max-width: 1400px) {
+    .metrics-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+    .metrics-grid.four-columns {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (min-width: 1401px) and (max-width: 1600px) {
+    .metrics-grid.four-columns {
+        grid-template-columns: 1fr 1fr 1fr;
+    }
+}
+
+.metrics-box {
+    background: #ffffff;
+    border-radius: 10px;
+    padding: 15px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    border: 1px solid #e9ecef;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.metrics-box:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.metrics-box h4 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: 1.1em;
+    font-weight: 600;
+    color: #495057;
+    border-bottom: 2px solid #e9ecef;
+    padding-bottom: 8px;
+}
+
+.metrics-box.exploration h4 {
+    color: #28a745;
+    border-bottom-color: #28a745;
+}
+
+.metrics-box.evaluation h4 {
+    color: #007bff;
+    border-bottom-color: #007bff;
+}
+
+.metrics-box.cogmap h4 {
+    color: #6f42c1;
+    border-bottom-color: #6f42c1;
+}
+
+.metrics-box.correlation h4 {
+    color: #fd7e14;
+    border-bottom-color: #fd7e14;
+}
+
+.metrics-box .dict-container {
+    margin: 0;
+    padding: 0;
+}
+
+.metrics-box .dict-item {
+    margin: 6px 0;
+    padding: 4px 0;
+    border-bottom: 1px solid #f8f9fa;
+}
+
+.metrics-box .dict-item:last-child {
+    border-bottom: none;
+}
+
+.metrics-box .dict-key {
+    font-weight: 500;
+    color: #495057;
+}
+
+.metrics-box .dict-value {
+    margin-left: 8px;
+}
+
+.metrics-box .dict-value.number {
+    font-weight: 600;
+    color: #495057;
+}
+
+.metrics-box .dict-value.true {
+    color: #28a745;
+    font-weight: 600;
+}
+
+.metrics-box .dict-value.false {
+    color: #dc3545;
+    font-weight: 600;
+}
+
 """
 
 JAVASCRIPT_CODE = """
@@ -1438,6 +1763,7 @@ function toggleGroundTruth(gtId) {
         }
     }
 }
+
 
 // Reset all combo states across ALL pages
 function resetAllComboStates() {

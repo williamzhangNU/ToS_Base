@@ -126,10 +126,93 @@ def create_cognitive_map_sample_plots(
 
 
 
-def visualize_json(json_data: dict, output_html: str, show_images: bool = True) -> str:
-    # Local import to avoid circular dependency
-    from .visualization import Visualization
-    viz = Visualization(json_data, output_html, show_images)
-    return viz.visualize()
+def create_correlation_scatter_plot(x_values: List[float], y_values: List[float],
+                                   x_label: str, y_label: str, title: str,
+                                   correlation_info: Dict = None) -> Optional[str]:
+    """
+    Create a scatter plot to display correlation between two variables.
 
+    Args:
+        x_values: X-axis data
+        y_values: Y-axis data
+        x_label: X-axis label
+        y_label: Y-axis label
+        title: Chart title
+        correlation_info: Correlation information dictionary containing pearson_r, p_value, etc.
+
+    Returns:
+        Chart data URI string, or None if no data available
+    """
+    if not x_values or not y_values or len(x_values) != len(y_values):
+        return None
+
+    # Filter valid data points
+    valid_pairs = []
+    for x, y in zip(x_values, y_values):
+        if (isinstance(x, (int, float)) and isinstance(y, (int, float)) and
+            not np.isnan(x) and not np.isnan(y)):
+            valid_pairs.append((float(x), float(y)))
+
+    if len(valid_pairs) < 2:
+        return None
+
+    valid_x = [pair[0] for pair in valid_pairs]
+    valid_y = [pair[1] for pair in valid_pairs]
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Draw scatter plot
+    ax.scatter(valid_x, valid_y, alpha=0.6, s=50, edgecolors='black', linewidths=0.5)
+
+    # Add trend line
+    if len(valid_pairs) >= 2:
+        z = np.polyfit(valid_x, valid_y, 1)
+        p = np.poly1d(z)
+        x_trend = np.linspace(min(valid_x), max(valid_x), 100)
+        ax.plot(x_trend, p(x_trend), "r--", alpha=0.8, linewidth=2)
+
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+
+    # Add correlation information to the chart
+    if correlation_info:
+        pearson_r = correlation_info.get('pearson_r')
+        p_value = correlation_info.get('p_value')
+        significant = correlation_info.get('significant', False)
+
+        if pearson_r is not None and p_value is not None:
+            sig_text = "***" if significant else "n.s."
+            text = f"r = {pearson_r:.3f}, p = {p_value:.3f} {sig_text}"
+            ax.text(0.05, 0.95, text, transform=ax.transAxes,
+                   bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+                   verticalalignment='top', fontsize=10)
+
+    return _fig_to_data_uri(fig)
+
+
+def create_correlation_plot(x_values: List[float], y_values: List[float],
+                          x_label: str, y_label: str, title: str,
+                          correlation_info: Dict = None) -> Optional[str]:
+    """
+    Create a correlation scatter plot between two lists.
+
+    Args:
+        x_values: X-axis data list
+        y_values: Y-axis data list
+        x_label: X-axis label
+        y_label: Y-axis label
+        title: Chart title
+        correlation_info: Optional correlation information dictionary, auto-calculated if not provided
+
+    Returns:
+        Chart data URI string, or None if no data available
+    """
+    if not x_values or not y_values:
+        return None
+
+    return create_correlation_scatter_plot(
+        x_values, y_values, x_label, y_label, title, correlation_info
+    )
 

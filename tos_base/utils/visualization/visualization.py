@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 from .html_templates import HTML_TEMPLATE, CSS_STYLES, JAVASCRIPT_CODE
 
 from ..utils import parse_llm_response
-from .charts import create_infogain_plot, create_cogmap_metrics_plot
+from .charts import create_infogain_plot, create_cogmap_metrics_plot, create_correlation_plot
 
 
 
@@ -25,7 +25,10 @@ class VisualizationHelper:
             if isinstance(v, (int, float)):
                 # Format numbers nicely
                 if isinstance(v, float):
-                    formatted_v = f"{v:.3f}" if v != int(v) else str(int(v))
+                    if v != v:  # NaN check
+                        formatted_v = "NaN"
+                    else:
+                        formatted_v = f"{v:.3f}" if v != int(v) else str(int(v))
                 else:
                     formatted_v = str(v)
                 html += f"<div class='dict-item'><span class='dict-key'>{escape(str(k))}:</span> <span class='dict-value number'>{formatted_v}</span></div>"
@@ -76,6 +79,7 @@ class HTMLGenerator:
         self.exp_summary = data.get("exp_summary", {})
         self.eval_summary = data.get("eval_summary", {})
         self.cogmap_summary = data.get("cogmap_summary", {})
+        self.correlation_summary = data.get("correlation", {})
 
         # Calculate statistics - each sample becomes one page
         self.total_pages = 1 + self.total_samples  # page 0 = TOC
@@ -114,68 +118,7 @@ class HTMLGenerator:
             f.write(f"<div class='stat-item'>📊 Samples: {sample_count}</div>\n")
             f.write("</div>\n")
 
-            # Text metrics section (without plots)
-            f.write("<div class='text-metrics-section'>\n")
-
-            # Group exploration performance (text only)
-            if self.exp_summary.get("group_performance", {}).get(gname):
-                exp_group = self.exp_summary["group_performance"][gname]
-                f.write("<div class='group-metrics'>")
-                f.write("<strong>Exploration:</strong>")
-                # Display exploration metrics but exclude the infogain_per_turn list
-                exp_group_filtered = {k: v for k, v in exp_group.items() if k != "infogain_per_turn"}
-                f.write(VisualizationHelper.dict_to_html(exp_group_filtered))
-                f.write("</div>\n")
-
-            # Group evaluation performance
-            if self.eval_summary.get("group_performance", {}).get(gname):
-                eval_group = self.eval_summary["group_performance"][gname]
-                f.write("<div class='group-metrics'>")
-                f.write("<strong>Evaluation:</strong>")
-                f.write(VisualizationHelper.dict_to_html(eval_group))
-                f.write("</div>\n")
-
-            # Group cognitive map performance (text only)
-            if self.cogmap_summary.get("group_performance", {}).get(gname):
-                cogmap_group = self.cogmap_summary["group_performance"][gname]
-                f.write("<div class='group-metrics'>")
-                f.write("<strong>Cognitive Map:</strong>")
-
-                # Display main cognitive map metrics (exclude per_turn data)
-                main_metrics = {k: v for k, v in cogmap_group.items()
-                               if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn"]}
-
-                # Check if we need 75/25 layout or single column
-                items = list(main_metrics.items())
-                total_items = len(items)
-                left_count = max(1, int(total_items * 0.75)) if total_items > 1 else total_items
-                right_metrics = dict(items[left_count:]) if left_count < total_items else {}
-
-                # Create layout class based on content
-                layout_class = "cogmap-compare" if right_metrics else "cogmap-compare single-column"
-                f.write(f"<div class='{layout_class}'>")
-
-                # Left side - Main cognitive map metrics
-                f.write("<div class='cogmap-box side'>")
-                left_metrics = dict(items[:left_count])
-                f.write(VisualizationHelper.dict_to_html(left_metrics))
-                f.write("</div>")
-
-                # Right side - Only if has content
-                if right_metrics:
-                    f.write("<div class='cogmap-box side'>")
-                    f.write(VisualizationHelper.dict_to_html(right_metrics))
-                    f.write("</div>")
-
-                f.write("</div>")  # End cogmap-compare
-                f.write("</div>\n")
-
-            f.write("</div>\n")  # End text-metrics-section
-
-            # Plots section (separate from text)
-            f.write("<div class='plots-section'>\n")
-
-            # Get plot data
+            # Generate plot data first (to pop values before metrics display)
             infogain_plot = None
             cogmap_update_plot = None
             cogmap_full_plot = None
@@ -183,15 +126,15 @@ class HTMLGenerator:
             # Exploration infogain plot
             if self.exp_summary.get("group_performance", {}).get(gname):
                 exp_group = self.exp_summary["group_performance"][gname]
-                infogain_per_turn = exp_group.get("infogain_per_turn", [])
+                infogain_per_turn = exp_group.pop("infogain_per_turn", [])
                 if infogain_per_turn:
                     infogain_plot = create_infogain_plot(infogain_per_turn, gname)
 
             # Cognitive map plots (only global now)
             if self.cogmap_summary.get("group_performance", {}).get(gname):
                 cogmap_group = self.cogmap_summary["group_performance"][gname]
-                update_data = cogmap_group.get("cogmap_update_per_turn", {})
-                full_data = cogmap_group.get("cogmap_full_per_turn", {})
+                update_data = cogmap_group.pop("cogmap_update_per_turn", {})
+                full_data = cogmap_group.pop("cogmap_full_per_turn", {})
 
                 # Only accept new shape (metric -> list)
                 global_update = update_data if isinstance(update_data, dict) else {}
@@ -205,7 +148,85 @@ class HTMLGenerator:
                     title = f"{gname} - Global (Full)"
                     cogmap_full_plot = create_cogmap_metrics_plot(global_full, title)
 
-            # Display plots in a single row (up to 3 plots)
+            # Generate correlation plots
+            correlation_plots = {}
+            if self.correlation_summary.get("group_performance", {}).get(gname):
+                correlation_data = self.correlation_summary["group_performance"][gname]
+                cogmap_values = correlation_data.pop('last_global_vs_gt_fulls', [])
+                acc_values = correlation_data.pop('avg_acc_metrics', [])
+                infogain_values = correlation_data.pop('last_infogains', [])
+
+                # Call twice to generate two scatter plots using existing correlation_info
+                if cogmap_values and acc_values:
+                    acc_correlation = correlation_data.get('cogmap_acc_correlations', {}).get('avg_accuracy', None)
+                    correlation_plots['cogmap_vs_accuracy'] = create_correlation_plot(
+                        cogmap_values, acc_values,
+                        'Cognitive Map Score (Last Global vs GT Full)',
+                        'Average Accuracy',
+                        'Cognitive Map Score vs Average Accuracy',
+                        acc_correlation
+                    )
+
+                if cogmap_values and infogain_values:
+                    infogain_correlation = correlation_data.get('cogmap_infogain_correlation', None)
+                    correlation_plots['cogmap_vs_infogain'] = create_correlation_plot(
+                        cogmap_values, infogain_values,
+                        'Cognitive Map Score (Last Global vs GT Full)',
+                        'Information Gain',
+                        'Cognitive Map Score vs Information Gain',
+                        infogain_correlation
+                    )
+
+            # Config metrics section with four-column layout (display metrics first)
+            f.write("<div class='metrics-section'>\n")
+            f.write("<div class='metrics-grid four-columns'>\n")
+
+            # Group exploration performance
+            exp_group = self.exp_summary.get("group_performance", {}).get(gname)
+            if exp_group:
+                exp_group_filtered = {k: v for k, v in exp_group.items() if k != "infogain_per_turn"}
+                if exp_group_filtered:
+                    f.write("<div class='metrics-box exploration'>\n")
+                    f.write("<h4>🔍 Exploration</h4>\n")
+                    f.write(VisualizationHelper.dict_to_html(exp_group_filtered))
+                    f.write("</div>\n")
+
+            # Group evaluation performance
+            eval_group = self.eval_summary.get("group_performance", {}).get(gname)
+            if eval_group:
+                f.write("<div class='metrics-box evaluation'>\n")
+                f.write("<h4>✅ Evaluation</h4>\n")
+                f.write(VisualizationHelper.dict_to_html(eval_group))
+                f.write("</div>\n")
+
+            # Group cognitive map performance
+            cogmap_group = self.cogmap_summary.get("group_performance", {}).get(gname)
+            if cogmap_group:
+                # Display main cognitive map metrics (exclude per_turn data)
+                main_metrics = {k: v for k, v in cogmap_group.items()
+                               if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn"]}
+                if main_metrics:
+                    f.write("<div class='metrics-box cogmap'>\n")
+                    f.write("<h4>🧠 Cognitive Map</h4>\n")
+                    f.write(VisualizationHelper.dict_to_html(main_metrics))
+                    f.write("</div>\n")
+
+            # Group correlation performance
+            correlation_summary = getattr(self, 'correlation_summary', {})
+            correlation_group = correlation_summary.get("group_performance", {}).get(gname)
+            if correlation_group:
+                f.write("<div class='metrics-box correlation'>\n")
+                f.write("<h4>📈 Correlation</h4>\n")
+                f.write(VisualizationHelper.dict_to_html(correlation_group))
+                f.write("</div>\n")
+
+            f.write("</div>\n")  # End metrics-grid
+            f.write("</div>\n")  # End metrics-section
+
+            # Plots section (display after metrics, but plots were generated earlier)
+            f.write("<div class='plots-section'>\n")
+
+            # Display plots in a single row (up to 5 plots now)
             available_plots = []
             if infogain_plot:
                 available_plots.append(("Information Gain per Turn", infogain_plot, "Information Gain per Turn"))
@@ -214,10 +235,17 @@ class HTMLGenerator:
             if cogmap_full_plot:
                 available_plots.append(("Cognitive Map (Full)", cogmap_full_plot, "Cognitive Map Full Turn Averages"))
 
+            # Add correlation plots
+            if correlation_plots.get('cogmap_vs_accuracy'):
+                available_plots.append(("CogMap vs Accuracy", correlation_plots['cogmap_vs_accuracy'], "Cognitive Map vs Accuracy Correlation"))
+            if correlation_plots.get('cogmap_vs_infogain'):
+                available_plots.append(("CogMap vs InfoGain", correlation_plots['cogmap_vs_infogain'], "Cognitive Map vs Information Gain Correlation"))
+
             if available_plots:
                 f.write("<div class='plots-row'>")
                 f.write("<h5>Performance Charts</h5>")
-                f.write("<div class='three-plots-grid'>")
+                # Use flexible grid that can handle more plots
+                f.write("<div class='plots-grid'>")
                 for title, plot_uri, alt_text in available_plots:
                     f.write(f"<div class='plot-item'>")
                     f.write(f"<h6>{title}</h6>")
@@ -227,6 +255,7 @@ class HTMLGenerator:
                 f.write("</div>")
 
             f.write("</div>\n")  # End plots-section
+
             f.write("</div>\n")  # End config-summary
 
         f.write("</div>\n")
@@ -258,55 +287,74 @@ class HTMLGenerator:
             running_page += 1
         f.write("</ul>\n</section>\n")
 
+    def generate_sample_metrics(self, f, entry: Dict, sample_name: str) -> None:
+        """Generate sample-level metrics visualization"""
+        metrics = entry.get("metrics", {})
+        if not metrics:
+            return
+
+        f.write("<div class='metrics-section'>\n")
+        f.write("<h3>📊 Sample Metrics</h3>\n")
+
+        # Create a three-column layout for exploration, evaluation, and cogmap metrics
+        f.write("<div class='metrics-grid'>\n")
+
+        # Helper function to filter out per_turn keys
+        def filter_per_turn_keys(data):
+            if not isinstance(data, dict):
+                return data
+            return {k: v for k, v in data.items() if "per_turn" not in k}
+
+        # Exploration metrics
+        exploration_metrics = metrics.get("exploration", {})
+        if exploration_metrics:
+            filtered_exploration = filter_per_turn_keys(exploration_metrics)
+            if filtered_exploration:
+                f.write("<div class='metrics-box exploration'>\n")
+                f.write("<h4>🔍 Exploration</h4>\n")
+                f.write(VisualizationHelper.dict_to_html(filtered_exploration))
+                f.write("</div>\n")
+
+        # Evaluation metrics
+        evaluation_metrics = metrics.get("evaluation", {})
+        if evaluation_metrics:
+            filtered_evaluation = filter_per_turn_keys(evaluation_metrics)
+            if filtered_evaluation:
+                f.write("<div class='metrics-box evaluation'>\n")
+                f.write("<h4>✅ Evaluation</h4>\n")
+                f.write(VisualizationHelper.dict_to_html(filtered_evaluation))
+                f.write("</div>\n")
+
+        # Cognitive map metrics
+        cogmap_metrics = metrics.get("cogmap", {})
+        if cogmap_metrics:
+            filtered_cogmap = filter_per_turn_keys(cogmap_metrics)
+            if filtered_cogmap:
+                f.write("<div class='metrics-box cogmap'>\n")
+                f.write("<h4>🧠 Cognitive Map</h4>\n")
+                f.write(VisualizationHelper.dict_to_html(filtered_cogmap))
+                f.write("</div>\n")
+
+        f.write("</div>\n")  # End metrics-grid
+        f.write("</div>\n")  # End metrics-section
+
     def generate_cognitive_map_charts(self, f, entry: Dict, sample_name: str) -> None:
-        """Generate cognitive map charts for a sample - only global level"""
-        # Extract cognitive map data from environment turn logs
-        env_turn_logs = entry.get("env_turn_logs", [])
-
-        # Prepare data structures for global cognitive maps only
-        cogmap_update_data = {"dir": [], "facing": [], "pos": [], "overall": []}
-        cogmap_full_data = {"dir": [], "facing": [], "pos": [], "overall": []}
-
-        # Extract metrics from each turn (global only)
-        for turn_log in env_turn_logs:
-            if turn_log['is_exploration_phase']:
-                # Extract update (cogmap_log) data - global only
-                cogmap_log = turn_log.get('cogmap_log', {})
-                if cogmap_log:
-                    global_data = cogmap_log.get('global', {})
-                    if global_data:
-                        update_metrics = global_data.get('metrics', {})
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            value = update_metrics.get(metric)
-                            cogmap_update_data[metric].append(value)
-                    else:
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            cogmap_update_data[metric].append(None)
-                else:
-                    # If no cogmap_log, fill with None
-                    for metric in ['dir', 'facing', 'pos', 'overall']:
-                        cogmap_update_data[metric].append(None)
-
-                # Extract full data - global only (using metrics_full from same cogmap_log)
-                if cogmap_log:
-                    global_data = cogmap_log.get('global', {})
-                    if global_data:
-                        full_metrics = global_data.get('metrics_full', {})
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            value = full_metrics.get(metric)
-                            cogmap_full_data[metric].append(value)
-                    else:
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            cogmap_full_data[metric].append(None)
-                else:
-                    # If no cogmap_log, fill with None
-                    for metric in ['dir', 'facing', 'pos', 'overall']:
-                        cogmap_full_data[metric].append(None)
-
-        # Generate plots for global level only
+        """Generate cognitive map charts and information gain chart in a single row"""
+        # Extract information gain data from exploration turns
+        infogain_per_turn = entry['metrics'].get('exploration', {}).pop('infogain_per_turn', [])
+        cogmap_update_data = entry['metrics'].get('cogmap', {}).pop('cogmap_update_per_turn', {})
+        cogmap_full_data = entry['metrics'].get('cogmap', {}).pop('cogmap_full_per_turn', {})
+        
+        # Generate plots
+        infogain_plot = None
         update_plot = None
         full_plot = None
 
+        # Information gain plot
+        if infogain_per_turn:
+            infogain_plot = create_infogain_plot(infogain_per_turn, sample_name)
+
+        # Cognitive map plots
         if any(cogmap_update_data.values()):
             title = f"{sample_name} - Global (Update)"
             update_plot = create_cogmap_metrics_plot(cogmap_update_data, title)
@@ -315,23 +363,25 @@ class HTMLGenerator:
             title = f"{sample_name} - Global (Full)"
             full_plot = create_cogmap_metrics_plot(cogmap_full_data, title)
 
-        # Display the plots in horizontal layout
-        if update_plot or full_plot:
+        # Display all plots in horizontal layout (3 plots for samples)
+        available_plots = []
+        if infogain_plot:
+            available_plots.append(("Information Gain per Turn", infogain_plot, "Information Gain per Turn"))
+        if update_plot:
+            available_plots.append(("Cognitive Map (Update)", update_plot, "Global Update Metrics"))
+        if full_plot:
+            available_plots.append(("Cognitive Map (Full)", full_plot, "Global Full Metrics"))
+
+        if available_plots:
             f.write("<div class='cognitive-map-charts'>\n")
-            f.write("<h3>🧠 Cognitive Map Metrics (Global)</h3>\n")
+            f.write("<h3>📊 Performance Charts</h3>\n")
             f.write("<div class='plots-row'>\n")
             f.write("<div class='three-plots-grid'>\n")
 
-            if update_plot:
+            for title, plot_uri, alt_text in available_plots:
                 f.write("<div class='plot-item'>\n")
-                f.write("<h6>Cognitive Map (Update)</h6>\n")
-                f.write(f"<img src='{update_plot}' alt='Global Update Metrics' class='plot-image'>\n")
-                f.write("</div>\n")
-
-            if full_plot:
-                f.write("<div class='plot-item'>\n")
-                f.write("<h6>Cognitive Map (Full)</h6>\n")
-                f.write(f"<img src='{full_plot}' alt='Global Full Metrics' class='plot-image'>\n")
+                f.write(f"<h6>{title}</h6>\n")
+                f.write(f"<img src='{plot_uri}' alt='{alt_text}' class='plot-image'>\n")
                 f.write("</div>\n")
 
             f.write("</div>\n")  # End three-plots-grid
@@ -390,7 +440,10 @@ class HTMLGenerator:
         from io import StringIO
         output = StringIO()
 
-        # Generate Cognitive Map plots at the top
+        # Generate Sample Metrics at the top
+        self.generate_sample_metrics(output, entry, f"{combo} {sample_id}")
+
+        # Generate Performance Charts (Information Gain + Cognitive Map plots)
         self.generate_cognitive_map_charts(output, entry, f"{combo} {sample_id}")
 
         # Display initial room image if available
@@ -440,6 +493,97 @@ class HTMLGenerator:
             if data.get('original_response'):
                 response_id = f"cogmap_{map_type}_{page_idx}_{t_idx}"
                 self._render_expandable_block(f, data['original_response'], response_id, title, "cogmap-response")
+
+                # Add JSON display for global and local
+                if map_type == 'global':
+                    # For global, display pred_json, gt_json, and gt_json_full in three columns
+                    pred_json = data.get('pred_json', {})
+                    gt_json = data.get('gt_json', {})
+                    gt_json_full = data.get('gt_json_full', {})
+
+                    if pred_json or gt_json or gt_json_full:
+                        f.write("<div class='json-container global'>\n")
+                        f.write("<div class='json-header'>")
+                        f.write("<strong>📊 Cognitive Map JSONs</strong>")
+                        f.write("</div>\n")
+                        f.write("<div class='json-content'>\n")
+                        f.write("<div class='json-compare global'>\n")
+
+                        # Left - pred_json
+                        f.write("<div class='json-box left predicted'>\n")
+                        f.write("<strong>🤖 Predicted</strong>\n")
+                        if pred_json:
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(pred_json, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        else:
+                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        # Middle - gt_json
+                        f.write("<div class='json-box middle gt-observed'>\n")
+                        f.write("<strong>🎯 Ground Truth (Observed)</strong>\n")
+                        if gt_json:
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(gt_json, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        else:
+                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        # Right - gt_json_full
+                        f.write("<div class='json-box right gt-full'>\n")
+                        f.write("<strong>🎯 Ground Truth (Full)</strong>\n")
+                        if gt_json_full:
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(gt_json_full, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        else:
+                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        f.write("</div>\n")  # End json-compare
+                        f.write("</div>\n")  # End json-content
+                        f.write("</div>\n")  # End json-container
+
+                elif map_type == 'local':
+                    # For local, display pred_json and gt_json in two columns
+                    pred_json = data.get('pred_json', {})
+                    gt_json = data.get('gt_json', {})
+
+                    if pred_json or gt_json:
+                        f.write("<div class='json-container local'>\n")
+                        f.write("<div class='json-header'>")
+                        f.write("<strong>📊 Cognitive Map JSONs</strong>")
+                        f.write("</div>\n")
+                        f.write("<div class='json-content'>\n")
+                        f.write("<div class='json-compare local'>\n")
+
+                        # Left - pred_json
+                        f.write("<div class='json-box left predicted'>\n")
+                        f.write("<strong>🤖 Predicted</strong>\n")
+                        if pred_json:
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(pred_json, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        else:
+                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        # Right - gt_json
+                        f.write("<div class='json-box right gt'>\n")
+                        f.write("<strong>🎯 Ground Truth</strong>\n")
+                        if gt_json:
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(gt_json, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        else:
+                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        f.write("</div>\n")  # End json-compare
+                        f.write("</div>\n")  # End json-content
+                        f.write("</div>\n")  # End json-container
 
     def _render_cogmap_metrics(self, f, cogmap_log: Dict, page_idx: int, t_idx: int) -> None:
         """Helper to render cognitive map metrics"""
@@ -656,17 +800,3 @@ class HTMLGenerator:
 
         return self.output_html
 
-
-class Visualization:
-    """Main visualization class for JSON data"""
-    
-    def __init__(self, json_data: dict, output_html: str, show_images: bool = True):
-        self.json_data = json_data
-        self.output_html = output_html
-        self.show_images = show_images
-
-
-    def visualize(self) -> str:
-        """Main method to generate visualization"""
-        generator = HTMLGenerator(self.json_data, self.output_html, self.show_images)
-        return generator.generate_html()
