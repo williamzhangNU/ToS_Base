@@ -54,14 +54,15 @@ class Prompter:
         room_desc = get_room_description(room, agent, with_topdown=self.config.prompt_config['topdown'])
         if self.config.render_mode == 'vision':
             images = [self.image_handler.get_image('instruction'), self.image_handler.get_image('label')]
-        else:
-            observation_instructions = (
-                PairwiseRelationship.prompt()
-                + f"\n{DegreeRel.prompt()}"
-                + f"\n{OrientationRel.prompt()}"
-                + f"\n{PairwiseRelationshipDiscrete.prompt()}"
-                + f"\n{ProximityRelationship.prompt()}"
-            )
+        
+        # Build observation instruction text (used in both text and vision modes)
+        observation_instructions = (
+            PairwiseRelationship.prompt()
+            + f"\n{DegreeRel.prompt()}"
+            + f"\n{OrientationRel.prompt()}"
+            + f"\n{PairwiseRelationshipDiscrete.prompt()}"
+            + f"\n{ProximityRelationship.prompt()}"
+        )
         if self.config.exp_type == 'active':
             exp_instructions = ActionSequence.get_usage_instructions() + f"\n\nYou have a maximum of {self.config.max_exp_steps} exploration steps."   
             if self.config.render_mode == 'vision':
@@ -72,7 +73,8 @@ class Prompter:
                 obs_str = ACTIVE_INSTRUCTION_VISION.format(
                     room_info=room_desc,
                     exp_instructions=exp_instructions,
-                    image_placeholder=self.config.image_placeholder
+                    image_placeholder=self.config.image_placeholder,
+                    observation_instructions=observation_instructions,
                 )
 
                 obs['multi_modal_data'] = {self.config.image_placeholder: images}
@@ -94,7 +96,8 @@ class Prompter:
                 obs_str = PASSIVE_INSTRUCTION_VISION.format(
                     room_info=room_desc,
                     exp_history=exp_history_str,
-                    image_placeholder=self.config.image_placeholder
+                    image_placeholder=self.config.image_placeholder,
+                    observation_instructions=observation_instructions,
                 )
                 obs['multi_modal_data'] = {self.config.image_placeholder: images}
             else:

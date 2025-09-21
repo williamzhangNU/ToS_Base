@@ -102,14 +102,16 @@ class EgoFrontBins:
 
     @classmethod
     def prompt(cls) -> str:
-        parts = [
+        lines = [
+            "Egocentric angle bins (0° is front):",
             "[-45°,-22.5°)→front-left",
             "[-22.5°,0°)→front-slight-left",
             "0°→front",
             "(0°,22.5°]→front-slight-right",
             "(22.5°,45°]→front-right",
+            "otherwise→beyond-fov",
         ]
-        return "Bearing bins (egocentric, 0° is front): " + ", ".join(parts) + "."
+        return "\n".join(lines)
 
 
 class _CardinalBinsBase:
@@ -129,8 +131,9 @@ class _CardinalBinsBase:
 
     @classmethod
     def prompt(cls) -> str:
+        header = "Cardinal angle bins:"
         parts = [f"[{lo}°,{hi}°]→{label}" for (lo, hi), label in zip(cls.BINS, cls.LABELS)]
-        return "Bearing bins (0° is front): " + ", ".join(parts) + "."
+        return "\n".join([header] + parts)
 
 
 class CardinalBinsAllo(_CardinalBinsBase):
@@ -174,7 +177,8 @@ class StandardDistanceBins:
     
     @classmethod
     def prompt(cls) -> str:
-        parts = [
+        lines = [
+            "Distance bins:",
             "=0→same distance",
             "(0,2]→near",
             "(2,4]→mid distance",
@@ -183,7 +187,7 @@ class StandardDistanceBins:
             "(16,32]→very far",
             "(32,64]→extremely far",
         ]
-        return "Distance bins (0 means same distance): " + ", ".join(parts) + "."
+        return "\n".join(lines)
 
 
 class Dir(Enum):
@@ -469,8 +473,7 @@ class PairwiseRelationship:
     @classmethod
     def prompt(cls) -> str:
         return (
-            "Relationship reporting: bearing as degree; distance is Euclidean. "
-            "Use discrete bins for tasks and proximity."
+            "Relationship: bearing in degrees; distance is Euclidean. Use binned labels."
         )
 
 
@@ -491,11 +494,11 @@ class PairwiseRelationshipDiscrete(PairwiseRelationship):
     @classmethod
     def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> str:
         return (
-            "Discrete relationship reporting:\n"
-            f"- Angles: EgoFront (egocentric observation); CardinalAllo (otherwise, object-to-object pairwise).\n"
-            f"  EgoFront details → {EgoFrontBins.prompt()}\n"
-            f"  CardinalAllo details → {CardinalBinsAllo.prompt()}\n"
-            f"- {StandardDistanceBins.prompt()}"
+            "Binned relationship reporting:\n"
+            f"Angles: EgoFront (egocentric); Cardinal (object-to-object).\n"
+            f"{EgoFrontBins.prompt()}\n"
+            f"{CardinalBinsAllo.prompt()}\n"
+            f"{StandardDistanceBins.prompt()}"
         )
     
     @classmethod
@@ -548,8 +551,9 @@ class ProximityRelationship:
     @classmethod
     def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> str:
         return (
-            f"Proximity relationship reporting:\n"
-            f"Nearby objects (≤{cls.PROXIMITY_THRESHOLD} units). Object-to-object uses CardinalAllo for angle and StandardDistance bins."
+            "Proximity reporting:\n"
+            f"Observe also returns nearby object-to-object relations (distance ≤ {cls.PROXIMITY_THRESHOLD}).\n"
+            "Treat your current facing as north and use cardinal angle bins; distances use the standard bins."
         )
     
     def to_string(self, a_name: str, b_name: str) -> str:

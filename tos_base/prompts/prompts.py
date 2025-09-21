@@ -62,9 +62,12 @@ Goal: Your objective is to **minimize total COST** while gaining knowledge of sp
 Facing: forward/backward/right/left. When facing north: forward=north, back=south, right=east, left=west.
 
 Observation: For visible objects you receive (direction, signed degree, distance).
-- direction uses <vertical>-<horizontal> with front|back|same and left|right|same and
+- direction uses <vertical>-<horizontal> with front|back|same and left|right|same
 - degree is clockwise from your facing; distance is Euclidean
 - You may ignore degree/distance for the stopping condition
+
+Observation details:
+{observation_instructions}
 
 Multi-room: 
 - Rooms are connected by gates/doors on vertical (N–S) or horizontal (E–W) walls. When you stand at a door, you can see objects from both connected rooms (within FOV).
@@ -106,6 +109,9 @@ Here is an example of your observation: blue object 1 m straight ahead; yellow o
 
 All objects in the following image are facing towards the camera and the labels match the objects listed below.
 {image_placeholder}
+
+Observation details:
+{observation_instructions}
 
 ## Room Layout
 {room_info}
