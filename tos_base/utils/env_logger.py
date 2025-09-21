@@ -14,7 +14,8 @@ from .. import (
     Agent,
     RoomPlotter
 )
-from .visualization import visualize_json
+from .visualization.visualization import HTMLGenerator
+
 
 @dataclass
 class EnvTurnLog:
@@ -129,7 +130,8 @@ class SpatialEnvLogger:
 
         # Generate HTML dashboard
         html_path = os.path.join(output_dir, "env_data.html")
-        dashboard_path = visualize_json(saved_data, html_path, True)
+        viz = HTMLGenerator(saved_data, html_path, True)
+        dashboard_path = viz.generate_html()
         
         print(f"Environment data logged to {os.path.abspath(output_dir)}")
         print(f"Dashboard written to {os.path.abspath(dashboard_path)}")

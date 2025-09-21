@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 from .html_templates import HTML_TEMPLATE, CSS_STYLES, JAVASCRIPT_CODE
 
 from ..utils import parse_llm_response
-from .charts import create_infogain_plot, create_cogmap_metrics_plot
+from .charts import create_infogain_plot, create_cogmap_metrics_plot, create_correlation_plot
 
 
 
@@ -25,7 +25,10 @@ class VisualizationHelper:
             if isinstance(v, (int, float)):
                 # Format numbers nicely
                 if isinstance(v, float):
-                    formatted_v = f"{v:.3f}" if v != int(v) else str(int(v))
+                    if v != v:  # NaN check
+                        formatted_v = "NaN"
+                    else:
+                        formatted_v = f"{v:.3f}" if v != int(v) else str(int(v))
                 else:
                     formatted_v = str(v)
                 html += f"<div class='dict-item'><span class='dict-key'>{escape(str(k))}:</span> <span class='dict-value number'>{formatted_v}</span></div>"
@@ -76,6 +79,7 @@ class HTMLGenerator:
         self.exp_summary = data.get("exp_summary", {})
         self.eval_summary = data.get("eval_summary", {})
         self.cogmap_summary = data.get("cogmap_summary", {})
+        self.correlation_summary = data.get("correlation", {})
 
         # Calculate statistics - each sample becomes one page
         self.total_pages = 1 + self.total_samples  # page 0 = TOC
@@ -114,9 +118,68 @@ class HTMLGenerator:
             f.write(f"<div class='stat-item'>📊 Samples: {sample_count}</div>\n")
             f.write("</div>\n")
 
-            # Config metrics section with three-column layout
+            # Generate plot data first (to pop values before metrics display)
+            infogain_plot = None
+            cogmap_update_plot = None
+            cogmap_full_plot = None
+
+            # Exploration infogain plot
+            if self.exp_summary.get("group_performance", {}).get(gname):
+                exp_group = self.exp_summary["group_performance"][gname]
+                infogain_per_turn = exp_group.pop("infogain_per_turn", [])
+                if infogain_per_turn:
+                    infogain_plot = create_infogain_plot(infogain_per_turn, gname)
+
+            # Cognitive map plots (only global now)
+            if self.cogmap_summary.get("group_performance", {}).get(gname):
+                cogmap_group = self.cogmap_summary["group_performance"][gname]
+                update_data = cogmap_group.pop("cogmap_update_per_turn", {})
+                full_data = cogmap_group.pop("cogmap_full_per_turn", {})
+
+                # Only accept new shape (metric -> list)
+                global_update = update_data if isinstance(update_data, dict) else {}
+                if global_update and any(global_update.values()):
+                    title = f"{gname} - Global (Update)"
+                    cogmap_update_plot = create_cogmap_metrics_plot(global_update, title)
+
+                # Full mode plot (global only)
+                global_full = full_data if isinstance(full_data, dict) else {}
+                if global_full and any(global_full.values()):
+                    title = f"{gname} - Global (Full)"
+                    cogmap_full_plot = create_cogmap_metrics_plot(global_full, title)
+
+            # Generate correlation plots
+            correlation_plots = {}
+            if self.correlation_summary.get("group_performance", {}).get(gname):
+                correlation_data = self.correlation_summary["group_performance"][gname]
+                cogmap_values = correlation_data.pop('last_global_vs_gt_fulls', [])
+                acc_values = correlation_data.pop('avg_acc_metrics', [])
+                infogain_values = correlation_data.pop('last_infogains', [])
+
+                # Call twice to generate two scatter plots using existing correlation_info
+                if cogmap_values and acc_values:
+                    acc_correlation = correlation_data.get('cogmap_acc_correlations', {}).get('avg_accuracy', None)
+                    correlation_plots['cogmap_vs_accuracy'] = create_correlation_plot(
+                        cogmap_values, acc_values,
+                        'Cognitive Map Score (Last Global vs GT Full)',
+                        'Average Accuracy',
+                        'Cognitive Map Score vs Average Accuracy',
+                        acc_correlation
+                    )
+
+                if cogmap_values and infogain_values:
+                    infogain_correlation = correlation_data.get('cogmap_infogain_correlation', None)
+                    correlation_plots['cogmap_vs_infogain'] = create_correlation_plot(
+                        cogmap_values, infogain_values,
+                        'Cognitive Map Score (Last Global vs GT Full)',
+                        'Information Gain',
+                        'Cognitive Map Score vs Information Gain',
+                        infogain_correlation
+                    )
+
+            # Config metrics section with four-column layout (display metrics first)
             f.write("<div class='metrics-section'>\n")
-            f.write("<div class='metrics-grid'>\n")
+            f.write("<div class='metrics-grid four-columns'>\n")
 
             # Group exploration performance
             exp_group = self.exp_summary.get("group_performance", {}).get(gname)
@@ -148,43 +211,22 @@ class HTMLGenerator:
                     f.write(VisualizationHelper.dict_to_html(main_metrics))
                     f.write("</div>\n")
 
+            # Group correlation performance
+            correlation_summary = getattr(self, 'correlation_summary', {})
+            correlation_group = correlation_summary.get("group_performance", {}).get(gname)
+            if correlation_group:
+                f.write("<div class='metrics-box correlation'>\n")
+                f.write("<h4>📈 Correlation</h4>\n")
+                f.write(VisualizationHelper.dict_to_html(correlation_group))
+                f.write("</div>\n")
+
             f.write("</div>\n")  # End metrics-grid
             f.write("</div>\n")  # End metrics-section
 
-            # Plots section (separate from text)
+            # Plots section (display after metrics, but plots were generated earlier)
             f.write("<div class='plots-section'>\n")
 
-            # Get plot data
-            infogain_plot = None
-            cogmap_update_plot = None
-            cogmap_full_plot = None
-
-            # Exploration infogain plot
-            if self.exp_summary.get("group_performance", {}).get(gname):
-                exp_group = self.exp_summary["group_performance"][gname]
-                infogain_per_turn = exp_group.get("infogain_per_turn", [])
-                if infogain_per_turn:
-                    infogain_plot = create_infogain_plot(infogain_per_turn, gname)
-
-            # Cognitive map plots (only global now)
-            if self.cogmap_summary.get("group_performance", {}).get(gname):
-                cogmap_group = self.cogmap_summary["group_performance"][gname]
-                update_data = cogmap_group.get("cogmap_update_per_turn", {})
-                full_data = cogmap_group.get("cogmap_full_per_turn", {})
-
-                # Only accept new shape (metric -> list)
-                global_update = update_data if isinstance(update_data, dict) else {}
-                if global_update and any(global_update.values()):
-                    title = f"{gname} - Global (Update)"
-                    cogmap_update_plot = create_cogmap_metrics_plot(global_update, title)
-
-                # Full mode plot (global only)
-                global_full = full_data if isinstance(full_data, dict) else {}
-                if global_full and any(global_full.values()):
-                    title = f"{gname} - Global (Full)"
-                    cogmap_full_plot = create_cogmap_metrics_plot(global_full, title)
-
-            # Display plots in a single row (up to 3 plots)
+            # Display plots in a single row (up to 5 plots now)
             available_plots = []
             if infogain_plot:
                 available_plots.append(("Information Gain per Turn", infogain_plot, "Information Gain per Turn"))
@@ -193,10 +235,17 @@ class HTMLGenerator:
             if cogmap_full_plot:
                 available_plots.append(("Cognitive Map (Full)", cogmap_full_plot, "Cognitive Map Full Turn Averages"))
 
+            # Add correlation plots
+            if correlation_plots.get('cogmap_vs_accuracy'):
+                available_plots.append(("CogMap vs Accuracy", correlation_plots['cogmap_vs_accuracy'], "Cognitive Map vs Accuracy Correlation"))
+            if correlation_plots.get('cogmap_vs_infogain'):
+                available_plots.append(("CogMap vs InfoGain", correlation_plots['cogmap_vs_infogain'], "Cognitive Map vs Information Gain Correlation"))
+
             if available_plots:
                 f.write("<div class='plots-row'>")
                 f.write("<h5>Performance Charts</h5>")
-                f.write("<div class='three-plots-grid'>")
+                # Use flexible grid that can handle more plots
+                f.write("<div class='plots-grid'>")
                 for title, plot_uri, alt_text in available_plots:
                     f.write(f"<div class='plot-item'>")
                     f.write(f"<h6>{title}</h6>")
@@ -206,6 +255,7 @@ class HTMLGenerator:
                 f.write("</div>")
 
             f.write("</div>\n")  # End plots-section
+
             f.write("</div>\n")  # End config-summary
 
         f.write("</div>\n")
@@ -290,58 +340,11 @@ class HTMLGenerator:
 
     def generate_cognitive_map_charts(self, f, entry: Dict, sample_name: str) -> None:
         """Generate cognitive map charts and information gain chart in a single row"""
-        # Extract cognitive map data from environment turn logs
-        env_turn_logs = entry.get("env_turn_logs", [])
-
         # Extract information gain data from exploration turns
-        infogain_per_turn = []
-        for turn_log in env_turn_logs:
-            if turn_log.get('is_exploration_phase', False):
-                exploration_log = turn_log.get('exploration_log', {})
-                infogain = exploration_log.get('information_gain')
-                if infogain is not None:
-                    infogain_per_turn.append(infogain)
-
-        # Prepare data structures for global cognitive maps only
-        cogmap_update_data = {"dir": [], "facing": [], "pos": [], "overall": []}
-        cogmap_full_data = {"dir": [], "facing": [], "pos": [], "overall": []}
-
-        # Extract metrics from each turn (global only)
-        for turn_log in env_turn_logs:
-            if turn_log['is_exploration_phase']:
-                # Extract update (cogmap_log) data - global only
-                cogmap_log = turn_log.get('cogmap_log', {})
-                if cogmap_log:
-                    global_data = cogmap_log.get('global', {})
-                    if global_data:
-                        update_metrics = global_data.get('metrics', {})
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            value = update_metrics.get(metric)
-                            cogmap_update_data[metric].append(value)
-                    else:
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            cogmap_update_data[metric].append(None)
-                else:
-                    # If no cogmap_log, fill with None
-                    for metric in ['dir', 'facing', 'pos', 'overall']:
-                        cogmap_update_data[metric].append(None)
-
-                # Extract full data - global only (using metrics_full from same cogmap_log)
-                if cogmap_log:
-                    global_data = cogmap_log.get('global', {})
-                    if global_data:
-                        full_metrics = global_data.get('metrics_full', {})
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            value = full_metrics.get(metric)
-                            cogmap_full_data[metric].append(value)
-                    else:
-                        for metric in ['dir', 'facing', 'pos', 'overall']:
-                            cogmap_full_data[metric].append(None)
-                else:
-                    # If no cogmap_log, fill with None
-                    for metric in ['dir', 'facing', 'pos', 'overall']:
-                        cogmap_full_data[metric].append(None)
-
+        infogain_per_turn = entry['metrics'].get('exploration', {}).pop('infogain_per_turn', [])
+        cogmap_update_data = entry['metrics'].get('cogmap', {}).pop('cogmap_update_per_turn', {})
+        cogmap_full_data = entry['metrics'].get('cogmap', {}).pop('cogmap_full_per_turn', {})
+        
         # Generate plots
         infogain_plot = None
         update_plot = None
@@ -360,29 +363,25 @@ class HTMLGenerator:
             title = f"{sample_name} - Global (Full)"
             full_plot = create_cogmap_metrics_plot(cogmap_full_data, title)
 
-        # Display all three plots in horizontal layout
-        if infogain_plot or update_plot or full_plot:
+        # Display all plots in horizontal layout (3 plots for samples)
+        available_plots = []
+        if infogain_plot:
+            available_plots.append(("Information Gain per Turn", infogain_plot, "Information Gain per Turn"))
+        if update_plot:
+            available_plots.append(("Cognitive Map (Update)", update_plot, "Global Update Metrics"))
+        if full_plot:
+            available_plots.append(("Cognitive Map (Full)", full_plot, "Global Full Metrics"))
+
+        if available_plots:
             f.write("<div class='cognitive-map-charts'>\n")
             f.write("<h3>📊 Performance Charts</h3>\n")
             f.write("<div class='plots-row'>\n")
             f.write("<div class='three-plots-grid'>\n")
 
-            if infogain_plot:
+            for title, plot_uri, alt_text in available_plots:
                 f.write("<div class='plot-item'>\n")
-                f.write("<h6>Information Gain per Turn</h6>\n")
-                f.write(f"<img src='{infogain_plot}' alt='Information Gain per Turn' class='plot-image'>\n")
-                f.write("</div>\n")
-
-            if update_plot:
-                f.write("<div class='plot-item'>\n")
-                f.write("<h6>Cognitive Map (Update)</h6>\n")
-                f.write(f"<img src='{update_plot}' alt='Global Update Metrics' class='plot-image'>\n")
-                f.write("</div>\n")
-
-            if full_plot:
-                f.write("<div class='plot-item'>\n")
-                f.write("<h6>Cognitive Map (Full)</h6>\n")
-                f.write(f"<img src='{full_plot}' alt='Global Full Metrics' class='plot-image'>\n")
+                f.write(f"<h6>{title}</h6>\n")
+                f.write(f"<img src='{plot_uri}' alt='{alt_text}' class='plot-image'>\n")
                 f.write("</div>\n")
 
             f.write("</div>\n")  # End three-plots-grid
@@ -801,17 +800,3 @@ class HTMLGenerator:
 
         return self.output_html
 
-
-class Visualization:
-    """Main visualization class for JSON data"""
-    
-    def __init__(self, json_data: dict, output_html: str, show_images: bool = True):
-        self.json_data = json_data
-        self.output_html = output_html
-        self.show_images = show_images
-
-
-    def visualize(self) -> str:
-        """Main method to generate visualization"""
-        generator = HTMLGenerator(self.json_data, self.output_html, self.show_images)
-        return generator.generate_html()

@@ -1,1 +1,1 @@
-from .charts import visualize_json, create_infogain_plot, create_cogmap_metrics_plot
+from .charts import create_infogain_plot, create_cogmap_metrics_plot

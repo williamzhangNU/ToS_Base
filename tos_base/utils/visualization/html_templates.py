@@ -996,6 +996,10 @@ a:hover {
         grid-template-columns: 1fr;
     }
 
+    .plots-grid {
+        grid-template-columns: 1fr;
+    }
+
     /* Stack cognitive map layout vertically on mobile */
     .cogmap-compare {
         grid-template-columns: 1fr;
@@ -1023,6 +1027,13 @@ a:hover {
 .three-plots-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-top: 15px;
+}
+
+.plots-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: 20px;
     margin-top: 15px;
 }
@@ -1450,16 +1461,32 @@ a:hover {
     align-items: start;
 }
 
+.metrics-grid.four-columns {
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+}
+
 @media (max-width: 1024px) {
     .metrics-grid {
         grid-template-columns: 1fr;
         gap: 15px;
+    }
+    .metrics-grid.four-columns {
+        grid-template-columns: 1fr;
     }
 }
 
 @media (min-width: 1025px) and (max-width: 1400px) {
     .metrics-grid {
         grid-template-columns: 1fr 1fr;
+    }
+    .metrics-grid.four-columns {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (min-width: 1401px) and (max-width: 1600px) {
+    .metrics-grid.four-columns {
+        grid-template-columns: 1fr 1fr 1fr;
     }
 }
 
@@ -1500,6 +1527,11 @@ a:hover {
 .metrics-box.cogmap h4 {
     color: #6f42c1;
     border-bottom-color: #6f42c1;
+}
+
+.metrics-box.correlation h4 {
+    color: #fd7e14;
+    border-bottom-color: #fd7e14;
 }
 
 .metrics-box .dict-container {

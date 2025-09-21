@@ -567,7 +567,7 @@ class CognitiveMapManager:
 
         # Per-turn global metrics (concise helper)
         per_turn_update, per_turn_full = CognitiveMapManager.compute_per_turn_global_metrics(cog_logs)
-
+        false_belief_acc = BaseCogMetrics.average([BaseCogMetrics.from_dict(m) for m in false_belief_metrics]).to_dict() if false_belief_metrics else None
         if exp_type == 'passive':
             return {
                 'exploration': {
@@ -584,7 +584,7 @@ class CognitiveMapManager:
                 'consistency': consistency,
             },
             'evaluation': {
-                'false_belief_acc': BaseCogMetrics.average([BaseCogMetrics.from_dict(m) for m in false_belief_metrics]).to_dict(),
+                'false_belief_acc': false_belief_acc,
             },
             'cogmap_update_per_turn': per_turn_update,
             'cogmap_full_per_turn': per_turn_full,

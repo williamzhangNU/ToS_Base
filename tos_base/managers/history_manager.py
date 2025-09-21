@@ -2,6 +2,8 @@ from typing import Optional, List, Dict
 import os
 import shutil
 import json
+
+from ..utils.cogmap.correlation import compute_correlation_metrics
 from ..utils.utils import hash
 from ..utils.room_utils import RoomPlotter
 from .. import (
@@ -234,7 +236,8 @@ class HistoryManager:
             "samples": samples,
             "exp_summary": {"group_performance": {}},
             "eval_summary": {"group_performance": {}},
-            "cogmap_summary": {"group_performance": {}}
+            "cogmap_summary": {"group_performance": {}},
+            "correlation": {"group_performance": {}},
         }
 
         # Aggregate performance for each config combination across all samples
@@ -250,6 +253,7 @@ class HistoryManager:
                 # Provide both exploration and evaluation cogmap summaries
                 exp_type = "active" if "active" in config_name else "passive"
                 result["cogmap_summary"]["group_performance"][config_name] = CognitiveMapManager.aggregate_group_performance(env_data_list, exp_type=exp_type)
+                result["correlation"]["group_performance"][config_name] = compute_correlation_metrics(env_data_list, exp_type=exp_type)
         return result
 
     @staticmethod
