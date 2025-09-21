@@ -365,7 +365,8 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
 class BackwardNavEvaluationTask(ForwardFOVEvaluationTask):
     """Infer action sequence from final observation."""
     ACTION_TEMPLATE = (
-        "You have executed an action sequence and changed to a new location and facing direction.\n"
+        "You return to your starting position and face north.\n"
+        "Then you have executed an action sequence and changed to a new location and facing direction.\n"
         "You see the final observation below:\n"
         "{final_obs}\n\n"
     )

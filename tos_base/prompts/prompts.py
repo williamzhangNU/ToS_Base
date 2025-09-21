@@ -24,7 +24,7 @@ ACTIVE_RULES_EXTRA = """\
 """
 
 VISION_EXAMPLE = """\
-Here is an example of your observation: blue object 1 m straight ahead; yellow object 2 m at 45° to your left; green object 3 m at 22.5° to your right:
+Here is an example of your observation: blue cylinder 1 m straight ahead; red cylinder 2 m straight ahead; yellow cylinder 2 m at 45° to your front-left; green cylinder 3 m at 22.5° to your front-slight-right:
 {image_placeholder}
 
 All objects in the following image are facing towards the camera (facing backwards). And numbered from 1 to N corresponding to object sequence mentioned in the room layout.

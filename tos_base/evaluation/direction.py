@@ -205,8 +205,9 @@ class BackwardPovEvaluationTask(DirectionEvaluationTask):
     task_type = "bwd_pov"
 
     QUESTION_TEMPLATE_BWD_POV = (
-        "You observe that {obj_name} is {spatial_relationship} from your current perspective.\n"
-        "Which object are you currently positioned at sharing the same orientation?\n\n"
+        "You are at an object's position facing its direction.\n"
+        "From this view, {obj_name} is {spatial_relationship}.\n"
+        "Which object are you positioned at?\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )

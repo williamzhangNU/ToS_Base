@@ -13,6 +13,7 @@ from ..managers.history_manager import HistoryManager
 from ..prompts.cogmap_prompts import get_cogmap_prompt
 from .. import Room, Agent
 import re
+from tqdm import tqdm
 
 def evaluate_cognitive_maps_from_turnlogs(
     env_summarys: List[Dict[str, Any]],  # List of env summaries from get_env_summary()
@@ -158,7 +159,6 @@ def evaluate_cognitive_maps_from_turnlogs(
         response_texts = _call_llm_batch(
             llm_wrapper, all_messages_list, all_env_ids, vagen
         )
-        print(f'[DEBUG] all_messages_list: {all_messages_list}')
 
         # Group responses by (env_idx, turn_idx)
         responses_by_turn = {}
@@ -229,22 +229,30 @@ def _call_llm_batch(
     Returns:
         List of response texts in the same order as input
     """
-    if vagen:
-        # Use _generate_batch_responses interface
-        responses = llm_wrapper.generate(all_messages_list)
+    CHUNK_SIZE = 128
+    total = len(all_messages_list)
 
-        # Return responses in the same order as input
-        return [response['text'] for response in responses]
-    else:
-        # Use original generate_sequences interface
+    def run_chunk(msgs_chunk, ids_chunk):
+        if vagen:
+            return [r['text'] for r in llm_wrapper.generate(msgs_chunk)]
         lm_inputs = DataProto()
         lm_inputs.non_tensor_batch = {
-            'messages_list': np.array(all_messages_list, dtype=object),
-            'env_ids': np.array(all_env_ids, dtype=object),
-            'group_ids': np.array(all_env_ids, dtype=object)  # Use env_ids as group_ids
+            'messages_list': np.array(msgs_chunk, dtype=object),
+            'env_ids': np.array(ids_chunk, dtype=object),
+            'group_ids': np.array(ids_chunk, dtype=object)
         }
-
-        # Call generate_sequences for batch processing
         lm_outputs = llm_wrapper.generate_sequences(lm_inputs)
-
         return lm_outputs.non_tensor_batch['response_texts']
+
+    results_by_id = {}
+    with tqdm(total=total, desc='COGMAP', leave=False) as pbar:
+        for start in range(0, total, CHUNK_SIZE):
+            end = min(start + CHUNK_SIZE, total)
+            msgs_chunk = all_messages_list[start:end]
+            ids_chunk = all_env_ids[start:end]
+            texts = run_chunk(msgs_chunk, ids_chunk)
+            for eid, text in zip(ids_chunk, texts):
+                results_by_id[eid] = text
+            pbar.update(len(texts))
+
+    return [results_by_id[eid] for eid in all_env_ids]
