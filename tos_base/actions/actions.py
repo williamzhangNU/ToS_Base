@@ -57,7 +57,7 @@ class MoveAction(BaseAction):
     
     def __init__(self, target: str):
         super().__init__(target)
-        self.target = target
+        self.target = target.replace('_', ' ')
     
     def success_message(self, **kwargs) -> str:
         extra = kwargs.get('extra')
@@ -320,7 +320,7 @@ class QueryBase(BaseAction):
     cost = 2
     def __init__(self, obj: str):
         super().__init__(obj)
-        self.obj = obj
+        self.obj = obj if obj == 'initial_pos' else obj.replace('_', ' ')
     def error_message(self, error_type: str) -> str:
         return f"Cannot query: {error_type}"
     @staticmethod

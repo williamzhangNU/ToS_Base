@@ -199,7 +199,7 @@ class CognitiveMapManager:
         if json_dict is None or gt_room is None:
             return BaseCogMapTurnLog(type=t, extraction_success=False, original_response=assistant_response, metrics=BaseCogMetrics.invalid())
         all_item_names = {o.name for o in gt_room.all_objects}
-        observed_set: set[str] = set(all_item_names if observed_items is None else [str(x) for x in observed_items])
+        observed_set: set[str] = set(all_item_names if observed_items is None else [str(x).replace('_', ' ') for x in observed_items])
         visible_names = self._visible_object_names(gt_room, gt_agent)
 
         if t == "global":
@@ -337,6 +337,7 @@ class CognitiveMapManager:
                 a, b = parse_pair_key(k)
                 if not a or not b:
                     continue
+                a, b = a.replace('_', ' '), b.replace('_', ' ')
                 key = make_ordered_pair_key(a, b)
                 if isinstance(v, str):
                     d, r = decode_relation_codes(v)
@@ -700,7 +701,7 @@ class CognitiveMapManager:
             else:
                 ori = np.array([0, 0])
                 has_orientation = False
-            objects.append(Object(name=str(obj_name), pos=pos, ori=ori, has_orientation=has_orientation))
+            objects.append(Object(name=str(obj_name).replace('_', ' '), pos=pos, ori=ori, has_orientation=has_orientation))
         if len(objects) == 0:
             return None
         return BaseRoom(objects=objects, name=room_name)

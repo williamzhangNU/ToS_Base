@@ -20,8 +20,8 @@ class FalseBeliefDirectionPov(DirectionPov):
     @retry_generate_question
     def generate_question(self) -> str:
         oriented = [o for o in self.room.objects if o.has_orientation]
-        if len(oriented) < 3:
-            raise ValueError("Need >=3 oriented objects for this task")
+        if len(oriented) < 1:
+            raise ValueError("Need >=1 oriented objects for this task")
 
         # 1) Rotate one oriented object (anchor A)
         anchor = self.np_random.choice(oriented)
@@ -30,7 +30,7 @@ class FalseBeliefDirectionPov(DirectionPov):
         rotations = {0: [[1, 0], [0, 1]], 90: [[0, -1], [1, 0]], 180: [[-1, 0], [0, -1]], 270: [[0, 1], [-1, 0]]}
         anchor.ori = anchor.ori @ rotations[deg]
 
-        # 2) Pick a north-facing vantage with >=2 objects in FOV (incl. anchor)
+        # 2) Pick a north-facing vantage changed objects in FOV (incl. anchor)
         rid = getattr(anchor, 'room_id', 0)
         rid = int(rid)
         xmin, xmax, ymin, ymax = self.room.get_boundary(room_id=rid)
@@ -49,7 +49,7 @@ class FalseBeliefDirectionPov(DirectionPov):
                 continue
             # visible objects in FOV
             vis = [o for o in self.room.objects if BaseAction._is_visible(tmp_agent, o)]
-            if anchor in vis and len(vis) >= 2:
+            if anchor in vis:
                 # build simplified observation: up to 4, only facing strings
                 def dist2(o):
                     d = o.pos - tmp_agent.pos
@@ -65,7 +65,7 @@ class FalseBeliefDirectionPov(DirectionPov):
                 self.agent = tmp_agent.copy()
                 break
         else:
-            raise ValueError("No suitable vantage with >=2 visible objects")
+            raise ValueError("No suitable vantage with changed object in FOV")
 
         # 3) Ask DirectionPov with this rotated object as anchor A
         n = len(self.room.objects)

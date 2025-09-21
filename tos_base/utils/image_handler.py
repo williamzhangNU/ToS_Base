@@ -28,8 +28,10 @@ class ImageHandler:
         self.image_dir, self.json_data = self._load_data(base_dir, seed)
         self.objects = {obj['object_id']: obj for obj in self.json_data.get('objects', [])}
         self._image_map, self._image_path_map = self._load_images()
-        self.name_2_cam_id = {obj['name']: obj['object_id'] for obj in self.objects.values()}
-        self.name_2_cam_id['agent'] = 'agent'
+        tmp = {obj['name']: obj['object_id'] for obj in self.objects.values()}
+        tmp.update({k.replace('_', ' '): v for k, v in tmp.items()})
+        tmp['agent'] = 'agent'
+        self.name_2_cam_id = tmp
     
     def _load_data(self, base_dir: str, seed: int = None) -> tuple:
         """Load JSON data from a 'runNN' subdirectory (sorted by NN)."""

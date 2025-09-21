@@ -52,22 +52,21 @@ class EvaluationManager:
     }
     
     def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent, history_manager=None, seed: int | None = None):
-        # Take only the first task if count allows
+        # In current implementation, only one evaluation task is allowed
+        assert len(eval_tasks) == 1, "Only one evaluation task is supported"
         self.history_manager = history_manager
         self.eval_tasks = []
-        if eval_tasks:
-            spec = eval_tasks[0]
-            ttype = spec['task_type']
-            num = int(spec.pop('num', 1))
+        spec = eval_tasks[0]
+        ttype = spec['task_type']
+        num = int(spec.pop('num', 1))
+        counts = self.history_manager.get_eval_counts() if self.history_manager else {}
+        done_count = 0
+        if counts:
+            class_name = EvalTaskType.from_short_name(ttype).class_name
+            done_count = counts.get(class_name, 0)
 
-            counts = self.history_manager.get_eval_counts() if self.history_manager else {}
-            done_count = 0
-            if counts:
-                class_name = EvalTaskType.from_short_name(ttype).class_name
-                done_count = counts.get(class_name, 0)
-
-            if num > done_count:
-                self.eval_tasks = [spec]
+        if num > done_count:
+            self.eval_tasks = [spec]
         self.np_random = np_random
         self.results = []
         self.turn_logs: List[EvaluationTurnLog] = []
@@ -77,11 +76,7 @@ class EvaluationManager:
         self.tasks = []
         for idx, task_spec in enumerate(self.eval_tasks):
             task_type = task_spec['task_type']
-            # deterministic per-task RNG derived from env seed when provided
-            task_rng = np.random.default_rng(
-                (int(self.seed) + idx * 1000003) % (2**32)
-            ) if self.seed is not None else np_random
-            task = EvalTaskType.create_task(task_type, task_rng, room.copy(), agent.copy(), {}, history_manager)
+            task = EvalTaskType.create_task(task_type, np.random.default_rng(int(self.seed)), room.copy(), agent.copy(), {}, history_manager)
             self.tasks.append(task)
             self.results.append({
                 "task_type": task.__class__.__name__,

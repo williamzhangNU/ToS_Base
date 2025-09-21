@@ -300,7 +300,7 @@ class RoomGenerator:
         for idx, pos, ori_idx in zip(indices, positions, orientations):
             obj_info = candidate_list[idx]
             ori = np.array(ori_vectors[int(ori_idx)]) if obj_info.has_orientation and perspective_taking else np.array([0, 1])
-            objects.append(Object(name=obj_info.name, pos=np.array(pos, dtype=int), ori=ori, has_orientation=obj_info.has_orientation))
+            objects.append(Object(name=obj_info.name.replace('_', ' '), pos=np.array(pos, dtype=int), ori=ori, has_orientation=obj_info.has_orientation))
         
         return objects
 
@@ -551,7 +551,7 @@ def initialize_room_from_json(json_data: Dict[str, Any]) ->  Tuple[Room, Agent]:
     for obj in json_data['objects']:
         if 'door' not in obj['name']:
             objects.append(Object(
-                name=obj['name'],
+                name=obj['name'].replace('_', ' '),
                 pos=np.array([obj["pos"]["x"], obj["pos"]["z"]]),
                 ori=rotation_map.get(obj["rot"]["y"]) if obj["attributes"]["has_orientation"] else np.array([1, 0]),
                 has_orientation=obj["attributes"]["has_orientation"],
@@ -575,7 +575,7 @@ def initialize_room_from_json(json_data: Dict[str, Any]) ->  Tuple[Room, Agent]:
     for gate in gates:
         for door in door_objects:
             if set(gate.room_id) == set(door["attributes"]['connected_rooms']):
-                gate.name = door['name']
+                gate.name = door['name'].replace('_', ' ')
 
     return Room(objects=objects, mask=mask, name=room_name, gates=gates), Agent(pos=agent_pos,room_id=1,init_room_id=1)
 

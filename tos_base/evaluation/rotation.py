@@ -16,9 +16,10 @@ class RotEvaluationTask(BaseEvaluationTask):
         "You return to your starting position and face north.\n"
         "You will perform a full 360-degree rotation by continuously turning {turn_direction} in place.\n"
         "Assume all walls are removed (you can see through walls), so every object is visible.\n"
-        "Your task is to answer the sequence of objects that will appear directly in front of you during the rotation.\n"
+        "Your task is to identify the correct sequence of objects that will appear directly in front of you during the rotation.\n"
         "If two objects have the exact same bearing, list the nearer first.\n\n"
-        "Choose the correct sequence:\n{choices_text}\n\n"
+        "Each option below shows a subset of objects in a specific order.\n"
+        "Choose the option that shows the correct sequence:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
 

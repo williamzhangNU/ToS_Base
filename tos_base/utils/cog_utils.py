@@ -175,17 +175,21 @@ def evaluate_cognitive_maps_from_turnlogs(
 
             cogmap_log = None
             if responses_by_type and turn_log.get('room_state') and turn_log.get('agent_state'):
-                # Reconstruct Room and Agent states from turn log
-                observed_items = turn_log['observed_items'] if env_config.get('exp_type') == 'active' else [obj.name for obj in room_state.all_objects]
+                # Reconstruct Room and Agent states from turn log first
+                room_state = Room.from_dict(turn_log['room_state'])
+                agent_state = Agent.from_dict(turn_log['agent_state'])
 
-                if not turn_log.get('is_exploration_phase', True) and 'falsebelief' in turn_log.get('evaluation_log', {}).get('task_type', '').lower():
+                # Determine observed items
+                if env_config.get('exp_type') == 'active':
+                    observed_items = turn_log.get('observed_items', [])
+                else:
+                    observed_items = [obj.name for obj in room_state.all_objects]
+
+                # only effective for false belief task
+                if (not turn_log.get('is_exploration_phase', True)) and 'falsebelief' in turn_log.get('evaluation_log', {}).get('task_type', '').lower():
                     responses_by_type['false_belief'] = responses_by_type['global']
                     observed_items = [turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('kwargs', {}).get('rotated_object')]
 
-                room_state = Room.from_dict(turn_log['room_state'])
-                agent_state = Agent.from_dict(turn_log['agent_state'])
-                
-                # Get observed items
                 # Evaluate cognitive maps using selected responses
                 cogmap_log = cognitive_map_manager.evaluate_cogmaps(
                     responses_by_type,
