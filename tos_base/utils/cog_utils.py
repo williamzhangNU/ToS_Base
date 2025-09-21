@@ -99,7 +99,8 @@ def evaluate_cognitive_maps_from_turnlogs(
                     final_only_types = ['rooms', 'relations'] if turn_log['is_last_exp'] else []
                     for map_type in per_turn_types + final_only_types:
                         msgs = [m.copy() for m in messages]
-                        cogmap_prompt = get_cogmap_prompt(map_type)
+                        enable_think = bool(env_config.get('prompt_config', {}).get('enable_think', True))
+                        cogmap_prompt = get_cogmap_prompt(map_type, enable_think)
                         msgs[-2]["content"] = base_user + cogmap_prompt
                         msgs.pop()
                         env_id_to_location[env_id_counter] = (env_idx, target_turn_idx, map_type)
@@ -117,7 +118,8 @@ def evaluate_cognitive_maps_from_turnlogs(
                     # Evaluation tasks: only global (correctness)
                     map_type = 'global'
                     msgs = [m.copy() for m in messages]
-                    cogmap_prompt = get_cogmap_prompt(map_type)
+                    enable_think = bool(env_config.get('prompt_config', {}).get('enable_think', True))
+                    cogmap_prompt = get_cogmap_prompt(map_type, enable_think)
                     msgs[-2]["content"] = base_user + cogmap_prompt
                     msgs.pop()
                     env_id_to_location[env_id_counter] = (env_idx, target_turn_idx, map_type)
@@ -138,7 +140,8 @@ def evaluate_cognitive_maps_from_turnlogs(
             # Passive: only global for first exp turn (correctness only)
             map_type = 'global'
             messages = [env_messages[0].copy()]
-            cogmap_prompt = get_cogmap_prompt(map_type)
+            enable_think = bool(env_config.get('prompt_config', {}).get('enable_think', True))
+            cogmap_prompt = get_cogmap_prompt(map_type, enable_think)
             messages[0]["content"] = base_user + cogmap_prompt
             all_messages_list.append(messages)
             all_env_ids.append(env_id_counter)
@@ -155,6 +158,7 @@ def evaluate_cognitive_maps_from_turnlogs(
         response_texts = _call_llm_batch(
             llm_wrapper, all_messages_list, all_env_ids, vagen
         )
+        print(f'[DEBUG] all_messages_list: {all_messages_list}')
 
         # Group responses by (env_idx, turn_idx)
         responses_by_turn = {}

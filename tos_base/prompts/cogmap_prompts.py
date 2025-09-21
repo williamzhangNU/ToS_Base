@@ -17,11 +17,22 @@ Represent the scene as a JSON map.
 ### General rules (shared)
 - Coordinate frame MUST be explicit in the content.
 - Include only observed/known information—do not invent.
-
-In your thinking (<think> ... </think>):  
-1) Briefly reason about your cognitive map 
-2) Then provide the cognitive map JSON in <answer>...</answer>
 """
+
+def _cogmap_format_rules(enable_think: bool) -> str:
+    if enable_think:
+        return (
+            "!!! IMPORTANT OUTPUT RULES !!!\n"
+            "1. Always output: <think> [Your thoughts on cognitive map] </think> <answer> [JSON map only] </answer>.\n"
+            "2. Inside <answer> output ONLY the JSON (no prose).\n"
+            "3. Any deviation is invalid."
+        )
+    return (
+        "!!! IMPORTANT OUTPUT RULES !!!\n"
+        "1. Always output: <answer> [JSON map only] </answer>.\n"
+        "2. Inside <answer> output ONLY the JSON (no prose).\n"
+        "3. Any deviation is invalid."
+    )
 
 # Global-only specifics
 COGMAP_INSTRUCTION_GLOBAL_ONLY = """\
@@ -91,19 +102,20 @@ Example:
 ```
 """
 
-def get_cogmap_prompt(map_type: str) -> str:
-    """Return the assembled cognitive-map prompt for a given type."""
+def get_cogmap_prompt(map_type: str, enable_think: bool = True) -> str:
+    """Return the assembled cognitive-map prompt for a given type, with format rules."""
     t = (map_type or "global").strip().lower()
+    fmt = _cogmap_format_rules(enable_think)
     if t == "global":
-        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}"
+        return f"{BASE_COGMAP_PROMPT}\n\n{fmt}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}"
     if t == "local":
-        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_LOCAL_ONLY}"
+        return f"{BASE_COGMAP_PROMPT}\n\n{fmt}\n\n{COGMAP_INSTRUCTION_LOCAL_ONLY}"
     if t == "rooms":
-        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_ROOMS_ONLY}"
+        return f"{BASE_COGMAP_PROMPT}\n\n{fmt}\n\n{COGMAP_INSTRUCTION_ROOMS_ONLY}"
     if t == "relations":
-        return RELATIONS_PROMPT
+        return f"{BASE_COGMAP_PROMPT}\n\n{fmt}\n\n{RELATIONS_PROMPT}"
     # default to global
-    return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}"
+    return f"{BASE_COGMAP_PROMPT}\n\n{fmt}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}"
 
 # --- Pairwise relations ---
 from ..utils.relation_codes import _DIR_LABEL_TO_CODE as _DLC, _DIST_LABEL_TO_CODE as _SLC

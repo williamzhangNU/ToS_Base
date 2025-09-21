@@ -11,9 +11,32 @@ from ..core.relationship import (
 from .prompts import *
 
 class Prompter:
-    # Strict format prompts
-    FORMAT_PROMPT_THINK = "Always output: <think> [Your thoughts] </think> <answer> [your answer] </answer>. You must strictly follow this format with no extra text."
-    FORMAT_PROMPT_ANSWER_ONLY = "Always output: <answer> [your answer] </answer>. You must strictly follow this format with no extra text."
+    # Dynamic, reusable format blocks
+    def _build_format_rules(self, is_exploration: bool) -> str:
+        if self.enable_think:
+            think = "[Your thoughts on next step actions]" if is_exploration else "[Your thoughts on the question]"
+            answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
+            fmt = f"<think> {think} </think> <answer> {answer} </answer>"
+        else:
+            answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
+            fmt = f"<answer> {answer} </answer>"
+        return (
+            "!!! IMPORTANT OUTPUT RULES !!!\n"
+            "1. You must always output in this format:\n"
+            f"   {fmt}\n"
+            "2. Inside <answer>, only include the required content.\n"
+            "   - No bullet points, prose, boxes, calculations, or explanations.\n"
+            "3. Any deviation is invalid."
+        )
+
+    def get_format_footer(self, is_exploration: bool) -> str:
+        if self.enable_think:
+            think = "[Your thoughts on next step actions]" if is_exploration else "[Your thoughts on the question]"
+            answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
+            return f"Always output: <think> {think} </think> <answer> {answer} </answer>."
+        else:
+            answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
+            return f"Always output: <answer> {answer} </answer>."
 
     # Add image prompt constants
     TOPDOWN_PROMPT = "\n\nTopdown view: {placeholder}\n{object_info}"
@@ -24,7 +47,6 @@ class Prompter:
         self.image_handler = image_handler
         self.np_random = np_random
         self.enable_think = bool(self.config.prompt_config.get('enable_think', True))
-        self.FORMAT_PROMPT = self.FORMAT_PROMPT_THINK if self.enable_think else self.FORMAT_PROMPT_ANSWER_ONLY
 
     def _get_topdown_prompt(self, prompt_template: str, room) -> str:
         """Generate topdown view prompt with object information."""
@@ -85,22 +107,25 @@ class Prompter:
         if not is_active:
             exp_history_str = f"## Exploration History\n{exp_history['obs_str']}" if not topdown else ""
 
-        template = (
-            ACTIVE_INSTRUCTION_VISION if is_active and is_vision else
-            ACTIVE_INSTRUCTION_TEXT if is_active else
-            PASSIVE_INSTRUCTION_VISION if is_vision else
-            PASSIVE_INSTRUCTION_TEXT
-        )
+        template = INSTRUCTION_TEMPLATE_VISION if is_vision else INSTRUCTION_TEMPLATE_TEXT
 
         fmt_kwargs = {
-            'room_info': room_desc,
+            'title': 'Spatial Exploration Task' if is_active else 'Spatial Reasoning Task',
+            'intro': SHARED_INTRO_TEXT if not is_vision else SHARED_INTRO_VISION,
+            'goal_lines': (
+                'Goal: Your objective is to **minimize total COST** while gaining knowledge of spatial relationships between each pair of objects. Do NOT stop until you have achieved complete coverage'
+                if is_active else ''
+            ),
+            'format_rules': self._build_format_rules(is_active),
             'observation_instructions': observation_instructions,
             'exp_instructions': exp_instructions,
+            'room_info': room_desc,
+            'multiroom_rules': SHARED_MULTIROOM_RULES,
+            'active_rules_extra': ACTIVE_RULES_EXTRA if is_active else '',
+            'rules_common': SHARED_RULES_COMMON,
+            'exp_history': exp_history_str if not is_active else '',
+            'vision_example': (VISION_EXAMPLE.format(image_placeholder=self.config.image_placeholder) if is_vision else ''),
         }
-        if not is_active:
-            fmt_kwargs['exp_history'] = exp_history_str
-        if is_vision:
-            fmt_kwargs['image_placeholder'] = self.config.image_placeholder
 
         obs_str = template.format(**fmt_kwargs)
         if not is_active:
@@ -108,7 +133,7 @@ class Prompter:
         if is_vision:
             obs['multi_modal_data'] = {self.config.image_placeholder: images}
 
-        obs['obs_str'] = obs_str + "\n" + self.FORMAT_PROMPT
+        obs['obs_str'] = obs_str + "\n" + self.get_format_footer(is_active)
         return obs
         
             

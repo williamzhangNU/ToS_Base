@@ -180,13 +180,13 @@ class StandardDistanceBins:
     def prompt(cls) -> str:
         lines = [
             "Distance bins:",
-            "=0→same distance",
-            "(0,2]→near",
-            "(2,4]→mid distance",
-            "(4,8]→slightly far",
-            "(8,16]→far",
-            "(16,32]→very far",
-            "(32,64]→extremely far",
+            "\t-=0→same distance",
+            "\t-(0,2]→near",
+            "\t-(2,4]→mid distance",
+            "\t-(4,8]→slightly far",
+            "\t-(8,16]→far",
+            "\t-(16,32]→very far",
+            "\t-(32,64]→extremely far",
         ]
         return "\n".join(lines)
 
@@ -287,7 +287,7 @@ class OrientationRel:
     @classmethod
     def prompt(cls) -> str:
         return (
-            "Orientation: forward/back/right/left (ego) or north/east/south/west (allo).\n"
+            "Orientation: forward/backward/right/left (ego) or north/east/south/west (allo).\n"
             "When agent faces north: forward = north, right = east, etc.\n"
             "Gate's orientation: report wall position (e.g., 'on left wall')."
         )
