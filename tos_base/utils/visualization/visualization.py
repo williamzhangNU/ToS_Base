@@ -441,6 +441,97 @@ class HTMLGenerator:
                 response_id = f"cogmap_{map_type}_{page_idx}_{t_idx}"
                 self._render_expandable_block(f, data['original_response'], response_id, title, "cogmap-response")
 
+                # Add JSON display for global and local
+                if map_type == 'global':
+                    # For global, display pred_json, gt_json, and gt_json_full in three columns
+                    pred_json = data.get('pred_json', {})
+                    gt_json = data.get('gt_json', {})
+                    gt_json_full = data.get('gt_json_full', {})
+
+                    if pred_json or gt_json or gt_json_full:
+                        f.write("<div class='json-container global'>\n")
+                        f.write("<div class='json-header'>")
+                        f.write("<strong>📊 Cognitive Map JSONs</strong>")
+                        f.write("</div>\n")
+                        f.write("<div class='json-content'>\n")
+                        f.write("<div class='json-compare global'>\n")
+
+                        # Left - pred_json
+                        f.write("<div class='json-box left predicted'>\n")
+                        f.write("<strong>🤖 Predicted</strong>\n")
+                        if pred_json:
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(pred_json, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        else:
+                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        # Middle - gt_json
+                        f.write("<div class='json-box middle gt-observed'>\n")
+                        f.write("<strong>🎯 Ground Truth (Observed)</strong>\n")
+                        if gt_json:
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(gt_json, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        else:
+                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        # Right - gt_json_full
+                        f.write("<div class='json-box right gt-full'>\n")
+                        f.write("<strong>🎯 Ground Truth (Full)</strong>\n")
+                        if gt_json_full:
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(gt_json_full, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        else:
+                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        f.write("</div>\n")  # End json-compare
+                        f.write("</div>\n")  # End json-content
+                        f.write("</div>\n")  # End json-container
+
+                elif map_type == 'local':
+                    # For local, display pred_json and gt_json in two columns
+                    pred_json = data.get('pred_json', {})
+                    gt_json = data.get('gt_json', {})
+
+                    if pred_json or gt_json:
+                        f.write("<div class='json-container local'>\n")
+                        f.write("<div class='json-header'>")
+                        f.write("<strong>📊 Cognitive Map JSONs</strong>")
+                        f.write("</div>\n")
+                        f.write("<div class='json-content'>\n")
+                        f.write("<div class='json-compare local'>\n")
+
+                        # Left - pred_json
+                        f.write("<div class='json-box left predicted'>\n")
+                        f.write("<strong>🤖 Predicted</strong>\n")
+                        if pred_json:
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(pred_json, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        else:
+                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        # Right - gt_json
+                        f.write("<div class='json-box right gt'>\n")
+                        f.write("<strong>🎯 Ground Truth</strong>\n")
+                        if gt_json:
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(gt_json, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        else:
+                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        f.write("</div>\n")  # End json-compare
+                        f.write("</div>\n")  # End json-content
+                        f.write("</div>\n")  # End json-container
+
     def _render_cogmap_metrics(self, f, cogmap_log: Dict, page_idx: int, t_idx: int) -> None:
         """Helper to render cognitive map metrics"""
         if not cogmap_log:

@@ -1248,6 +1248,182 @@ a:hover {
     }
 }
 
+/* JSON Display Styles with Collapsible Functionality */
+.json-container {
+    margin: 15px 0;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    overflow: hidden;
+}
+
+.json-header {
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+    padding: 12px 15px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.json-header strong {
+    color: #1565c0;
+    font-weight: 600;
+    display: block;
+}
+
+.json-content {
+    /* Always visible, no transition needed */
+}
+
+/* Global layout - three columns */
+.json-compare.global {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+}
+
+/* Local layout - two columns */
+.json-compare.local {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+}
+
+.json-box {
+    background: white;
+    border: none;
+    padding: 15px;
+    margin: 0;
+    min-height: 200px;
+}
+
+.json-box.left {
+    border-right: 1px solid #dee2e6;
+}
+
+.json-box.middle {
+    border-right: 1px solid #dee2e6;
+    border-left: none;
+}
+
+.json-box.right {
+    border-left: none;
+}
+
+.json-box strong {
+    display: block;
+    color: #495057;
+    font-weight: 600;
+    margin-bottom: 10px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #e9ecef;
+    font-size: 0.9em;
+}
+
+.json-content-inner {
+    background: #f8f9fa;
+    border-radius: 4px;
+    padding: 10px;
+    border: 1px solid #e9ecef;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.json-content-inner pre {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #495057;
+    background: transparent;
+    border: none;
+    padding: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-x: auto;
+}
+
+.empty-json {
+    color: #6c757d;
+    font-style: italic;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    border: 1px dashed #dee2e6;
+    text-align: center;
+    font-size: 0.9em;
+}
+
+/* Color coding for different JSON types */
+.json-box:has(strong:contains("Predicted")) .json-content-inner {
+    border-left: 3px solid #17a2b8;
+}
+
+.json-box:has(strong:contains("Ground Truth (Observed)")) .json-content-inner {
+    border-left: 3px solid #28a745;
+}
+
+.json-box:has(strong:contains("Ground Truth (Full)")) .json-content-inner {
+    border-left: 3px solid #ffc107;
+}
+
+.json-box:has(strong:contains("Ground Truth")) .json-content-inner {
+    border-left: 3px solid #28a745;
+}
+
+/* Fallback for browsers that don't support :has() */
+.json-box.predicted .json-content-inner {
+    border-left: 3px solid #17a2b8;
+}
+
+.json-box.gt-observed .json-content-inner {
+    border-left: 3px solid #28a745;
+}
+
+.json-box.gt-full .json-content-inner {
+    border-left: 3px solid #ffc107;
+}
+
+.json-box.gt .json-content-inner {
+    border-left: 3px solid #28a745;
+}
+
+/* Responsive design for JSON displays */
+@media (max-width: 1024px) {
+    .json-compare.global {
+        grid-template-columns: 1fr;
+    }
+
+    .json-compare.local {
+        grid-template-columns: 1fr;
+    }
+
+    .json-box.left,
+    .json-box.middle {
+        border-right: none;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .json-box.right {
+        border-left: none;
+        border-top: none;
+    }
+
+    .json-box:last-child {
+        border-bottom: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .json-content-inner {
+        max-height: 300px;
+        font-size: 10px;
+    }
+
+    .json-box {
+        padding: 12px;
+        min-height: 150px;
+    }
+}
+
 """
 
 JAVASCRIPT_CODE = """
@@ -1438,6 +1614,7 @@ function toggleGroundTruth(gtId) {
         }
     }
 }
+
 
 // Reset all combo states across ALL pages
 function resetAllComboStates() {
