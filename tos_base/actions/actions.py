@@ -16,16 +16,27 @@ ACTION_INSTRUCTION = """\
 You can move within and across rooms, turn, and observe.
 When you are at a door, you can see objects from both connected rooms (within FOV).
 
+Action Grammar (HARD CONSTRAINT):
+Your <answer> must match this grammar:
+<answer> Actions: [ <M>* <F> ] </answer>
+<M> = "Move(OBJ)" | "Rotate(DEG)" | "Return()"
+<F> = "Observe()" | "Query(OBJ)" | "Return(), Term()" | "Term()"
+Constraints:
+- Exactly one <F>, and it must be the final element.
+- No more than one Observe().
+- Term() may appear only alone or after Return().
+- Any violation is invalid.
+
 Available Actions:
 {actions}
 
-Answer format:
-Actions: [<movement_1>, <movement_2>, ... (movement) , <movement_n>, <final_action>]
+Examples:
+{examples}
 
 Rules:
 - You may perform zero, one or more movement actions.
-- Provide **exactly one** final action (and it **must be last**)
-- Observe action only reports from your current position. If you move multiple times, the final Observe action gives the view only from your last position.
+- Provide **exactly one** final action (and it **must be last**) or your actoin sequence will be invalid.
+- Observe action only reports from your current position. If you move multiple times, the final Observe() action gives the view only from your last position.
 - Actions execute in order. Field of view: {field_of_view}°.
 
 Costs:
@@ -33,8 +44,6 @@ Costs:
 
 You need to explore the environment using **minimal cost**.
 
-Examples:
-{examples}
 
 """
 
@@ -48,7 +57,7 @@ class MoveAction(BaseAction):
         "Move to the same position as the object. "
         "Your orientation does NOT change when you move."
         "You can ONLY move to objects within your field of view and you must have observed it before. "
-        "You can ONLY move to objects by name, not directions or others. "
+        "You can ONLY move to objects by name, not directions or others. You CANNOT move to objects by numbers."
         "Invalid examples: Move(left), Move(forward), Move(back). "
     )
     example = "Move(table)"
@@ -98,7 +107,7 @@ class RotateAction(BaseAction):
     """Rotate by specified degrees"""
     
     format_desc = "Rotate(degrees)"
-    description = "Rotate by specified degrees relative to your current orientation. Positive = clockwise, negative = counterclockwise. Valid: -270, -180, -90, 0, 90, 180, 270."
+    description = "Rotate by specified degrees relative to your current orientation. Positive = clockwise, negative = counterclockwise. Valid: -270, -180, -90, 0, 90, 180, 270. You must rotate by these specified degrees; otherwise your action will be invalid."
     example = "Rotate(-90)"
     format_pattern = r"^Rotate\(([0-9-]+)\)$"
     VALID_DEGREES = [0, 90, 180, 270, -90, -180, -270]
@@ -218,7 +227,7 @@ class ObserveBase(BaseAction):
 class ObserveAction(ObserveBase):
     """Observe with approximate relations and local (near) pair descriptions"""
     format_desc = "Observe()"
-    description = "Report objects (including doors) and their spatial relationships from your current position in your FOV."
+    description = "Report objects (including doors) and their spatial relationships from your current position in your FOV. It should NEVER be followed by a Term(). You can ONLY use ONE Observe() per step and it must be your last action. Otherwise your action sequence will be invalid."
     example = "Observe()"
     format_pattern = r"^Observe\(\)$"
     cost = 1
@@ -272,7 +281,7 @@ class TermAction(BaseAction):
     """Terminate exploration"""
     
     format_desc = "Term()"
-    description = "Terminate the exploration phase. Term() must be alone with no movement actions except for Return()."
+    description = "Terminate the exploration phase. Term() must be alone with no movement actions except for Return(). You MUST ONLY use it in the last turn and no other turns. Otherwise your action sequence will be invalid."
     example = "Term()"
     format_pattern = r"^Term\(\)$"
     cost = 0
@@ -464,8 +473,11 @@ class ActionSequence:
             f"1 (no final action): Actions: [Move(table)]\n" +
             f"2 (more than one final action): Actions: [Observe(), Rotate(90), Observe()]\n" +
             f"3 (termination with other actions): Actions: [Move(table), Term()]\n\n"
+            
         )
+        """
         
+        """
         return ACTION_INSTRUCTION.format(
             actions=action_desc,
             examples=examples,

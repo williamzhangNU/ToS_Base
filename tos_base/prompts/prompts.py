@@ -57,17 +57,37 @@ Room Layout:
 ACTIVE_INSTRUCTION_VISION = """\
 # Spatial Exploration Task
 
-Goal: Your objective is to **minimize total COST** while gaining knowledge of spatial relationships between each pair of objects.
+Goal: Your objective is to **minimize total COST** while gaining knowledge of spatial relationships between each pair of objects. Do NOT stop until you have aciehved complete coverage
+
+!!! IMPORTANT OUTPUT RULES !!!
+
+1. You must always output in this format:
+   <answer> Actions: [ ... ] </answer>
+
+2. Inside <answer>, ONLY output the "Actions: [...]" list exactly as specified.
+   - No bullet points
+   - No prose
+   - No cost calculations
+   - No boxed answers
+   - No explanations
+
+3. If you write anything outside <answer>, it is WRONG and you will be penalized.
+
+Action Instructions:
+{exp_instructions}
+
+Room Layout:
+{room_info}
 
 Facing: forward/backward/right/left. When facing north: forward=north, back=south, right=east, left=west.
+
+Multi-room: 
+- Rooms are connected by gates/doors on vertical (N–S) or horizontal (E–W) walls. When you stand at a door, you can see objects from both connected rooms (within FOV).
 
 Observation: For visible objects you receive (direction, signed degree, distance).
 - direction uses <vertical>-<horizontal> with front|back|same and left|right|same and
 - degree is clockwise from your facing; distance is Euclidean
 - You may ignore degree/distance for the stopping condition
-
-Multi-room: 
-- Rooms are connected by gates/doors on vertical (N–S) or horizontal (E–W) walls. When you stand at a door, you can see objects from both connected rooms (within FOV).
 
 Rules:
 - Achieve complete coverage with the fewest steps; continue only while any pair is unknown
@@ -80,12 +100,6 @@ Here is an example of your observation: blue object 1 m straight ahead; yellow o
 
 All objects in the following image are facing towards the camera and the labels match the objects listed below.
 {image_placeholder}
-
-Room Layout:
-{room_info}
-
-Action Instructions:
-{exp_instructions}
 
 After exploration, you will return to your starting position facing north.
 """
