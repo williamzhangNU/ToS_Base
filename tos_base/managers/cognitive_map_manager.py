@@ -70,6 +70,7 @@ class GlobalCogMapTurnLog(BaseCogMapTurnLog):
     gt_room_state_full: Optional['BaseRoom'] = None
     gt_json_full: Dict[str, Any] = field(default_factory=dict)
     metrics_full: BaseCogMetrics = field(default_factory=BaseCogMetrics)
+    metric_agent: BaseCogMetrics = field(default_factory=BaseCogMetrics)
 
     def to_dict(self) -> Dict[str, Any]:
         out = super().to_dict()
@@ -79,6 +80,7 @@ class GlobalCogMapTurnLog(BaseCogMapTurnLog):
             "gt_room_state_full": self.gt_room_state_full.to_dict() if self.gt_room_state_full else {},
             "gt_json_full": self.gt_json_full,
             "metrics_full": (self.metrics_full.to_dict() if self.metrics_full.valid else {}),
+            "metric_agent": (self.metric_agent.to_dict() if self.metric_agent.valid else {}),
         })
         return out
 
@@ -194,8 +196,9 @@ class CognitiveMapManager:
             pred_global_br = self._preprocess_predicted(json_dict, observed_set, visible_names, gt_room, gt_agent, map_type)
             gt_global_br = self._build_gt_global_baseroom(gt_room, gt_agent, observed_set)
             full_global = transform_baseroom(self._baseroom_from_gt(gt_room, gt_agent), gt_agent.init_pos, gt_agent.init_ori)
+            agent_br = self._build_gt_global_agent_baseroom(gt_room, gt_agent)
             self._ensure_pos_norm_L(gt_room, gt_agent)
-            return self._eval_global(pred_global_br, gt_global_br, full_global, assistant_response, json_dict)
+            return self._eval_global(pred_global_br, gt_global_br, full_global, agent_br, assistant_response, json_dict)
         
         if t == "false_belief":
             pred_global_br = self._preprocess_predicted(json_dict, observed_set, visible_names, gt_room, gt_agent, map_type)
@@ -222,11 +225,12 @@ class CognitiveMapManager:
 
         raise ValueError(f"Invalid map type: {t}")
 
-    def _eval_global(self, pred_global_br: BaseRoom,  gt_global_br: BaseRoom, gt_room_state_full: BaseRoom, assistant_response: str, pred_json: Dict) -> GlobalCogMapTurnLog:
+    def _eval_global(self, pred_global_br: BaseRoom,  gt_global_br: BaseRoom, gt_room_state_full: BaseRoom, agent_br: BaseRoom, assistant_response: str, pred_json: Dict) -> GlobalCogMapTurnLog:
         gt_json = self.baseroom_to_json(gt_global_br, include_gates=True)
         metrics = self._compare_baserooms(pred_global_br, gt_global_br)
         gt_json_full = self.baseroom_to_json(gt_room_state_full, include_gates=True)
         metrics_full = self._compare_baserooms(pred_global_br, gt_room_state_full)
+        metric_agent = self._compare_baserooms(pred_global_br, agent_br)
         return GlobalCogMapTurnLog(
             type="global",
             extraction_success=True,
@@ -239,6 +243,7 @@ class CognitiveMapManager:
             gt_room_state_full=gt_room_state_full,
             gt_json_full=gt_json_full,
             metrics_full=metrics_full,
+            metric_agent=metric_agent,
         )
 
     def _eval_false_belief(self, pred_global_br: BaseRoom, gt_global_br: BaseRoom, assistant_response: str, pred_json: Dict) -> BaseCogMapTurnLog:
@@ -506,6 +511,7 @@ class CognitiveMapManager:
         error = {
             'local_vs_gt_local_avg': _avg_maps(cog_logs, ['local', 'metrics']).to_dict(),
             'global_vs_gt_global_avg': _avg_maps(cog_logs, ['global', 'metrics']).to_dict(),
+            'agent_vs_gt_agent_avg': _avg_maps(cog_logs, ['global', 'metric_agent']).to_dict(),
         }
 
         # Correctness: last global_full and relations_full
@@ -698,6 +704,11 @@ class CognitiveMapManager:
         objs.append(Agent(name='agent', pos=gt_agent.pos.copy(), ori=gt_agent.ori.copy(), has_orientation=True))
         return BaseRoom(objects=objs, name='gt')
 
+    def _build_gt_global_agent_baseroom(self, gt_room: Room, gt_agent: Agent) -> BaseRoom:
+        raw = self._baseroom_from_gt(gt_room, gt_agent)
+        br = transform_baseroom(raw, gt_agent.init_pos, gt_agent.init_ori)
+        return self._filter_br_by_names(br, {"agent"})
+    
     def _build_gt_global_baseroom(self, gt_room: Room, gt_agent: Agent, observed_set: set[str]) -> BaseRoom:
         raw = self._baseroom_from_gt(gt_room, gt_agent)
         br = transform_baseroom(raw, gt_agent.init_pos, gt_agent.init_ori)

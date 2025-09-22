@@ -117,9 +117,9 @@ def evaluate_cognitive_maps_from_turnlogs(
                     if cogmap and not override_cogmap:
                         if reevaluate:
                             responses_by_type = {k: v['original_response'] for k, v in cogmap.items() if v.get('original_response')}
-                            cogmap_log = _evaluate_cogmaps(cognitive_map_manager,responses_by_type,turn_log)
+                            cogmap_log = _evaluate_cogmaps(cognitive_map_manager,responses_by_type, turn_logs[target_turn_idx])
                             turn_log['cogmap_log'] = cogmap_log.to_dict() if cogmap_log else {}
-                            history_manager.update_cogmap(turn_log)
+                            history_manager.update_cogmap(turn_logs[target_turn_idx])
                         continue
                     assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
 
