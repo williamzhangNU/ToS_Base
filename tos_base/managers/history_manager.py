@@ -176,7 +176,7 @@ class HistoryManager:
         model_config.pop("max_retries", None)
         model_config.pop("timeout", None)
         model_config_str = json.dumps(model_config, sort_keys=True)
-        model_name = model_config['model_name'] + "_" + hash(model_config_str)
+        model_name = model_config['model_name'].replace("/", "-") + "_" + hash(model_config_str)
         return os.path.join(output_dir, model_name)
     
     @staticmethod

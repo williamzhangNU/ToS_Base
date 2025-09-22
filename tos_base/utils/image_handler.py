@@ -33,19 +33,31 @@ class ImageHandler:
         tmp['agent'] = 'agent'
         self.name_2_cam_id = tmp
     
-    def _load_data(self, base_dir: str, seed: int = None) -> tuple:
+
+    def _load_data(self, base_dir: str, seed: int) -> tuple:
         """Load JSON data from a 'runNN' subdirectory (sorted by NN)."""
-        subdirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
-        runs = [d for d in subdirs if re.fullmatch(r"run(\d+)", d)]
-        assert runs, "No runNN folders found"
-        runs.sort(key=lambda d: int(re.match(r"run(\d+)", d).group(1)))
-        idx = (seed if seed is not None else np.random.randint(0, len(runs))) % len(runs)
-        image_dir = os.path.join(base_dir, runs[idx])
-        
+        target_run = f"run{seed}"
+        image_dir = os.path.join(base_dir, target_run)
+        assert os.path.exists(image_dir), f"Image directory {image_dir} does not exist"
         with open(os.path.join(image_dir, "meta_data.json"), 'r') as f:
             json_data = json.load(f)
             
         return image_dir, json_data
+
+
+    # def _load_data(self, base_dir: str, seed: int = None) -> tuple:
+    #     """Load JSON data from a 'runNN' subdirectory (sorted by NN)."""
+    #     subdirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+    #     runs = [d for d in subdirs if re.fullmatch(r"run(\d+)", d)]
+    #     assert runs, "No runNN folders found"
+    #     runs.sort(key=lambda d: int(re.match(r"run(\d+)", d).group(1)))
+    #     idx = (seed if seed is not None else np.random.randint(0, len(runs))) % len(runs)
+    #     image_dir = os.path.join(base_dir, runs[idx])
+        
+    #     with open(os.path.join(image_dir, "meta_data.json"), 'r') as f:
+    #         json_data = json.load(f)
+            
+    #     return image_dir, json_data
     
     def _load_images(self) -> Dict[str, Union[Image.Image, str]]:
         """Load images or paths based on preload setting."""

@@ -405,10 +405,10 @@ class CognitiveMapManager:
     @staticmethod
     def _relations_accuracies(pred: Dict[str, str], gt: Dict[str, str]) -> Tuple[float, float, float]:
         from ..utils.relation_codes import decode_relation_codes
-        if not gt:
+        if not pred:
             return 0.0, 0.0, 0.0
         tot = len(gt)
-        dir_correct = dist_correct = both_correct = 0
+        dir_correct = dist_correct = 0
         for pair_key, gt_value in gt.items():
             gt_dir_code, gt_dist_code = decode_relation_codes(gt_value)
             pred_dir_code = pred_dist_code = ""
@@ -419,9 +419,8 @@ class CognitiveMapManager:
                 dir_correct += 1
             if pred_dist_code == gt_dist_code:
                 dist_correct += 1
-            if pred_dir_code == gt_dir_code and pred_dist_code == gt_dist_code:
-                both_correct += 1
-        return dir_correct / tot, dist_correct / tot, both_correct / tot
+        dir_acc, dist_acc = dir_correct / tot, dist_correct / tot
+        return dir_acc, dist_acc, (dir_acc + dist_acc) / 2
 
     def _eval_relations(self, pred_relations: Dict[str, str], gt_room_state_full: BaseRoom, observed_set: set[str], assistant_response: str) -> RelationsCogMapTurnLog:
         # Missing relations -> extraction failure

@@ -113,7 +113,7 @@ class Prompter:
             'title': 'Spatial Exploration Task' if is_active else 'Spatial Reasoning Task',
             'intro': SHARED_INTRO_TEXT if not is_vision else SHARED_INTRO_VISION,
             'goal_lines': (
-                'Goal: Your objective is to **minimize total COST** while gaining knowledge of spatial relationships between each pair of objects. Do NOT stop until you have achieved complete coverage'
+                'Goal: **Minimize total COST** while building a complete and accurate map of the environment.'
                 if is_active else ''
             ),
             'format_rules': self._build_format_rules(is_active),
