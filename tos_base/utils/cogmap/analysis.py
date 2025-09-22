@@ -59,16 +59,11 @@ def calculate_cogmap_per_turn(env_data_list: List[Dict[str, Any]], mode: str = "
             if not isinstance(level_data, dict):
                 continue
             metrics_data = level_data.get('metrics_full' if mode == 'full' else 'metrics') or {}
-            if not isinstance(metrics_data, dict):
+            if not isinstance(metrics_data, dict) or not metrics_data:
                 continue
-            m = MapCogMetrics(
-                dir=float(metrics_data.get('dir', 0.0)),
-                facing=float(metrics_data.get('facing', 0.0)),
-                pos=float(metrics_data.get('pos', 0.0)),
-                overall=float(metrics_data.get('overall', 0.0)),
-                valid=True,
-            )
-            turn_to_metrics[turn_idx].append(m)
+            m = MapCogMetrics.from_dict(metrics_data)
+            if m.valid:
+                turn_to_metrics[turn_idx].append(m)
 
     max_turn = max(turn_to_metrics.keys()) if turn_to_metrics else -1
     per_turn_avg = [MapCogMetrics.average(turn_to_metrics[i]) if i in turn_to_metrics else MapCogMetrics.invalid() for i in range(max_turn + 1)]
@@ -125,11 +120,11 @@ def avg_nested_dicts(dicts: List[Dict[str, Any]]) -> Dict[str, Any]:
     for k in keys:
         vals = [d.get(k) for d in dicts]
         nums = [v for v in vals if isinstance(v, (int, float))]
-        if nums and len(nums) == len(vals):
+        if nums:
             out[k] = float(sum(nums) / len(nums))
             continue
         subs = [v for v in vals if isinstance(v, dict)]
-        if subs and len(subs) == len(vals):
+        if subs:
             out[k] = avg_nested_dicts(subs)
             continue
         lists = [v for v in vals if isinstance(v, list)]
@@ -180,82 +175,12 @@ def get_false_belief_metrics(env_data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 false_belief_metrics.append(cogmap_log['false_belief']['metrics'])
     return false_belief_metrics
 
-def compute_correctness_aggregates(env_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
-    vals = [compute_correctness_per_sample(s) for s in env_data_list]
-    return {
-        'last_global_vs_gt_full': _avg_map_dicts([v['last_global_vs_gt_full'] for v in vals]),
-        'last_relations_vs_gt_full': _avg_rel_dicts([v['last_relations_vs_gt_full'] for v in vals]),
-    }
 
 
-def compute_correctness_per_sample(env_data: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
-    lg = get_last_exploration_cogmap(env_data)
-    return {
-        'last_global_vs_gt_full': MapCogMetrics.from_dict(((lg or {}).get('global', {}) or {}).get('metrics_full', {})).to_dict(),
-        'last_relations_vs_gt_full': RelationMetrics.from_dict(((lg or {}).get('relations', {}) or {}).get('metrics_full', {})).to_dict(),
-    }
 
 
-def compute_consistency_aggregates(env_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
-    local_vs_global_avg = aggregate_per_sample_then_group(env_data_list, compute_consistency_per_sample_local_vs_global)
-    rooms_vals = [compute_consistency_per_sample_rooms_vs_global(s) for s in env_data_list]
-    from .types import MapCogMetrics as _M
-    rooms_vs_global_last = _avg_map_dicts(rooms_vals)
-    map_vs_relations_last = (sum([compute_consistency_per_sample_map_vs_rel(s) for s in env_data_list]) / len(env_data_list)) if env_data_list else 0.0
-    relations_consistency_last = (sum([compute_consistency_per_sample_relations(s) for s in env_data_list]) / len(env_data_list)) if env_data_list else 0.0
-    return {
-        'local_vs_global_avg': local_vs_global_avg,
-        'rooms_vs_global_last': rooms_vs_global_last,
-        'map_vs_relations_last': map_vs_relations_last,
-        'relations_consistency_last': relations_consistency_last,
-    }
 
 
-def compute_consistency_per_sample(env_data: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        'local_vs_global_avg': compute_consistency_per_sample_local_vs_global(env_data),
-        'rooms_vs_global_last': compute_consistency_per_sample_rooms_vs_global(env_data),
-        'map_vs_relations_last': compute_consistency_per_sample_map_vs_rel(env_data),
-        'relations_consistency_last': compute_consistency_per_sample_relations(env_data),
-    }
-
-
-def compute_consistency_per_sample_local_vs_global(env_data: Dict[str, Any]) -> Dict[str, float]:
-    mats: List[MapCogMetrics] = []
-    for t in env_data.get('env_turn_logs', []):
-        cons = (t.get('cogmap_log') or {}).get('consistency') or {}
-        m = MapCogMetrics.from_dict(cons.get('local_vs_global') or {})
-        if m.valid:
-            mats.append(m)
-    return MapCogMetrics.average(mats).to_dict() if mats else MapCogMetrics.invalid().to_dict()
-
-
-def compute_consistency_per_sample_rooms_vs_global(env_data: Dict[str, Any]) -> Dict[str, float]:
-    lg = get_last_exploration_cogmap(env_data)
-    m = MapCogMetrics.from_dict(((lg or {}).get('consistency', {}).get('rooms_vs_global', {}).get('average', {})))
-    return m.to_dict()
-
-
-def compute_consistency_per_sample_map_vs_rel(env_data: Dict[str, Any]) -> float:
-    lg = get_last_exploration_cogmap(env_data)
-    return float((lg or {}).get('consistency', {}).get('map_vs_relations', 0.0))
-
-
-def compute_consistency_per_sample_relations(env_data: Dict[str, Any]) -> float:
-    lg = get_last_exploration_cogmap(env_data)
-    return float((lg or {}).get('consistency', {}).get('relations_consistency', 0.0))
-
-
-def compute_evaluation_correctness_aggregates(env_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Aggregate evaluation (non-exploration) global correctness across samples."""
-    vals: List[Dict[str, float]] = []
-    for env_data in env_data_list:
-        eval_tasks = env_data.get('evaluation_tasks') or {}
-        for task_log in eval_tasks.values():
-            m = (task_log.get('cogmap_log') or {}).get('global', {}).get('metrics_full', {})
-            if m:
-                vals.append(MapCogMetrics.from_dict(m).to_dict())
-    return _avg_map_dicts(vals)
 
 
 __all__ = [
@@ -263,18 +188,10 @@ __all__ = [
     "aggregate_lists_per_turn",
     "calculate_cogmap_per_turn",
     "compute_error_aggregates",
-    "compute_correctness_aggregates",
-    "compute_consistency_aggregates",
     "avg_nested_dicts",
     "avg_lists",
     "compute_error_per_sample_local",
     "compute_error_per_sample_global",
-    "compute_correctness_per_sample",
-    "compute_consistency_per_sample",
-    "compute_consistency_per_sample_local_vs_global",
-    "compute_consistency_per_sample_rooms_vs_global",
-    "compute_consistency_per_sample_map_vs_rel",
-    "compute_consistency_per_sample_relations",
 ]
 
 

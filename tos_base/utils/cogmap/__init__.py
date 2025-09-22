@@ -32,8 +32,6 @@ from .analysis import (
     aggregate_lists_per_turn,
     calculate_cogmap_per_turn,
     compute_error_aggregates,
-    compute_correctness_aggregates,
-    compute_consistency_aggregates,
 )
 
 __all__ = [
@@ -67,8 +65,6 @@ __all__ = [
     "aggregate_lists_per_turn",
     "calculate_cogmap_per_turn",
     "compute_error_aggregates",
-    "compute_correctness_aggregates",
-    "compute_consistency_aggregates",
 ]
 
 

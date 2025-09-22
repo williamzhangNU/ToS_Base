@@ -245,7 +245,7 @@ def _call_llm_batch(
         return lm_outputs.non_tensor_batch['response_texts']
 
     results_by_id = {}
-    with tqdm(total=total, desc='COGMAP', leave=False) as pbar:
+    with tqdm(total=total, desc='COGMAP') as pbar:
         for start in range(0, total, CHUNK_SIZE):
             end = min(start + CHUNK_SIZE, total)
             msgs_chunk = all_messages_list[start:end]

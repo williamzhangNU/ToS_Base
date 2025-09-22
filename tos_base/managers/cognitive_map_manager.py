@@ -34,13 +34,8 @@ from ..utils.cogmap.consistency import (
     relations_consistency,
     stability,
 )
-from ..utils.cogmap.types import BaseCogMetrics, MapCogMetrics, RelationMetrics, ConsistencySummary
+from ..utils.cogmap.types import BaseCogMetrics, MapCogMetrics, RelationMetrics, ConsistencySummary, AccuracyMetrics
 from ..utils.cogmap.analysis import (
-    compute_error_aggregates,
-    compute_correctness_aggregates,
-    compute_consistency_aggregates,
-    calculate_cogmap_per_turn,
-    compute_evaluation_correctness_aggregates,
     get_last_exploration_cogmap,
     get_false_belief_metrics,
     avg_nested_dicts,
@@ -107,8 +102,8 @@ class RoomsCogMapTurnLog(BaseCogMapTurnLog):
     def to_dict(self) -> Dict[str, Any]:
         out = super().to_dict()
         out.update({
-            "pred_rooms_state": {k: v.to_dict() for k, v in self.pred_rooms_state.items()} if self.pred_rooms_state else {},
-            "gt_rooms_state": {k: v.to_dict() for k, v in self.gt_rooms_state.items()} if self.gt_rooms_state else {},
+            "pred_rooms_state": {k: (v.to_dict() if v is not None else {}) for k, v in (self.pred_rooms_state.items() if self.pred_rooms_state else [])},
+            "gt_rooms_state": {k: (v.to_dict() if v is not None else {}) for k, v in (self.gt_rooms_state.items() if self.gt_rooms_state else [])},
         })
         return out
 
@@ -197,7 +192,14 @@ class CognitiveMapManager:
         t = (map_type or "global").lower()
         json_dict = self._extract_json_from_text(assistant_response)
         if json_dict is None or gt_room is None:
-            return BaseCogMapTurnLog(type=t, extraction_success=False, original_response=assistant_response, metrics=BaseCogMetrics.invalid())
+            # Mark extraction failure as invalid metric of the appropriate type
+            if t == "relations":
+                m = RelationMetrics.invalid()
+            elif t == "false_belief":
+                m = AccuracyMetrics.invalid()
+            else:
+                m = MapCogMetrics.invalid()
+            return BaseCogMapTurnLog(type=t, extraction_success=False, original_response=assistant_response, metrics=m)
         all_item_names = {o.name for o in gt_room.all_objects}
         observed_set: set[str] = set(all_item_names if observed_items is None else [str(x).replace('_', ' ') for x in observed_items])
         visible_names = self._visible_object_names(gt_room, gt_agent)
@@ -235,6 +237,20 @@ class CognitiveMapManager:
         raise ValueError(f"Invalid map type: {t}")
 
     def _eval_global(self, pred_global_br: BaseRoom,  gt_global_br: BaseRoom, gt_room_state_full: BaseRoom, assistant_response: str) -> GlobalCogMapTurnLog:
+        if pred_global_br is None or len(pred_global_br.objects) == 0:
+            return GlobalCogMapTurnLog(
+                type="global",
+                extraction_success=False,
+                original_response=assistant_response,
+                pred_json={},
+                pred_room_state=pred_global_br,
+                metrics=MapCogMetrics.invalid(),
+                gt_room_state=None,
+                gt_json={},
+                gt_room_state_full=None,
+                gt_json_full={},
+                metrics_full=MapCogMetrics.invalid(),
+            )
         metrics = self._compare_baserooms(pred_global_br, gt_global_br)
         pred_json = self.baseroom_to_json(pred_global_br, include_gates=True)
         gt_json = self.baseroom_to_json(gt_global_br, include_gates=True)
@@ -256,10 +272,19 @@ class CognitiveMapManager:
 
     def _eval_false_belief(self, pred_global_br: BaseRoom, gt_global_br: BaseRoom, assistant_response: str) -> BaseCogMapTurnLog:
         """Evaluate false belief task - check if one object in observed_items has correct orientation."""
+        if pred_global_br is None or len(pred_global_br.objects) == 0:
+            return BaseCogMapTurnLog(
+                type="false_belief",
+                extraction_success=False,
+                original_response=assistant_response,
+                pred_json={},
+                pred_room_state=pred_global_br,
+                metrics=AccuracyMetrics.invalid(),
+            )
         # Create name-to-object mappings for comparison
         pred_objects = {o.name: o for o in pred_global_br.objects}
         gt_objects = {o.name: o for o in gt_global_br.objects}
-        metrics = BaseCogMetrics(0)
+        metrics = AccuracyMetrics(0.0)
         for name in gt_objects:
             gt_obj = gt_objects[name]
             pred_obj = pred_objects.get(name)
@@ -267,7 +292,7 @@ class CognitiveMapManager:
             # Only check objects that have orientation
             if gt_obj.has_orientation and pred_obj is not None:
                 if np.array_equal(pred_obj.ori, gt_obj.ori):
-                    metrics = BaseCogMetrics(1.0)  
+                    metrics = AccuracyMetrics(1.0)
                     break
  
         pred_json = self.baseroom_to_json(pred_global_br, include_gates=True)
@@ -282,6 +307,17 @@ class CognitiveMapManager:
         )
 
     def _eval_local(self, pred_local_br: BaseRoom, gt_local_br: BaseRoom, assistant_response: str) -> LocalCogMapTurnLog:
+        if pred_local_br is None or len(pred_local_br.objects) == 0:
+            return LocalCogMapTurnLog(
+                type="local",
+                extraction_success=False,
+                original_response=assistant_response,
+                pred_json={},
+                pred_room_state=pred_local_br,
+                metrics=MapCogMetrics.invalid(),
+                gt_room_state=None,
+                gt_json={},
+            )
         metrics = self._compare_baserooms(pred_local_br, gt_local_br)
         pred_json = self.baseroom_to_json(pred_local_br, include_gates=True)
         return LocalCogMapTurnLog(
@@ -296,6 +332,19 @@ class CognitiveMapManager:
         )
 
     def _eval_rooms(self, pred_rooms_map: Dict[str, BaseRoom], gt_rooms_map: Dict[int, BaseRoom], assistant_response: str) -> RoomsCogMapTurnLog:
+        # Treat missing/empty predictions as extraction failure
+        has_any = any((br is not None and len(br.objects) > 0) for br in (pred_rooms_map or {}).values())
+        if not has_any:
+            return RoomsCogMapTurnLog(
+                type="rooms",
+                extraction_success=False,
+                original_response=assistant_response,
+                pred_json={},
+                pred_room_state=None,
+                metrics=MapCogMetrics.invalid(),
+                pred_rooms_state={},
+                gt_rooms_state={},
+            )
         per_room: List[MapCogMetrics] = []
         for rid in sorted(gt_rooms_map.keys()):
             gt_br = gt_rooms_map[rid]
@@ -375,6 +424,20 @@ class CognitiveMapManager:
         return dir_correct / tot, dist_correct / tot, both_correct / tot
 
     def _eval_relations(self, pred_relations: Dict[str, str], gt_room_state_full: BaseRoom, observed_set: set[str], assistant_response: str) -> RelationsCogMapTurnLog:
+        # Missing relations -> extraction failure
+        if not pred_relations:
+            return RelationsCogMapTurnLog(
+                type="relations",
+                extraction_success=False,
+                original_response=assistant_response,
+                pred_json={},
+                pred_room_state=None,
+                metrics=RelationMetrics.invalid(),
+                pred_relations={},
+                gt_relations={},
+                gt_relations_full={},
+                metrics_full=RelationMetrics.invalid(),
+            )
         # Observed: include only observed names; include initial_pos at agent.init_pos; exclude agent
         from ..utils.relationship_utils import room_to_ordered_relations
         # Try to find agent initial pos from any Agent present in the full room state
@@ -417,7 +480,7 @@ class CognitiveMapManager:
             if not isinstance(resp, str):
                 continue
             single = self.evaluate_cogmap_type(resp, gt_room, gt_agent, observed_items, map_type_key)
-            if single is None:
+            if single is None or not single.extraction_success:
                 continue
             setattr(out, f"{single.type}_log", single)
         # Consistency fields per turn
@@ -541,8 +604,8 @@ class CognitiveMapManager:
 
         # Correctness: last global_full and relations_full
         correctness = {
-            'last_global_vs_gt_full': MapCogMetrics.from_dict((((last or {}).get('global') or {}).get('metrics_full') or {})).to_dict(),
-            'last_relations_vs_gt_full': RelationMetrics.from_dict((((last or {}).get('relations') or {}).get('metrics_full') or {})).to_dict(),
+            'last_global_vs_gt_full': (lambda _m: (_m.to_dict() if _m.valid else {}))(MapCogMetrics.from_dict((((last or {}).get('global') or {}).get('metrics_full') or {}))),
+            'last_relations_vs_gt_full': (lambda _r: (_r.to_dict() if _r.valid else {}))(RelationMetrics.from_dict((((last or {}).get('relations') or {}).get('metrics_full') or {}))),
         }
 
         # Consistency
@@ -560,8 +623,8 @@ class CognitiveMapManager:
         consistency = {
             'local_vs_global_avg': _avg_consistency_lvsg(cog_logs).to_dict(),
             'rooms_vs_global_last': MapCogMetrics.from_dict(((cons_last.get('rooms_vs_global') or {}).get('average') or {})).to_dict(),
-            'map_vs_relations_last': float(cons_last.get('map_vs_relations', 0.0) or 0.0),
-            'relations_consistency_last': float(cons_last.get('relations_consistency', 0.0) or 0.0),
+            'map_vs_relations_last': (float(cons_last.get('map_vs_relations')) if isinstance(cons_last.get('map_vs_relations'), (int, float)) else None),
+            'relations_consistency_last': (float(cons_last.get('relations_consistency')) if isinstance(cons_last.get('relations_consistency'), (int, float)) else None),
             'stability_avg': MapCogMetrics.average(stability(env_data)).to_dict(),
         }
 

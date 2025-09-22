@@ -25,7 +25,8 @@ def compare_on_common_subset(a: BaseRoom | None, b: BaseRoom | None, allow_scale
     names_b = {o.name for o in b.objects}
     names = names_a & names_b
     if not names:
-        return MapCogMetrics.invalid()
+        # No overlap -> treat as wrong
+        return MapCogMetrics(dir=0.0, facing=0.0, overall=0.0, pos=0.0, valid=True)
     a_sub = BaseRoom(objects=[o for o in a.objects if o.name in names], name=a.name)
     b_sub = BaseRoom(objects=[o for o in b.objects if o.name in names], name=b.name)
     return compute_map_metrics(a_sub, b_sub, allow_scale=allow_scale, pos_norm_L=pos_norm_L)
@@ -43,24 +44,41 @@ def rooms_vs_global_consistency(pred_rooms: Dict[str, BaseRoom], pred_global: Ba
         return MapCogMetrics.invalid(), {}
     per_room: Dict[str, MapCogMetrics] = {}
     vals: List[MapCogMetrics] = []
-    for rid, room_br in sorted(pred_rooms.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else kv[0]):
-        gate_name = entry_gate_by_room.get(int(rid))
+    # Iterate over all GT rooms to ensure missing predictions count as 0
+    for rid_int in sorted(room.objects_by_room.keys()):
+        rid = str(rid_int)
+        room_br = pred_rooms.get(rid)
+        gate_name = entry_gate_by_room.get(rid_int)
         if gate_name:
             g = next((gg for gg in room.gates if gg.name == gate_name), None)
             if g is None:
+                m = MapCogMetrics(dir=0.0, facing=0.0, pos=0.0, overall=0.0, valid=True)
+                per_room[rid] = m
+                vals.append(m)
                 continue
             gate_pos = g.pos
-            gate_ori = g.get_ori_for_room(int(rid))
-        elif int(rid) == 1:
+            gate_ori = g.get_ori_for_room(rid_int)
+        elif rid_int == 1:
             gate_pos = agent.init_pos
             gate_ori = agent.init_ori
         else:
+            # No anchor info; treat as wrong
+            m = MapCogMetrics(dir=0.0, facing=0.0, pos=0.0, overall=0.0, valid=True)
+            per_room[rid] = m
+            vals.append(m)
+            continue
+        if room_br is None:
+            m = MapCogMetrics(dir=0.0, facing=0.0, pos=0.0, overall=0.0, valid=True)
+            per_room[rid] = m
+            vals.append(m)
             continue
         room_in_initial = br_from_anchor_to_initial(room_br, gate_pos, gate_ori, agent)
         m = compare_on_common_subset(room_in_initial, pred_global, allow_scale=allow_scale, pos_norm_L=pos_norm_L)
-        if m.valid:
-            per_room[rid] = m
-            vals.append(m)
+        # If invalid comparison (no overlap), count as 0 instead of skipping
+        if not m.valid:
+            m = MapCogMetrics(dir=0.0, facing=0.0, pos=0.0, overall=0.0, valid=True)
+        per_room[rid] = m
+        vals.append(m)
     avg = MapCogMetrics.average(vals) if vals else MapCogMetrics.invalid()
     return avg, per_room
 
@@ -122,7 +140,8 @@ def relations_consistency(pred_relations: Dict) -> float:
         Float between 0.0 and 1.0 representing consistency (1.0 = fully consistent)
     """
     if not pred_relations or len(pred_relations) < 3:
-        return 1.0  # Trivially consistent if too few relations
+        # Empty or too few relations after successful extraction -> treat as wrong
+        return 0.0
 
     # Extract unique object names (ordered keys preferred)
     all_names_set = set()

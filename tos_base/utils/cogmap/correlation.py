@@ -21,8 +21,8 @@ def compute_correlation_metrics(env_data_list: Dict, exp_type: str = 'active') -
     # First pass: collect all existing task names
     all_task_names = set()
     for s in env_data_list:
-        metrics = s.get('metrics')
-        evaluation_metric = metrics.get('evaluation')
+        metrics = s.get('metrics') or {}
+        evaluation_metric = metrics.get('evaluation') or {}
         if isinstance(evaluation_metric, dict):
             per_task = evaluation_metric.get('per_task', {})
             all_task_names.update(per_task.keys())
@@ -35,43 +35,41 @@ def compute_correlation_metrics(env_data_list: Dict, exp_type: str = 'active') -
     last_infogains = []
 
     for s in env_data_list:
-        metrics = s.get('metrics')
-        cogmap_metric = metrics.get('cogmap')
-        evaluation_metric = metrics.get('evaluation')
-        exploration_metric = metrics.get('exploration', {})
-        assert isinstance(cogmap_metric, dict) and isinstance(evaluation_metric, dict), "Each env_data must have 'cogmap' and 'evaluation' metrics"
+        metrics = s.get('metrics') or {}
+        cogmap_metric = metrics.get('cogmap') or {}
+        evaluation_metric = metrics.get('evaluation') or {}
+        exploration_metric = metrics.get('exploration', {}) or {}
+        if not isinstance(cogmap_metric, dict) or not isinstance(evaluation_metric, dict):
+            continue
 
         # Extract last_global_vs_gt_full metric
         exploration = cogmap_metric.get('exploration', {})
         correctness = exploration.get('correctness', {})
-        last_global_full = correctness.get('last_global_vs_gt_full', {})
-        overall_cogmap = last_global_full.get('overall', 0.0)
+        last_global_full = correctness.get('last_global_vs_gt_full', {}) or {}
+        # Only keep samples with valid last_global_vs_gt_full
+        if not last_global_full or 'overall' not in last_global_full:
+            continue
+        overall_cogmap = last_global_full.get('overall')
 
         # Extract last_infogain metric
-        last_infogain = exploration_metric.get('final_information_gain', 0.0)
+        last_infogain = exploration_metric.get('final_information_gain')
 
         if isinstance(overall_cogmap, (int, float)) and not np.isnan(overall_cogmap):
             last_global_vs_gt_fulls.append(float(overall_cogmap))
 
             # Extract evaluation metrics
             # Overall accuracy
-            avg_accuracy = evaluation_metric.get('overall', {}).get('avg_accuracy')
-            evaluation_metric_list['avg_accuracy'].append(float(avg_accuracy) if avg_accuracy is not None else None)
+            avg_accuracy = (evaluation_metric.get('overall') or {}).get('avg_accuracy')
+            evaluation_metric_list['avg_accuracy'].append(float(avg_accuracy) if isinstance(avg_accuracy, (int, float)) else None)
 
             # Accuracy for each task - fill missing tasks with None
-            per_task = evaluation_metric.get('per_task', {})
+            per_task = evaluation_metric.get('per_task') or {}
             for task_name in all_task_names:
-                if task_name in per_task:
-                    task_acc = per_task[task_name].get('accuracy', 0.0)
-                    evaluation_metric_list[task_name].append(float(task_acc))
-                else:
-                    evaluation_metric_list[task_name].append(None)
+                task_acc = (per_task.get(task_name) or {}).get('accuracy')
+                evaluation_metric_list[task_name].append(float(task_acc) if isinstance(task_acc, (int, float)) else None)
 
-            # Add information gain data
-            if isinstance(last_infogain, (int, float)) and not np.isnan(last_infogain):
-                last_infogains.append(float(last_infogain))
-            else:
-                last_infogains.append(0.0)  # Use default value to maintain consistent length
+            # Add information gain data (aligned)
+            last_infogains.append(float(last_infogain) if isinstance(last_infogain, (int, float)) and not np.isnan(last_infogain) else None)
 
     cogmap_acc_correlations = {}
     for task_name, evaluation_values in evaluation_metric_list.items():
@@ -90,10 +88,21 @@ def compute_correlation_metrics(env_data_list: Dict, exp_type: str = 'active') -
 
 
 def calculate_pearson_correlation(x: List[float], y: List[float]) -> Dict[str, Any]:
-    assert len(x) == len(y), "Length of x and y must be the same"
     try:
-        # Filter out None values and corresponding x values
-        valid_pairs = [(xi, yi) for xi, yi in zip(x, y) if yi is not None and not np.isnan(xi) and not np.isnan(yi)]
+        # Pairwise filter (ignore None/NaN), allow length mismatch by zipping
+        valid_pairs = []
+        for xi, yi in zip(x or [], y or []):
+            if xi is None or yi is None:
+                continue
+            if isinstance(xi, (int, float)) and isinstance(yi, (int, float)) and not np.isnan(xi) and not np.isnan(yi):
+                valid_pairs.append((float(xi), float(yi)))
+        if len(valid_pairs) < 2:
+            return {
+                'pearson_r': None,
+                'p_value': None,
+                'significant': False,
+                'n_samples': len(valid_pairs)
+            }
         x_valid, y_valid = zip(*valid_pairs)
         corr_coef, p_value = pearsonr(x_valid, y_valid)
         return {

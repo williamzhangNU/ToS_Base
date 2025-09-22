@@ -98,6 +98,28 @@ class MapCogMetrics(BaseCogMetrics):
 
 
 @dataclass
+class AccuracyMetrics(BaseCogMetrics):
+    """Binary/accuracy-style metric with validity flag.
+
+    Uses 'overall' as the accuracy score to stay compatible with existing code.
+    """
+
+    def to_dict(self) -> Dict[str, float]:
+        return {"overall": float(self.overall)}
+
+    @classmethod
+    def invalid(cls) -> 'AccuracyMetrics':
+        return cls(overall=0.0, valid=False)
+
+    @staticmethod
+    def from_dict(d: Dict[str, float]) -> 'AccuracyMetrics':
+        if not isinstance(d, dict) or not d:
+            return AccuracyMetrics.invalid()
+        # Accept either 'overall' or 'acc' keys
+        val = d.get('overall', d.get('acc', 0.0))
+        return AccuracyMetrics(overall=float(val), valid=True)
+
+@dataclass
 class RelationMetrics(BaseCogMetrics):
     dir: float = 0.0
     dist: float = 0.0
@@ -157,8 +179,8 @@ class ConsistencySummary:
     local_vs_global: Optional[MapCogMetrics] = None
     rooms_vs_global_avg: Optional[MapCogMetrics] = None
     rooms_vs_global_per_room: Dict[str, MapCogMetrics] = field(default_factory=dict)
-    map_vs_relations: float = 0.0
-    relations_consistency: float = 0.0
+    map_vs_relations: Optional[float] = None
+    relations_consistency: Optional[float] = None
 
     def to_dict(self) -> Dict:
         return {
@@ -167,8 +189,8 @@ class ConsistencySummary:
                 "average": (self.rooms_vs_global_avg.to_dict() if self.rooms_vs_global_avg and self.rooms_vs_global_avg.valid else {}),
                 "per_room": {k: v.to_dict() for k, v in self.rooms_vs_global_per_room.items()},
             },
-            "map_vs_relations": float(self.map_vs_relations),
-            "relations_consistency": float(self.relations_consistency),
+            "map_vs_relations": (float(self.map_vs_relations) if isinstance(self.map_vs_relations, (int, float)) else None),
+            "relations_consistency": (float(self.relations_consistency) if isinstance(self.relations_consistency, (int, float)) else None),
         }
 
 
@@ -176,6 +198,7 @@ __all__ = [
     "BaseCogMetrics",
     "MapCogMetrics",
     "RelationMetrics",
+    "AccuracyMetrics",
     "ConsistencySummary",
 ]
 

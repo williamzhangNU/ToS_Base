@@ -45,7 +45,7 @@ def create_cogmap_metrics_plot(
     ]
 
     any_data = any(
-        include and isinstance(series.get(k), list) and any(v is not None for v in series.get(k, []))
+        include and isinstance(series.get(k), list) and any(isinstance(v, (int, float)) for v in series.get(k, []))
         for k, include, _ in keys
     )
     if not any_data:
@@ -68,7 +68,7 @@ def create_cogmap_metrics_plot(
         vals = series.get(k, [])
         if not isinstance(vals, list) or len(vals) == 0:
             continue
-        y = [np.nan if v is None else float(v) for v in vals]
+        y = [np.nan if not isinstance(v, (int, float)) else float(v) for v in vals]
         if turns is None:
             turns = list(range(1, len(y) + 1))
         ax.plot(turns, y, marker='o', linewidth=2, markersize=3, label=label)
@@ -166,10 +166,13 @@ def create_correlation_scatter_plot(x_values: List[float], y_values: List[float]
 
     # Add trend line
     if len(valid_pairs) >= 2:
-        z = np.polyfit(valid_x, valid_y, 1)
-        p = np.poly1d(z)
-        x_trend = np.linspace(min(valid_x), max(valid_x), 100)
-        ax.plot(x_trend, p(x_trend), "r--", alpha=0.8, linewidth=2)
+        try:
+            z = np.polyfit(valid_x, valid_y, 1)
+            p = np.poly1d(z)
+            x_trend = np.linspace(min(valid_x), max(valid_x), 100)
+            ax.plot(x_trend, p(x_trend), "r--", alpha=0.8, linewidth=2)
+        except Exception:
+            pass
 
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)

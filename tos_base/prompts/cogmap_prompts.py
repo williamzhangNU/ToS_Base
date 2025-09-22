@@ -107,15 +107,15 @@ def get_cogmap_prompt(map_type: str, enable_think: bool = True) -> str:
     t = (map_type or "global").strip().lower()
     fmt = _cogmap_format_rules(enable_think)
     if t == "global":
-        return f"{BASE_COGMAP_PROMPT}\n\n{fmt}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}"
+        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
     if t == "local":
-        return f"{BASE_COGMAP_PROMPT}\n\n{fmt}\n\n{COGMAP_INSTRUCTION_LOCAL_ONLY}"
+        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_LOCAL_ONLY}\n\n{fmt}"
     if t == "rooms":
-        return f"{BASE_COGMAP_PROMPT}\n\n{fmt}\n\n{COGMAP_INSTRUCTION_ROOMS_ONLY}"
+        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_ROOMS_ONLY}\n\n{fmt}"
     if t == "relations":
-        return f"{BASE_COGMAP_PROMPT}\n\n{fmt}\n\n{RELATIONS_PROMPT}"
+        return f"{RELATIONS_PROMPT}\n\n{fmt}"
     # default to global
-    return f"{BASE_COGMAP_PROMPT}\n\n{fmt}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}"
+    return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
 
 # --- Pairwise relations ---
 from ..utils.relation_codes import _DIR_LABEL_TO_CODE as _DLC, _DIST_LABEL_TO_CODE as _SLC
