@@ -96,7 +96,10 @@ def evaluate_cognitive_maps_from_turnlogs(
                     # - For each turn: generate local and global
                     # - For final turn only: also generate rooms and relations
                     base_user = re.sub(r"You have a maximum of\s*\d+\s*exploration steps left.*", "", turn_log['user_message'], flags=re.DOTALL)
-                    per_turn_types = ['local', 'global']
+                    if len(turn_log['exploration_log']['visible_objects']) == 0:
+                        per_turn_types = ['global']
+                    else:
+                        per_turn_types = ['local', 'global']
                     final_only_types = ['rooms', 'relations'] if turn_log['is_last_exp'] else []
                     for map_type in per_turn_types + final_only_types:
                         msgs = [m.copy() for m in messages]
@@ -116,8 +119,7 @@ def evaluate_cognitive_maps_from_turnlogs(
                     target_turn_idx = turn_idx
                     base_user = re.sub(r'## Evaluation Question.*', '', turn_log['user_message'],  flags=re.DOTALL) + turn_log['evaluation_log']['evaluation_data']['action']
 
-                    # Evaluation tasks: only global (correctness)
-                    map_type = 'global'
+                    map_type = 'false_belief'
                     msgs = [m.copy() for m in messages]
                     enable_think = bool(env_config.get('prompt_config', {}).get('enable_think', True))
                     cogmap_prompt = get_cogmap_prompt(map_type, enable_think)
@@ -184,15 +186,12 @@ def evaluate_cognitive_maps_from_turnlogs(
                 agent_state = Agent.from_dict(turn_log['agent_state'])
 
                 # Determine observed items
-                if env_config.get('exp_type') == 'active':
-                    observed_items = turn_log.get('observed_items', [])
+                if env_config.get('exp_type') == 'active' and turn_log.get('is_exploration_phase'):
+                    observed_items = turn_log.get('exploration_log').get('observed_items', [])
+                elif (not turn_log.get('is_exploration_phase', True)) and 'falsebelief' in turn_log.get('evaluation_log', {}).get('task_type', '').lower():
+                    observed_items = [turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('kwargs', {}).get('rotated_object')]
                 else:
                     observed_items = [obj.name for obj in room_state.all_objects]
-
-                # only effective for false belief task
-                if (not turn_log.get('is_exploration_phase', True)) and 'falsebelief' in turn_log.get('evaluation_log', {}).get('task_type', '').lower():
-                    responses_by_type['false_belief'] = responses_by_type['global']
-                    observed_items = [turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('kwargs', {}).get('rotated_object')]
 
                 # Evaluate cognitive maps using selected responses
                 cogmap_log = cognitive_map_manager.evaluate_cogmaps(

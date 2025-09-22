@@ -585,7 +585,7 @@ class HTMLGenerator:
                         f.write("</div>\n")  # End json-content
                         f.write("</div>\n")  # End json-container
 
-    def _render_cogmap_metrics(self, f, cogmap_log: Dict, page_idx: int, t_idx: int) -> None:
+    def _render_cogmap_metrics(self, f, cogmap_log: Dict) -> None:
         """Helper to render cognitive map metrics"""
         if not cogmap_log:
             return
@@ -689,7 +689,7 @@ class HTMLGenerator:
             # Display cognitive map original responses if available
             if env_log.get('cogmap_log'):
                 self._render_cogmap_responses(f, env_log['cogmap_log'], page_idx, t_idx)
-                self._render_cogmap_metrics(f, env_log['cogmap_log'], page_idx, t_idx)
+                self._render_cogmap_metrics(f, env_log['cogmap_log'])
 
             # Display turn metrics
             self._render_turn_metrics(f, env_log)
