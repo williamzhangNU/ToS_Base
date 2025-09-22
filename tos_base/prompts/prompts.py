@@ -27,7 +27,9 @@ VISION_EXAMPLE = """\
 Here is an example of your observation: blue cylinder 1 m straight ahead; red cylinder 2 m straight ahead; yellow cylinder 2 m at 45° to your front-left; green cylinder 3 m at 22.5° to your front-slight-right:
 {image_placeholder}
 
-All objects in the following image are facing towards the camera (facing backwards). And numbered from 1 to N corresponding to object sequence mentioned in the room layout.
+The image shows all objects in the room. Each tile is numbered (1-N) in the top-left, matching the object order in the room layout.
+For items with a facing direction, two copies are shown side-by-side: the left copy has its front facing the camera; the right copy has its front facing left.
+Items without a meaningful facing direction are shown once.
 {image_placeholder}
 """
 

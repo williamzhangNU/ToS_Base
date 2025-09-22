@@ -15,14 +15,14 @@ class EvalTaskType(Enum):
     ROT = ("rot", "RotEvaluationTask")
     ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
     POV = ("pov", "PovEvaluationTask")
-    DIR_ANCHOR = ("dir_anchor", "DirectionPov")
+    BWD_POV = ("bwd_pov", "BackwardPovEvaluationTask")
     E2A = ("e2a", "E2AEvaluationTask")
     FWD_LOC = ("fwd_loc", "ForwardLocEvaluationTask")
     BWD_LOC = ("bwd_loc", "BackwardLocEvaluationTask")
-    FALSE_BELIEF = ("false_belief", "FalseBeliefDirectionPov")
     FWD_FOV = ("fwd_fov", "ForwardFOVEvaluationTask")
     BWD_NAV = ("bwd_nav", "BackwardNavEvaluationTask")
-    BWD_POV = ("bwd_pov", "BackwardPovEvaluationTask")
+    FALSE_BELIEF = ("false_belief", "FalseBeliefDirectionPov")
+    DIR_ANCHOR = ("dir_anchor", "DirectionPov")
     
     def __init__(self, short_name: str, class_name: str):
         self.short_name = short_name

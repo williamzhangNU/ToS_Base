@@ -87,7 +87,7 @@ class ExplorationManager:
         # Action counts and costs
         self.action_counts: Dict[str, int] = self.DEFAULT_ACTION_COUNTS.copy()
         self.action_cost: int = 0
-        # Observed names (objects and gates) to gate Move() eligibility
+        # Observed names (objects and gates) to gate JumpTo() eligibility
         self.observed_items: Set[str] = set()
         self.visible_objects: List[str] = []
         # Grid size for solver metrics (use provided or infer from mask; fallback 10)

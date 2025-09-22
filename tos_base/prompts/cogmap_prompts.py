@@ -16,21 +16,23 @@ Represent the scene as a JSON map.
 
 ### General rules (shared)
 - Coordinate frame MUST be explicit in the content.
-- Include only observed/known information—do not invent.
+- Include only observed/known information, do not invent.
 """
+
+from ..utils.utils import THINK_LABEL, ANSWER_LABEL
 
 def _cogmap_format_rules(enable_think: bool) -> str:
     if enable_think:
         return (
             "!!! IMPORTANT OUTPUT RULES !!!\n"
-            "1. Always output: <think> [Your thoughts on cognitive map] </think> <answer> [JSON map only] </answer>.\n"
-            "2. Inside <answer> output ONLY the JSON (no prose).\n"
+            f"1. Always output (labels followed by a newline):\n{THINK_LABEL} [Your thoughts on cognitive map]\n{ANSWER_LABEL} [JSON map only]\n"
+            f"2. Inside {ANSWER_LABEL} output ONLY the JSON (no prose).\n"
             "3. Any deviation is invalid."
         )
     return (
         "!!! IMPORTANT OUTPUT RULES !!!\n"
-        "1. Always output: <answer> [JSON map only] </answer>.\n"
-        "2. Inside <answer> output ONLY the JSON (no prose).\n"
+        f"1. Always output (label followed by a newline):\n{ANSWER_LABEL} [JSON map only]\n"
+        f"2. Inside {ANSWER_LABEL} output ONLY the JSON (no prose).\n"
         "3. Any deviation is invalid."
     )
 
@@ -56,9 +58,12 @@ Example:
 COGMAP_INSTRUCTION_LOCAL_ONLY = """\
 ## Cognitive Map — Local (specifics)
 
-- Frame: must include "origin":"agent". Always keep in mind that the origin is the agent's position and orientation.
 - Structure: include an "objects" dict; each object's position and facing are relative to the agent at time of writing.
-- Content: include all objects and doors in your current field of view; DO NOT include the agent itself in "objects".
+- Frame: must include "origin":"agent". Always keep in mind that the origin is the agent's current position and orientation.
+  - +y: facing forward
+  - +x: right when facing +y; -x: left; -y: back toward door
+  - All positions/facings relative to this frame.
+- Content: "objects" dict; include all objects and doors in your current field of view; exclude agent.
 - Facing: use "+x|-x|+y|-y" (local axes).
 
 Example:
@@ -76,11 +81,14 @@ Example:
 COGMAP_INSTRUCTION_ROOMS_ONLY = """\
 ## Cognitive Map — Rooms (specifics)
 
-- Structure: map of rooms keyed by room id.
-- Frame per room: must include "origin":"<gate_name>" where the origin gate is the first used to enter that room; +Y points into the room.
-- Content: include each room’s "objects" dict; DO NOT include the agent; DO NOT include the entry door.
-- Initial room: include it with origin at the initial position and orientation.
-- Facing: use "+x|-x|+y|-y".
+- Structure: rooms keyed by room id.
+- Frame per room: include "origin":"<door_name>|initial".
+  - origin is the first entry door; for starting room use "initial" (starting position)
+  - +y: into room (direction of walking through the door); north for starting room
+  - +x: right when facing +y; -x: left; -y: back toward door
+  - All positions/facings relative to this frame.
+- Content: room's "objects" dict; exclude agent and entry door.
+- Facing: "+x|-x|+y|-y".
 
 Example:
 ```json
@@ -89,11 +97,10 @@ Example:
     "origin": "initial",
     "objects": {
       "chair": {"position": [1, 0], "facing": "+y"},
-      "table": {"position": [2, 1], "facing": "-x"}
     }
   },
   "2": {
-    "origin": "door",
+    "origin": "red door",
     "objects": {
       "sofa": {"position": [0, 2], "facing": "-y"}
     }

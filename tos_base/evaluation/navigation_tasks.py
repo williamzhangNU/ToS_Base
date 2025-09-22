@@ -15,7 +15,7 @@ from ..managers.exploration_manager import ExplorationManager
 from ..utils.action_utils import action_results_to_text
 from ..utils.utils import hash
 
-"""Small, shared helpers. Use actions (Observe/Rotate/Move) via ExplorationManager."""
+"""Small, shared helpers. Use actions (Observe/Rotate/JumpTo) via ExplorationManager."""
 
 def _closest_cardinal(vec: np.ndarray) -> np.ndarray:
     basis = [np.array([0, 1]), np.array([1, 0]), np.array([0, -1]), np.array([-1, 0])]
@@ -98,8 +98,8 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
                 dist_phrase = f"{_nearfar_phrase(i, len(dist_group))} one"
         if dir_phrase or dist_phrase:
             parts = [p for p in [dir_phrase, dist_phrase] if p]
-            return f"Among objects which are {dir_label}, {dist_label}, you move to the " + " also ".join(parts) + "."
-        return f"Move to the object at {dir_label}, {dist_label}."
+            return f"Among objects which are {dir_label}, {dist_label}, you jump to the " + " also ".join(parts) + "."
+        return f"Jump to the object at {dir_label}, {dist_label}."
 
     def build_action_sequence(self, sequence: List[str], final_ori: Tuple[int, int]) -> Tuple[List[List], Agent]:
         """Return per-step ActionResults groups and end agent. Each target yields [Rotate?, Move]. Final group is Rotate if needed."""

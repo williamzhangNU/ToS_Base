@@ -56,7 +56,7 @@ room, agent = RoomGenerator.generate_room(n_objects=5, np_random=np_random)
 ### Exploration
 ```python
 exploration_manager = ExplorationManager(room, agent)
-action_seq = ActionSequence.parse("Actions: [Move(table), Observe()]")
+action_seq = ActionSequence.parse("Actions: [JumpTo(table), Observe()]")
 result, info = exploration_manager.execute_action_sequence(action_seq)
 ```
 

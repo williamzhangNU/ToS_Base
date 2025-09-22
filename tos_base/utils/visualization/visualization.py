@@ -46,11 +46,6 @@ class VisualizationHelper:
         html += "</div>"
         return html
     
-    @staticmethod
-    def extract_think_and_answer(text: str) -> tuple[str, str]:
-        think, answer, _ = parse_llm_response(text, enable_think=True)
-        return think or text, answer or text
-    
     
 
 

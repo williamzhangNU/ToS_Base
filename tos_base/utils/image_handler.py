@@ -36,10 +36,7 @@ class ImageHandler:
 
     def _load_data(self, base_dir: str, seed: int) -> tuple:
         """Load JSON data from a 'runNN' subdirectory (sorted by NN)."""
-        if len(str(seed)) == 1:
-            target_run = f"run0{seed}"
-        else:
-            target_run = f"run{seed}"
+        target_run = f"run{seed:02d}"
         image_dir = os.path.join(base_dir, target_run)
         assert os.path.exists(image_dir), f"Image directory {image_dir} does not exist"
         with open(os.path.join(image_dir, "meta_data.json"), 'r') as f:

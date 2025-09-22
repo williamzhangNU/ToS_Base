@@ -12,8 +12,10 @@ Contains all concrete action classes and the ActionSequence parser.
 """
 
 
+from ..utils.utils import ANSWER_LABEL
+
 ACTION_INSTRUCTION = """\
-You can move within and across rooms, turn, and observe.
+You can jump to objects within and across rooms, turn, and observe.
 When you are at a door, you can see objects from both connected rooms (within FOV).
 
 Available Actions:
@@ -21,9 +23,9 @@ Available Actions:
 
 
 Action Grammar (HARD CONSTRAINT):
-Your <answer> must match this grammar:
-<answer> Actions: [ <M>* <F> ] </answer>
-<M> = "Move(OBJ)" | "Rotate(DEG)" | "Return()"
+Your {answer_label} must match this grammar (label followed by newline):
+{answer_label}\nActions: [ <M>* <F> ]
+<M> = "JumpTo(OBJ)" | "Rotate(DEG)" | "Return()"
 <F> = "Observe()" | "Query(OBJ)" | "Term()"
 Constraints:
 - Exactly one <F>, and it must be the final element.
@@ -38,7 +40,7 @@ Examples:
 Rules:
 - You may perform zero, one or more movement actions.
 - Provide **EXACTLY ONE** final action (and it **must be last**) or your action sequence will be invalid.
-- Observe action only reports from your current position. If you move multiple times, the final Observe() action gives the view only from your last position.
+- Observe action only reports from your current position. If you jump multiple times, the final Observe() action gives the view only from your last position.
 - Actions execute in order. Field of view: {field_of_view}°.
 
 Observe and Query action have costs:
@@ -48,18 +50,18 @@ Observe and Query action have costs:
 
 
 class MoveAction(BaseAction):
-    """Move to a target object"""
+    """Jump to a target object"""
     
-    format_desc = "Move(object_name)"
+    format_desc = "JumpTo(object_name)"
     description = (
-        "Move to the same position as the object. "
-        "Your orientation does NOT change when you move."
-        "You can ONLY move to objects within your field of view and you must have observed it before. "
-        "You can ONLY move to objects by name, not directions or others. You CANNOT move to objects by numbers. "
-        "Invalid: Move(left), Move(1)."
+        "Jump to the same position as the object. "
+        "Your orientation does NOT change when you jump."
+        "You can ONLY jump to objects within your field of view and you must have observed it before. "
+        "You can ONLY jump to objects by name, not directions or others. You CANNOT jump to objects by numbers. "
+        "Invalid: JumpTo(left), JumpTo(1)."
     )
-    example = "Move(table)"
-    format_pattern = r"^Move\(([A-Za-z0-9_ -]+)\)$"
+    example = "JumpTo(table)"
+    format_pattern = r"^JumpTo\(([A-Za-z0-9_ -]+)\)$"
     cost = 0
     
     def __init__(self, target: str):
@@ -68,14 +70,14 @@ class MoveAction(BaseAction):
     
     def success_message(self, **kwargs) -> str:
         extra = kwargs.get('extra')
-        return f"You moved at {self.target}." + (f" {extra}" if extra else "")
+        return f"You jumped to {self.target}." + (f" {extra}" if extra else "")
     
     def error_message(self, error_type: str) -> str:
         errors = {"not_found": "object not found", "not_visible": "object not visible", "not_observed": "object not observed yet"}
-        return f"Cannot move to '{self.target}': {errors.get(error_type, 'execution failed')}."
+        return f"Cannot jump to '{self.target}': {errors.get(error_type, 'execution failed')}."
     
     def execute(self, room, agent, **kwargs) -> ActionResult:
-        """Execute move action on room state."""
+        """Execute jump action on room state."""
         if not room.has_object(self.target):
             return ActionResult(False, self.get_feedback(False, "not_found"), str(self), 'move', {'target_name': self.target})
         
@@ -99,7 +101,7 @@ class MoveAction(BaseAction):
         return ActionResult(True, self.get_feedback(True, extra=extra_msg), str(self), 'move', {'target_name': self.target})
     
     def __repr__(self):
-        return f"Move({self.target})"
+        return f"JumpTo({self.target})"
 
 class RotateAction(BaseAction):
     """Rotate by specified degrees"""
@@ -424,7 +426,7 @@ class ActionSequence:
         m = re.search(r'\[(.*)\]', action_str.strip())
         if not m:
             return None
-        # extract top-level actions like Move(table), Rotate(90), Term()
+        # extract top-level actions like JumpTo(table), Rotate(90), Term()
         action_strs = re.findall(r'([A-Za-z]+\([^()]*\))', m.group(1))
         if not action_strs:
             return None
@@ -475,19 +477,20 @@ class ActionSequence:
             "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in final_actions)
         )
         examples = (
-            f"Valid: Actions: [Move(table), Rotate(90), Observe()]\n" +
+            f"Valid: Actions: [JumpTo(table), Rotate(90), Observe()]\n" +
             f"Valid: Actions: [Observe()]\n" +
             f"Valid: Actions: [Query(table)]\n" +
-            f"Invalid (no final action): Actions: [Move(table)]\n" +
+            f"Invalid (no final action): Actions: [JumpTo(table)]\n" +
             f"Invalid (more than one final action): Actions: [Observe(), Rotate(90), Observe()]\n" +
-            f"Invalid (termination with other actions): Actions: [Move(table), Term()]\n\n"
+            f"Invalid (termination with other actions): Actions: [JumpTo(table), Term()]\n\n"
         )
         
         return ACTION_INSTRUCTION.format(
             actions=action_desc,
             examples=examples,
             field_of_view=BaseAction.get_field_of_view(),
-            costs="\n".join(f"- {cls.format_desc}: {cls.cost}" for cls in [ObserveAction, QueryAction])
+            costs="\n".join(f"- {cls.format_desc}: {cls.cost}" for cls in [ObserveAction, QueryAction]),
+            answer_label=ANSWER_LABEL
         )
 
 

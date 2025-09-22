@@ -9,6 +9,7 @@ from ..core.relationship import (
     DegreeRel, OrientationRel
 )
 from .prompts import *
+from ..utils.utils import THINK_LABEL, ANSWER_LABEL
 
 class Prompter:
     # Dynamic, reusable format blocks
@@ -16,15 +17,15 @@ class Prompter:
         if self.enable_think:
             think = "[Your thoughts on next step actions]" if is_exploration else "[Your thoughts on the question]"
             answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
-            fmt = f"<think> {think} </think> <answer> {answer} </answer>"
+            fmt = f"{THINK_LABEL}\n{think}\n{ANSWER_LABEL}\n{answer}"
         else:
             answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
-            fmt = f"<answer> {answer} </answer>"
+            fmt = f"{ANSWER_LABEL}\n{answer}"
         return (
             "!!! IMPORTANT OUTPUT RULES !!!\n"
-            "1. You must always output in this format:\n"
+            "1. You must always output in this format (labels followed by a newline):\n"
             f"   {fmt}\n"
-            "2. Inside <answer>, only include the required content.\n"
+            f"2. Inside {ANSWER_LABEL}, include ONLY the required answer. No extra text, notes, or formatting.\n"
             "   - No bullet points, prose, boxes, calculations, or explanations.\n"
             "3. Any deviation is invalid."
         )
@@ -33,10 +34,10 @@ class Prompter:
         if self.enable_think:
             think = "[Your thoughts on next step actions]" if is_exploration else "[Your thoughts on the question]"
             answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
-            return f"Always output: <think> {think} </think> <answer> {answer} </answer>."
+            return f"Strictly follow this format, include only required answer in {ANSWER_LABEL}. No extra text, notes, formatting or anything else:\n{THINK_LABEL}\n{think}\n{ANSWER_LABEL}\n{answer}"
         else:
             answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
-            return f"Always output: <answer> {answer} </answer>."
+            return f"Strictly follow this format, include only required answer in {ANSWER_LABEL}. No extra text, notes, formatting or anything else:\n{ANSWER_LABEL}\n{answer}"
 
     # Add image prompt constants
     TOPDOWN_PROMPT = "\n\nTopdown view: {placeholder}\n{object_info}"
