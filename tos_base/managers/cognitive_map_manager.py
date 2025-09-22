@@ -815,7 +815,7 @@ class CognitiveMapManager:
         for rid in sorted(gt_room.objects_by_room.keys()):
             gate_name = self.entry_gate_by_room.get(int(rid))
             if gate_name is None: # no entry gate for this room
-                gate_name = 'initial_pos'
+                gate_name = 'initial'
                 anchor_pos = gt_agent.init_pos
                 anchor_ori = gt_agent.init_ori
             else:

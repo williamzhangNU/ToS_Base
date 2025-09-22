@@ -87,8 +87,8 @@ def room_to_ordered_relations(
     if include_names is not None:
         names &= set(include_names)
     if include_initial_pos:
-        pos_by_name['initial_pos'] = np.array(agent_init_pos, dtype=float)
-        names.add('initial_pos')
+        pos_by_name['initial pos'] = np.array(agent_init_pos, dtype=float)
+        names.add('initial pos')
 
     names_sorted = sorted(names)
     out: dict[str, str] = {}

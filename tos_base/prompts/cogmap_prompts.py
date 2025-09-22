@@ -86,7 +86,7 @@ Example:
 ```json
 {
   "1": {
-    "origin": "initial_pos",
+    "origin": "initial",
     "objects": {
       "chair": {"position": [1, 0], "facing": "+y"},
       "table": {"position": [2, 1], "facing": "-x"}
@@ -128,15 +128,16 @@ def _build_relations_mapping_text() -> str:
 RELATIONS_PROMPT = f"""\
 ## Pairwise Relations (JSON)
 
-- Report unordered pairs for ALL observed objects (objects and gates) and agent's initial position as "initial_pos". Do NOT include agent current pose.
+- Report unordered pairs for ALL observed objects (objects and gates) and agent's initial position as "initial". Do NOT include agent current pose.
 - Keys: "A|B" (alphabetical). A|B means A is relative to B.
+- Report only one direction per pair (A|B or B|A, not both)
 - Values: "(DIR, DIST)" where DIR and DIST are compact codes. {_build_relations_mapping_text()}
 - Output a flat JSON object of pairs (no extra nesting).
 
 Example:
 ```json
 {{
-  "initial_pos|chair": "(E, near)",
+  "initial|chair": "(E, near)",
   "chair|door1": "(NW, mid)"
 }}
 ```

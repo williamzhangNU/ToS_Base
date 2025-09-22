@@ -349,7 +349,6 @@ class QueryAction(QueryBase):
     """Query object coordinates in the initial frame and emit relation triple to initial_pos."""
     description = (
         "Return object's coordinates with agent's initial position as origin, north as y+ axis. "
-        "Sometimes necessary to eliminate ambiguities."
     )
     def success_message(self, **kwargs) -> str:
         return f"You query {self.obj}: {kwargs.get('answer','unknown')}"
