@@ -27,16 +27,16 @@ class HistoryManager:
     Example: gpt-4o/1d54fa/vision/active/
     """
 
-    def __init__(self, observation_config: Dict, model_config: Dict , room_dict: Dict, agent_dict: Dict, output_dir:str,
-                 eval_override: bool = False, all_override: bool = False, task_type: str = None):
+    def __init__(self, observation_config: Dict, model_config: Dict , room_dict: Dict, agent_dict: Dict, output_dir:str, 
+                 image_dir:str = None, eval_override: bool = False, all_override: bool = False, task_type: str = None):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.evaluation_turn_logs: Dict[str, Dict[str, Dict]] = {}
         self.exp_type = observation_config['exp_type']
         self.model_path= HistoryManager.get_model_dir(output_dir, model_config)
+        self.sample_path = os.path.join(self.model_path,self._generate_room_key(room_dict, agent_dict))
         self.output_dir = os.path.abspath(os.path.join(
-            self.model_path,
-            self._generate_room_key(room_dict, agent_dict),
+            self.sample_path,
             observation_config['render_mode'],
             observation_config['exp_type'],
             "think" if observation_config['prompt_config']["enable_think"] else "nothink",
@@ -45,7 +45,8 @@ class HistoryManager:
             self.output_dir = os.path.join(self.output_dir, observation_config["proxy_agent"])
         self.exploration_path = os.path.join(self.output_dir, EXPLORATION_LOG_BASENAME)
         self.evaluation_path = os.path.join(self.output_dir, EVALUATION_LOG_BASENAME)
-        self.config_path = os.path.join(self.output_dir, CONFIG_BASENAME)
+        self.model_config_path = os.path.join(self.model_path, CONFIG_BASENAME)
+        self.sample_config_path = os.path.join(self.sample_path, CONFIG_BASENAME)
         self.metrics_path = os.path.join(self.output_dir, METRICS_BASENAME)
 
         # Apply granular overrides
@@ -57,12 +58,21 @@ class HistoryManager:
         if eval_override:
             if task_type in self.evaluation_turn_logs:
                 self.evaluation_turn_logs[task_type] = {}
+
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(os.path.join(self.output_dir, IMAGES_DIRNAME), exist_ok=True)
-
-        # Save per-sample config/meta for convenience
-        self._write_config(observation_config, model_config, room_dict, agent_dict)
-
+        if not os.path.exists(self.model_config_path):
+            with open(self.model_config_path, "w") as f:
+                json.dump(model_config, f, ensure_ascii=False, indent=2)
+        if not os.path.exists(self.sample_config_path):
+            assert image_dir is not None
+            sample_cfg = {
+                "room_dict": room_dict,
+                "agent_dict": agent_dict,
+                "image_dir": image_dir,
+            }
+            with open(self.sample_config_path, "w") as f:
+                json.dump(sample_cfg, f, ensure_ascii=False, indent=2)
 
     def is_history_exist(self):
         return os.path.exists(self.exploration_path)
@@ -148,10 +158,11 @@ class HistoryManager:
 
             self.evaluation_turn_logs[task_type][question_id]['cogmap_log'] = turn_log['cogmap_log']
 
-    def has_cogmap_response(self, turn_idx: int = None) -> bool:
-        """Check if cognitive map response exists for a specific turn (0-indexed)"""
-        return (0 <= turn_idx < len(self.exploration_turn_logs) and
-                self.exploration_turn_logs[turn_idx].get('cogmap_log'))
+    def get_cogmap(self, turn_idx) -> Optional[Dict]:
+        """Get cognitive map response for a specific turn (0-indexed)"""
+        if not (0 <= turn_idx < len(self.exploration_turn_logs)):
+            return None
+        return self.exploration_turn_logs[turn_idx].get('cogmap_log')
 
     def has_question(self, question_id: str) -> bool:
         """Check if a question with the given ID already exists in evaluation logs"""
@@ -197,7 +208,6 @@ class HistoryManager:
         sample_dirs = [d for d in os.listdir(model_dir) if os.path.isdir(os.path.join(model_dir, d))]
 
         # Sequential numbering only for valid samples (with valid subdirs)
-        valid_idx = 0
         for sample_dir in sample_dirs:
             sample_path = os.path.join(model_dir, sample_dir)
 
@@ -210,9 +220,10 @@ class HistoryManager:
             # Skip if subdirs is empty (invalid sample)
             if not subdirs:
                 continue
-
-            valid_idx += 1
-            sample_key = f"sample_{valid_idx}"
+            with open(os.path.join(sample_path, CONFIG_BASENAME), 'r') as f:
+                sample_cfg = json.load(f)
+            sample_key = f"sample_{os.path.basename(sample_cfg['image_dir'])}"
+            assert sample_key not in samples, f"Duplicate sample key {sample_key}"
             samples[sample_key] = {}
 
             for combo_path in subdirs:
@@ -310,18 +321,7 @@ class HistoryManager:
                     if question_data.get('message_images'):
                         question_data['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in question_data['message_images']]
 
-        return sample_data if sample_data["env_turn_logs"] or sample_data["evaluation_tasks"] else None
-
-    # --------- Helpers: write config and metrics ---------
-    def _write_config(self, observation_config: Dict, model_config: Dict, room_dict: Dict, agent_dict: Dict) -> None:
-        cfg = {
-            "observation_config": observation_config,
-            "model_config": model_config,
-            "room_dict": room_dict,
-            "agent_dict": agent_dict,
-        }
-        with open(self.config_path, "w") as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        return sample_data if sample_data["env_turn_logs"] or sample_data["evaluation_tasks"] else None        
 
     def _compute_sample_metrics(self) -> Dict:
         env_data = {

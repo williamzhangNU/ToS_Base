@@ -20,7 +20,8 @@ import copy
 from ..actions.base import BaseAction
 from ..core.room import Room, BaseRoom
 from ..core.object import Object, Agent, Gate
-
+from ..utils.relationship_utils import room_to_ordered_relations        
+from ..utils.relation_codes import decode_relation_codes,invert_pair_key, invert_dir_code
 # Utils
 from ..utils.cogmap.transforms import (
     transform_baseroom,
@@ -69,6 +70,7 @@ class GlobalCogMapTurnLog(BaseCogMapTurnLog):
     gt_room_state_full: Optional['BaseRoom'] = None
     gt_json_full: Dict[str, Any] = field(default_factory=dict)
     metrics_full: BaseCogMetrics = field(default_factory=BaseCogMetrics)
+    metric_agent: BaseCogMetrics = field(default_factory=BaseCogMetrics)
 
     def to_dict(self) -> Dict[str, Any]:
         out = super().to_dict()
@@ -78,6 +80,7 @@ class GlobalCogMapTurnLog(BaseCogMapTurnLog):
             "gt_room_state_full": self.gt_room_state_full.to_dict() if self.gt_room_state_full else {},
             "gt_json_full": self.gt_json_full,
             "metrics_full": (self.metrics_full.to_dict() if self.metrics_full.valid else {}),
+            "metric_agent": (self.metric_agent.to_dict() if self.metric_agent.valid else {}),
         })
         return out
 
@@ -111,17 +114,13 @@ class RoomsCogMapTurnLog(BaseCogMapTurnLog):
 @dataclass
 class RelationsCogMapTurnLog(BaseCogMapTurnLog):
     pred_relations: Dict[str, str] = field(default_factory=dict)
-    gt_relations: Dict[str, str] = field(default_factory=dict)
     gt_relations_full: Dict[str, str] = field(default_factory=dict)
-    metrics_full: BaseCogMetrics = field(default_factory=BaseCogMetrics)
 
     def to_dict(self) -> Dict[str, Any]:
         out = super().to_dict()
         out.update({
             "pred_relations": self.pred_relations,
-            "gt_relations": self.gt_relations,
             "gt_relations_full": self.gt_relations_full,
-            "metrics_full": (self.metrics_full.to_dict() if self.metrics_full.valid else {}),
         })
         return out
 
@@ -154,22 +153,11 @@ class CognitiveMapTurnLog:
 
 
 class CognitiveMapManager:
-    """Evaluate cognitive map JSON against ground truth."""
-    
-    DEFAULT_COGMAP_SUMMARY = {
-        "global": {"dir": 0.0, "facing": 0.0, "pos": 0.0, "overall": 0.0},
-        "gates": {"conn_acc": 0.0},
-        "relations": {"dir": 0.0, "dist": 0.0, "overall": 0.0},
-        "extraction_success_rate": 0.0,
-        "n_successful": 0,
-        "n_evaluations": 0,
-    }
-    
+    """Evaluate cognitive map JSON against ground truth."""    
     def __init__(self, cogmap_type: str = "standard", pos_allow_scale: bool = False, scope: str = "all"):
         """Initialize cognitive map manager."""
         self.explore_logs: List[CognitiveMapTurnLog] = []
         self.evaluate_log: Optional[CognitiveMapTurnLog] = None
-        self.cogmap_summary = copy.deepcopy(self.DEFAULT_COGMAP_SUMMARY)
 
         self.config = {
             "cogmap_type": cogmap_type,
@@ -208,54 +196,41 @@ class CognitiveMapManager:
             pred_global_br = self._preprocess_predicted(json_dict, observed_set, visible_names, gt_room, gt_agent, map_type)
             gt_global_br = self._build_gt_global_baseroom(gt_room, gt_agent, observed_set)
             full_global = transform_baseroom(self._baseroom_from_gt(gt_room, gt_agent), gt_agent.init_pos, gt_agent.init_ori)
+            agent_br = self._build_gt_global_agent_baseroom(gt_room, gt_agent)
             self._ensure_pos_norm_L(gt_room, gt_agent)
-            return self._eval_global(pred_global_br, gt_global_br, full_global, assistant_response)
+            return self._eval_global(pred_global_br, gt_global_br, full_global, agent_br, assistant_response, json_dict)
         
         if t == "false_belief":
             pred_global_br = self._preprocess_predicted(json_dict, observed_set, visible_names, gt_room, gt_agent, map_type)
             gt_global_br = self._build_gt_global_baseroom(gt_room, gt_agent, observed_set)
-            return self._eval_false_belief(pred_global_br, gt_global_br, assistant_response)
+            return self._eval_false_belief(pred_global_br, gt_global_br, assistant_response, json_dict)
 
         if t == "local":
             pred_local_br = self._preprocess_predicted(json_dict, observed_set, visible_names, gt_room, gt_agent, map_type)
             gt_local_br = self._build_gt_local_baseroom(gt_room, gt_agent)
             self._ensure_pos_norm_L(gt_room, gt_agent)
-            return self._eval_local(pred_local_br, gt_local_br, assistant_response)
+            return self._eval_local(pred_local_br, gt_local_br, assistant_response, json_dict)
 
         if t == "rooms":
             pred_rooms_map = self._preprocess_predicted(json_dict, observed_set, visible_names, gt_room, gt_agent, map_type)
             gt_rooms_map = self._build_gt_room_baserooms(gt_room, gt_agent, observed_set)
             self._ensure_pos_norm_L(gt_room, gt_agent)
-            return self._eval_rooms(pred_rooms_map, gt_rooms_map, assistant_response)
+            return self._eval_rooms(pred_rooms_map, gt_rooms_map, assistant_response, json_dict)
 
         if t == "relations":
             # No map preprocessing needed; relations are a flat dict of pairs
             pred_relations = self._parse_predicted_relations(json_dict)
             full_global = transform_baseroom(self._baseroom_from_gt(gt_room, gt_agent), gt_agent.init_pos, gt_agent.init_ori)
-            return self._eval_relations(pred_relations, full_global, observed_set, assistant_response)
+            return self._eval_relations(pred_relations, full_global, assistant_response, json_dict)
 
         raise ValueError(f"Invalid map type: {t}")
 
-    def _eval_global(self, pred_global_br: BaseRoom,  gt_global_br: BaseRoom, gt_room_state_full: BaseRoom, assistant_response: str) -> GlobalCogMapTurnLog:
-        if pred_global_br is None or len(pred_global_br.objects) == 0:
-            return GlobalCogMapTurnLog(
-                type="global",
-                extraction_success=False,
-                original_response=assistant_response,
-                pred_json={},
-                pred_room_state=pred_global_br,
-                metrics=MapCogMetrics.invalid(),
-                gt_room_state=None,
-                gt_json={},
-                gt_room_state_full=None,
-                gt_json_full={},
-                metrics_full=MapCogMetrics.invalid(),
-            )
-        metrics = self._compare_baserooms(pred_global_br, gt_global_br)
-        pred_json = self.baseroom_to_json(pred_global_br, include_gates=True)
+    def _eval_global(self, pred_global_br: BaseRoom,  gt_global_br: BaseRoom, gt_room_state_full: BaseRoom, agent_br: BaseRoom, assistant_response: str, pred_json: Dict) -> GlobalCogMapTurnLog:
         gt_json = self.baseroom_to_json(gt_global_br, include_gates=True)
+        metrics = self._compare_baserooms(pred_global_br, gt_global_br)
         gt_json_full = self.baseroom_to_json(gt_room_state_full, include_gates=True)
         metrics_full = self._compare_baserooms(pred_global_br, gt_room_state_full)
+        metric_agent = self._compare_baserooms(pred_global_br, agent_br)
         return GlobalCogMapTurnLog(
             type="global",
             extraction_success=True,
@@ -268,19 +243,11 @@ class CognitiveMapManager:
             gt_room_state_full=gt_room_state_full,
             gt_json_full=gt_json_full,
             metrics_full=metrics_full,
+            metric_agent=metric_agent,
         )
 
-    def _eval_false_belief(self, pred_global_br: BaseRoom, gt_global_br: BaseRoom, assistant_response: str) -> BaseCogMapTurnLog:
+    def _eval_false_belief(self, pred_global_br: BaseRoom, gt_global_br: BaseRoom, assistant_response: str, pred_json: Dict) -> BaseCogMapTurnLog:
         """Evaluate false belief task - check if one object in observed_items has correct orientation."""
-        if pred_global_br is None or len(pred_global_br.objects) == 0:
-            return BaseCogMapTurnLog(
-                type="false_belief",
-                extraction_success=False,
-                original_response=assistant_response,
-                pred_json={},
-                pred_room_state=pred_global_br,
-                metrics=AccuracyMetrics.invalid(),
-            )
         # Create name-to-object mappings for comparison
         pred_objects = {o.name: o for o in pred_global_br.objects}
         gt_objects = {o.name: o for o in gt_global_br.objects}
@@ -295,8 +262,6 @@ class CognitiveMapManager:
                     metrics = AccuracyMetrics(1.0)
                     break
  
-        pred_json = self.baseroom_to_json(pred_global_br, include_gates=True)
-
         return BaseCogMapTurnLog(
             type="false_belief",
             extraction_success=True,
@@ -306,20 +271,8 @@ class CognitiveMapManager:
             metrics=metrics,
         )
 
-    def _eval_local(self, pred_local_br: BaseRoom, gt_local_br: BaseRoom, assistant_response: str) -> LocalCogMapTurnLog:
-        if pred_local_br is None or len(pred_local_br.objects) == 0:
-            return LocalCogMapTurnLog(
-                type="local",
-                extraction_success=False,
-                original_response=assistant_response,
-                pred_json={},
-                pred_room_state=pred_local_br,
-                metrics=MapCogMetrics.invalid(),
-                gt_room_state=None,
-                gt_json={},
-            )
+    def _eval_local(self, pred_local_br: BaseRoom, gt_local_br: BaseRoom, assistant_response: str, pred_json: Dict) -> LocalCogMapTurnLog:
         metrics = self._compare_baserooms(pred_local_br, gt_local_br)
-        pred_json = self.baseroom_to_json(pred_local_br, include_gates=True)
         return LocalCogMapTurnLog(
             type="local",
             extraction_success=True,
@@ -331,20 +284,7 @@ class CognitiveMapManager:
             gt_json=self.baseroom_to_json(gt_local_br, include_gates=True),
         )
 
-    def _eval_rooms(self, pred_rooms_map: Dict[str, BaseRoom], gt_rooms_map: Dict[int, BaseRoom], assistant_response: str) -> RoomsCogMapTurnLog:
-        # Treat missing/empty predictions as extraction failure
-        has_any = any((br is not None and len(br.objects) > 0) for br in (pred_rooms_map or {}).values())
-        if not has_any:
-            return RoomsCogMapTurnLog(
-                type="rooms",
-                extraction_success=False,
-                original_response=assistant_response,
-                pred_json={},
-                pred_room_state=None,
-                metrics=MapCogMetrics.invalid(),
-                pred_rooms_state={},
-                gt_rooms_state={},
-            )
+    def _eval_rooms(self, pred_rooms_map: Dict[str, BaseRoom], gt_rooms_map: Dict[int, BaseRoom], assistant_response: str, pred_json: Dict) -> RoomsCogMapTurnLog:
         per_room: List[MapCogMetrics] = []
         for rid in sorted(gt_rooms_map.keys()):
             gt_br = gt_rooms_map[rid]
@@ -353,7 +293,6 @@ class CognitiveMapManager:
             pred_br = pred_rooms_map.get(str(rid)) or pred_rooms_map.get(rid) or BaseRoom(objects=[], name=f"pred_room_{rid}")
             per_room.append(self._compare_baserooms(pred_br, gt_br))
         metrics = MapCogMetrics.average(per_room)
-        pred_json = {rid: self.baseroom_to_json(pred_rooms_map.get(str(rid)) or BaseRoom(objects=[], name=f"pred_room_{rid}"), include_gates=False) for rid in gt_rooms_map.keys()}
         pred_rooms_state = {str(rid): br for rid, br in pred_rooms_map.items()}
         gt_rooms_state = {str(rid): br for rid, br in gt_rooms_map.items()}
         return RoomsCogMapTurnLog(
@@ -365,6 +304,62 @@ class CognitiveMapManager:
             metrics=metrics,
             pred_rooms_state=pred_rooms_state,
             gt_rooms_state=gt_rooms_state,
+        )
+    
+    @staticmethod
+    def _relations_accuracies(pred: Dict[str, str], gt: Dict[str, str]) -> Tuple[float, float, float]:
+        if not pred:
+            return 0.0, 0.0, 0.0
+        tot = len(gt)
+        dir_correct = dist_correct = 0
+        for pair_key, gt_value in gt.items():
+            gt_dir_code, gt_dist_code = decode_relation_codes(gt_value)
+            pred_dir_code = pred_dist_code = ""
+
+            # First try the exact pair key
+            pval = pred.get(pair_key)
+            if isinstance(pval, str):
+                pred_dir_code, pred_dist_code = decode_relation_codes(pval)
+            else:
+                # If not found, try the inverse key with inverted direction
+                inverse_key = invert_pair_key(pair_key)
+                inverse_pval = pred.get(inverse_key)
+                if isinstance(inverse_pval, str):
+                    inverse_pred_dir_code, pred_dist_code = decode_relation_codes(inverse_pval)
+                    # Invert the direction code to match the original pair order
+                    pred_dir_code = invert_dir_code(inverse_pred_dir_code)
+
+            if pred_dir_code == gt_dir_code:
+                dir_correct += 1
+            if pred_dist_code == gt_dist_code:
+                dist_correct += 1
+        dir_acc, dist_acc = dir_correct / tot, dist_correct / tot
+        return dir_acc, dist_acc, (dir_acc + dist_acc) / 2
+
+    def _eval_relations(self, pred_relations: Dict[str, str], gt_room_state_full: BaseRoom, assistant_response: str, pred_json: Dict) -> RelationsCogMapTurnLog:
+        # Observed: include only observed names; include initial_pos at agent.init_pos; exclude agent
+        # Try to find agent initial pos from any Agent present in the full room state
+        agent_obj = next((o for o in gt_room_state_full.objects if isinstance(o, Agent)), None)
+        agent_init_pos = agent_obj.init_pos
+
+        # Full: all names; include initial_pos at agent.init_pos; exclude agent
+        all_names = {o.name for o in gt_room_state_full.objects if o.name != 'agent'}
+        gt_relations_full = room_to_ordered_relations(
+            gt_room_state_full,
+            include_names=all_names,
+            include_initial_pos=True,
+            agent_init_pos=agent_init_pos,
+        )
+        dir_acc_full, dist_acc_full, overall_full = self._relations_accuracies(pred_relations, gt_relations_full)
+        return RelationsCogMapTurnLog(
+            type="relations",
+            extraction_success=True,
+            original_response=assistant_response,
+            pred_json=pred_json,
+            pred_room_state=None,
+            pred_relations=pred_relations,
+            gt_relations_full=gt_relations_full,
+            metrics=RelationMetrics(dir=float(dir_acc_full), dist=float(dist_acc_full), overall=float(overall_full), valid=True),
         )
 
     # =============================== Relations helpers/eval ===============================
@@ -400,78 +395,6 @@ class CognitiveMapManager:
                             out[key] = f"({d1}, {r1})"
         return out
 
-    # Removed; use room_to_ordered_relations directly
-
-    @staticmethod
-    def _relations_accuracies(pred: Dict[str, str], gt: Dict[str, str]) -> Tuple[float, float, float]:
-        from ..utils.relation_codes import decode_relation_codes
-        if not pred:
-            return 0.0, 0.0, 0.0
-        tot = len(gt)
-        dir_correct = dist_correct = 0
-        for pair_key, gt_value in gt.items():
-            gt_dir_code, gt_dist_code = decode_relation_codes(gt_value)
-            pred_dir_code = pred_dist_code = ""
-            pval = pred.get(pair_key)
-            if isinstance(pval, str):
-                pred_dir_code, pred_dist_code = decode_relation_codes(pval)
-            if pred_dir_code == gt_dir_code:
-                dir_correct += 1
-            if pred_dist_code == gt_dist_code:
-                dist_correct += 1
-        dir_acc, dist_acc = dir_correct / tot, dist_correct / tot
-        return dir_acc, dist_acc, (dir_acc + dist_acc) / 2
-
-    def _eval_relations(self, pred_relations: Dict[str, str], gt_room_state_full: BaseRoom, observed_set: set[str], assistant_response: str) -> RelationsCogMapTurnLog:
-        # Missing relations -> extraction failure
-        if not pred_relations:
-            return RelationsCogMapTurnLog(
-                type="relations",
-                extraction_success=False,
-                original_response=assistant_response,
-                pred_json={},
-                pred_room_state=None,
-                metrics=RelationMetrics.invalid(),
-                pred_relations={},
-                gt_relations={},
-                gt_relations_full={},
-                metrics_full=RelationMetrics.invalid(),
-            )
-        # Observed: include only observed names; include initial_pos at agent.init_pos; exclude agent
-        from ..utils.relationship_utils import room_to_ordered_relations
-        # Try to find agent initial pos from any Agent present in the full room state
-        agent_obj = next((o for o in gt_room_state_full.objects if isinstance(o, Agent)), None)
-        agent_init_pos = agent_obj.init_pos
-
-        gt_relations_obs = room_to_ordered_relations(
-            gt_room_state_full,
-            include_names=set(observed_set),
-            include_initial_pos=True,
-            agent_init_pos=agent_init_pos,
-        )
-        # Full: all names; include initial_pos at agent.init_pos; exclude agent
-        all_names = {o.name for o in gt_room_state_full.objects if o.name != 'agent'}
-        gt_relations_full = room_to_ordered_relations(
-            gt_room_state_full,
-            include_names=all_names,
-            include_initial_pos=True,
-            agent_init_pos=agent_init_pos,
-        )
-        dir_acc_obs, dist_acc_obs, overall_obs = self._relations_accuracies(pred_relations, gt_relations_obs)
-        dir_acc_full, dist_acc_full, overall_full = self._relations_accuracies(pred_relations, gt_relations_full)
-        return RelationsCogMapTurnLog(
-            type="relations",
-            extraction_success=True,
-            original_response=assistant_response,
-            pred_json={},
-            pred_room_state=None,
-            metrics=RelationMetrics(dir=float(dir_acc_obs), dist=float(dist_acc_obs), overall=float(overall_obs), valid=True),
-            pred_relations=pred_relations,
-            gt_relations=gt_relations_obs,
-            gt_relations_full=gt_relations_full,
-            metrics_full=RelationMetrics(dir=float(dir_acc_full), dist=float(dist_acc_full), overall=float(overall_full), valid=True),
-        )
-
     def evaluate_cogmaps(self, responses_by_type: Dict[str, str], gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]]) -> CognitiveMapTurnLog:
         """Evaluate multiple types and record one aggregate log for the turn."""
         out = CognitiveMapTurnLog()
@@ -479,8 +402,6 @@ class CognitiveMapManager:
             if not isinstance(resp, str):
                 continue
             single = self.evaluate_cogmap_type(resp, gt_room, gt_agent, observed_items, map_type_key)
-            if single is None or not single.extraction_success:
-                continue
             setattr(out, f"{single.type}_log", single)
         # Consistency fields per turn
         summary = ConsistencySummary()
@@ -533,17 +454,7 @@ class CognitiveMapManager:
         """
         assert isinstance(env_data_list, list) and len(env_data_list) > 0, "env_data_list must be a non-empty list"
 
-        # Ensure per-sample metrics exist on each env_data
-        for s in env_data_list:
-            metrics = s.get('metrics')
-            if metrics is None or not isinstance(metrics, dict):
-                s['metrics'] = {}
-                metrics = s['metrics']
-            cm = metrics.get('cogmap')
-            if not isinstance(cm, dict) or not cm:
-                metrics['cogmap'] = CognitiveMapManager.aggregate_per_sample(s, exp_type=exp_type)
-
-        pre_list = [((s.get('metrics') or {}).get('cogmap') or {}) for s in env_data_list]
+        pre_list = [cogmap for s in env_data_list if (cogmap := (s.get('metrics') or {}).get('cogmap')) is not None]
         if exp_type == 'active':
             exploration = avg_nested_dicts([m.get('exploration') or {} for m in pre_list])
             evaluation = avg_nested_dicts([m.get('evaluation') or {} for m in pre_list])
@@ -573,7 +484,8 @@ class CognitiveMapManager:
         for t in turn_logs:
             if t.get('is_exploration_phase', False) and t.get('cogmap_log'):
                 cog_logs.append(t['cogmap_log'])
-
+        if not cog_logs:
+            return {}
         # Use shared helper to find last exploration cogmap
         
         last = get_last_exploration_cogmap(env_data)
@@ -599,12 +511,13 @@ class CognitiveMapManager:
         error = {
             'local_vs_gt_local_avg': _avg_maps(cog_logs, ['local', 'metrics']).to_dict(),
             'global_vs_gt_global_avg': _avg_maps(cog_logs, ['global', 'metrics']).to_dict(),
+            'agent_vs_gt_agent_avg': _avg_maps(cog_logs, ['global', 'metric_agent']).to_dict(),
         }
 
         # Correctness: last global_full and relations_full
         correctness = {
             'last_global_vs_gt_full': (lambda _m: (_m.to_dict() if _m.valid else {}))(MapCogMetrics.from_dict((((last or {}).get('global') or {}).get('metrics_full') or {}))),
-            'last_relations_vs_gt_full': (lambda _r: (_r.to_dict() if _r.valid else {}))(RelationMetrics.from_dict((((last or {}).get('relations') or {}).get('metrics_full') or {}))),
+            'last_relations_vs_gt_full': (lambda _r: (_r.to_dict() if _r.valid else {}))(RelationMetrics.from_dict((((last or {}).get('relations') or {}).get('metrics') or {}))),
         }
 
         # Consistency
@@ -764,8 +677,7 @@ class CognitiveMapManager:
                 ori = np.array([0, 0])
                 has_orientation = False
             objects.append(Object(name=str(obj_name).replace('_', ' '), pos=pos, ori=ori, has_orientation=has_orientation))
-        if len(objects) == 0:
-            return None
+
         return BaseRoom(objects=objects, name=room_name)
 
     def _parse_rooms(self, rooms_sec: Dict[str, Any]) -> Dict[str, BaseRoom]:
@@ -792,6 +704,11 @@ class CognitiveMapManager:
         objs.append(Agent(name='agent', pos=gt_agent.pos.copy(), ori=gt_agent.ori.copy(), has_orientation=True))
         return BaseRoom(objects=objs, name='gt')
 
+    def _build_gt_global_agent_baseroom(self, gt_room: Room, gt_agent: Agent) -> BaseRoom:
+        raw = self._baseroom_from_gt(gt_room, gt_agent)
+        br = transform_baseroom(raw, gt_agent.init_pos, gt_agent.init_ori)
+        return self._filter_br_by_names(br, {"agent"})
+    
     def _build_gt_global_baseroom(self, gt_room: Room, gt_agent: Agent, observed_set: set[str]) -> BaseRoom:
         raw = self._baseroom_from_gt(gt_room, gt_agent)
         br = transform_baseroom(raw, gt_agent.init_pos, gt_agent.init_ori)
@@ -959,6 +876,8 @@ class CognitiveMapManager:
         if map_type == "rooms":
             out_rooms = {}
             for rid, sec in jd.items():
+                if  not isinstance(sec, dict):
+                    continue
                 inner = sec.get("objects", sec)  # sometimes wrapped in {"origin":..., "objects":{...}}
                 keep = {
                     n

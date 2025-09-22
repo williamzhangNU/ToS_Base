@@ -177,16 +177,6 @@ class EvaluationManager:
         if not env_data_list:
             return {'avg_accuracy': 0.0, 'task_metrics': {}}
 
-        # Ensure per-sample metrics exist on each env_data
-        for s in env_data_list:
-            metrics = s.get('metrics')
-            if metrics is None or not isinstance(metrics, dict):
-                s['metrics'] = {}
-                metrics = s['metrics']
-            ev = metrics.get('evaluation')
-            if not isinstance(ev, dict) or not ev:
-                metrics['evaluation'] = EvaluationManager.aggregate_per_sample(s)
-
         per_samples = [((s.get('metrics') or {}).get('evaluation') or {}) for s in env_data_list]
 
         total_count = sum(int(m['overall'].get('n_total', 0)) for m in per_samples)

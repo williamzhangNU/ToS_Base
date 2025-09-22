@@ -19,6 +19,8 @@ class ExplorationTurnLog:
     edge_coverage: float
     step: int
     action_counts: Dict[str, int]
+    observed_items: List[str]
+    visible_objects: List[str]
     is_action_fail: bool = False
     room_state: Optional['Room'] = None
     agent_state: Optional['Agent'] = None
@@ -30,6 +32,8 @@ class ExplorationTurnLog:
             "node_coverage": self.node_coverage,
             "edge_coverage": self.edge_coverage,
             "step": self.step,
+            "observed_items": self.observed_items,
+            "visible_objects": self.visible_objects,
             "is_action_fail": self.is_action_fail,
             "action_counts": dict(self.action_counts),
             "room_state": self.room_state.to_dict() if self.room_state else {},
@@ -45,16 +49,14 @@ class ExplorationManager:
     - Executes actions and logs turns.
     - Graph-related metrics default to safe zeros.
     """
-    DEFAULT_EXP_SUMMARY = {"node_coverage": 0.0, "edge_coverage": 0.0, "n_exploration_steps": 0, "action_counts": {}}
     MAX_POSSIBLE_POSITIONS_PER_OBJECT: int = 200
     DEFAULT_ACTION_COUNTS = {'move': 0, 'rotate': 0, 'return': 0, 'observe': 0, 'term': 0, 'forced_term': 0, 'query': 0}
-    def __init__(self, room: Room, agent: Agent, enable_information_gain: bool = False, grid_size: int | None = None):
+    def __init__(self, room: Room, agent: Agent, grid_size: int | None = None):
         self.base_room = room.copy()
         self.exploration_room = room.copy()
         self.agent = agent.copy()
         self.keep_object_names = [self.agent.name] + [obj.name for obj in getattr(self.exploration_room, 'all_objects', [])]
 
-        self.exp_summary = copy.deepcopy(self.DEFAULT_EXP_SUMMARY)
         self.turn_logs: List[ExplorationTurnLog] = []
         # History now stores ActionResult for each executed action (in order)
         self.history: List['ActionResult'] = []
@@ -87,17 +89,13 @@ class ExplorationManager:
         self.action_cost: int = 0
         # Observed names (objects and gates) to gate Move() eligibility
         self.observed_items: Set[str] = set()
-        
-        # Information gain control (also controls exploration-quality-as-infogain)
-        self.enable_information_gain = bool(enable_information_gain)
+        self.visible_objects: List[str] = []
         # Grid size for solver metrics (use provided or infer from mask; fallback 10)
         inferred_g = (max(self.exploration_room.mask.shape) if getattr(self.exploration_room, 'mask', None) is not None else 10)
         self.grid_size: int = int(inferred_g if grid_size is None else grid_size)
         # Spatial solver for info gain / quality
-        self.spatial_solver = None
-        if self.enable_information_gain:
-            self.spatial_solver = SpatialSolver(self.node_names + ['initial_pos'], self.grid_size)
-            self.spatial_solver.set_initial_position('initial_pos', (0, 0))
+        self.spatial_solver = SpatialSolver(self.node_names + ['initial_pos'], self.grid_size)
+        self.spatial_solver.set_initial_position('initial_pos', (0, 0))
         
     def _execute_and_update(self, action: BaseAction, **kwargs) -> ActionResult:
         """Execute action and update exploration state."""
@@ -173,7 +171,22 @@ class ExplorationManager:
     
     def get_exp_summary(self) -> Dict[str, Any]:
         """Get exploration summary."""
-        return dict(self._update_exp_summary())
+        node_cov = len(self.observed_nodes) / len(self.node_names)
+        edge_cov = len(self.known_edges) / len(self.target_edges)
+        info_gain_list = [turn_log.information_gain for turn_log in self.turn_logs] if self.turn_logs else []
+        acc_info_gain = sum(info_gain_list)
+        avg_info_gain = acc_info_gain / len(self.turn_logs) if self.turn_logs else 0.0
+        return {
+            "node_coverage": node_cov,
+            "edge_coverage": edge_cov,
+            "n_exploration_steps": len(self.turn_logs),
+            "action_counts": dict(self.action_counts),
+            "action_cost": int(self.action_cost),
+            "exploration_cost": int(self.action_cost),
+            "info_gain_list": info_gain_list,
+            "acc_info_gain": acc_info_gain,
+            "avg_info_gain": avg_info_gain,
+        }
     
     @staticmethod
     def aggregate_group_performance(env_data_list: List[Dict] = None) -> Dict[str, Any]:
@@ -182,16 +195,6 @@ class ExplorationManager:
         """
         if not env_data_list:
             return {}
-
-        # Ensure per-sample metrics exist on each env_data
-        for s in env_data_list:
-            metrics = s.get('metrics')
-            if metrics is None or not isinstance(metrics, dict):
-                s['metrics'] = {}
-                metrics = s['metrics']
-            exp = metrics.get('exploration')
-            if not isinstance(exp, dict) or not exp:
-                metrics['exploration'] = ExplorationManager.aggregate_per_sample(s)
 
         pre = [((s.get('metrics') or {}).get('exploration') or {}) for s in env_data_list]
 
@@ -412,22 +415,23 @@ class ExplorationManager:
     def _log_exploration(self, action_results: List['ActionResult'], is_action_fail = False) -> None:
         """Log exploration history and efficiency."""
         # First ingest latest observations, then compute info gain as exploration quality
-        if self.enable_information_gain:
-            for ar in action_results:
-                self._calculate_single_action_information_gain(ar)
-        turn_quality = self._compute_exploration_quality() if self.enable_information_gain else 0.0
+        for ar in action_results:
+            if getattr(ar, 'action_type', None) in ('observe'):
+                self.visible_objects = ar.data.get('visible_objects', []) or []
+            self._calculate_single_action_information_gain(ar)
+        turn_quality = self._compute_exploration_quality()
         # Snapshot possible positions per object (only initialized/observed ones), with sampling
-        possible_positions = self._get_possible_positions_snapshot(self.MAX_POSSIBLE_POSITIONS_PER_OBJECT) if self.enable_information_gain else {}
+        possible_positions = self._get_possible_positions_snapshot(self.MAX_POSSIBLE_POSITIONS_PER_OBJECT)
         
-        # Log current turn with coverage snapshot
-        self._update_exp_summary()
         step_idx = len(self.turn_logs) + 1
         turn_log = ExplorationTurnLog(
-            node_coverage=self.exp_summary.get('node_coverage', 0.0),
-            edge_coverage=self.exp_summary.get('edge_coverage', 0.0),
+            node_coverage=len(self.observed_nodes) / len(self.node_names),
+            edge_coverage=len(self.known_edges) / len(self.target_edges),
+            observed_items=list(self.observed_items),
+            visible_objects=self.visible_objects,
             step=step_idx,
             is_action_fail=is_action_fail,
-            action_counts=dict(self.exp_summary.get('action_counts', {})),
+            action_counts=self.action_counts,
             room_state=self.exploration_room.copy(),
             agent_state=self.agent.copy(),
             information_gain=turn_quality if turn_quality is not None else (self.turn_logs[-1].information_gain if self.turn_logs else 0.0),
@@ -435,25 +439,6 @@ class ExplorationManager:
         )
         self.turn_logs.append(turn_log)
     
-    def _update_exp_summary(self) -> Dict[str, Any]:
-        """Calculate current coverage and summary stats."""
-        node_cov = len(self.observed_nodes) / len(self.node_names)
-        edge_cov = len(self.known_edges) / len(self.target_edges)
-        info_gain_list = [turn_log.information_gain for turn_log in self.turn_logs] if self.turn_logs else []
-        acc_info_gain = sum(info_gain_list)
-        avg_info_gain = acc_info_gain / len(self.turn_logs) if self.turn_logs else 0.0
-        self.exp_summary = {
-            "node_coverage": node_cov,
-            "edge_coverage": edge_cov,
-            "n_exploration_steps": len(self.turn_logs),
-            "action_counts": dict(self.action_counts),
-            "action_cost": int(self.action_cost),
-            "exploration_cost": int(self.action_cost),
-            "info_gain_list": info_gain_list,
-            "acc_info_gain": acc_info_gain,
-            "avg_info_gain": avg_info_gain,
-        }
-        return self.exp_summary
 
     def _get_possible_positions_snapshot(self, max_per_obj: Optional[int] = None) -> Dict[str, List[List[int]]]:
         """Return sampled possible positions for each observed object (exclude 'initial_pos')."""
@@ -481,8 +466,6 @@ class ExplorationManager:
         """Ingest observation/query triples into the solver; return 0.0.
         Keep simple: we use exploration quality as info gain elsewhere.
         """
-        if not self.enable_information_gain or (self.spatial_solver is None):
-            return
         if getattr(action_result, 'action_type', None) in ('observe', 'query'):
             triples = action_result.data.get('relation_triples', []) if hasattr(action_result, 'data') else []
             if triples:
