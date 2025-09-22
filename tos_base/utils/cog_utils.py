@@ -15,6 +15,30 @@ from .. import Room, Agent
 import re
 from tqdm import tqdm
 
+def _evaluate_cogmaps(
+    cognitive_map_manager: CognitiveMapManager,
+    responses_by_type: Dict[str, str],
+    turn_log: Dict[str, Any],
+):
+    room_state = Room.from_dict(turn_log['room_state'])
+    agent_state = Agent.from_dict(turn_log['agent_state'])
+
+    # Determine observed items
+    if turn_log.get('is_exploration_phase'):
+        observed_items = turn_log.get('exploration_log',{}).get('observed_items', [obj.name for obj in room_state.all_objects])
+    elif (not turn_log.get('is_exploration_phase', True)) and 'falsebelief' in turn_log.get('evaluation_log', {}).get('task_type', '').lower():
+        observed_items = [turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('kwargs', {}).get('rotated_object')]
+    else:
+        raise ValueError("turn_log must be either exploration phase or false belief evaluation")
+
+    # Evaluate cognitive maps using selected responses
+    return cognitive_map_manager.evaluate_cogmaps(
+        responses_by_type,
+        room_state,
+        agent_state,
+        observed_items
+    )
+
 def evaluate_cognitive_maps_from_turnlogs(
     env_summarys: List[Dict[str, Any]],  # List of env summaries from get_env_summary()
     message_lists: List[List[Dict[str, str]]],  # Corresponding list of message histories
@@ -22,6 +46,7 @@ def evaluate_cognitive_maps_from_turnlogs(
     override_cogmap: bool = False,
     cogmap_config: Dict[str, Any] = None,
     vagen: bool = False,  # Whether to use _generate_batch_responses interface
+    reevaluate: bool = False,  # Whether to re-evaluate existing cogmaps
 ) -> None:
     """
     Evaluate cognitive maps for each turn in multiple environments' turn logs.
@@ -88,7 +113,13 @@ def evaluate_cognitive_maps_from_turnlogs(
                 # Check if cogmap response already exists in history
                 if turn_log['is_exploration_phase']:
                     target_turn_idx = turn_idx - 1
-                    if history_manager.has_cogmap_response(target_turn_idx) and not override_cogmap:
+                    cogmap = history_manager.get_cogmap(target_turn_idx)
+                    if cogmap and not override_cogmap:
+                        if reevaluate:
+                            responses_by_type = {k: v['original_response'] for k, v in cogmap.items() if v.get('original_response')}
+                            cogmap_log = _evaluate_cogmaps(cognitive_map_manager,responses_by_type,turn_log)
+                            turn_log['cogmap_log'] = cogmap_log.to_dict() if cogmap_log else {}
+                            history_manager.update_cogmap(turn_log)
                         continue
                     assert messages[-2]["role"] == "user", f"Expected user message but got {messages[-2]['role']}"
 
@@ -96,7 +127,7 @@ def evaluate_cognitive_maps_from_turnlogs(
                     # - For each turn: generate local and global
                     # - For final turn only: also generate rooms and relations
                     base_user = re.sub(r"You have a maximum of\s*\d+\s*exploration steps left.*", "", turn_log['user_message'], flags=re.DOTALL)
-                    if len(turn_log['exploration_log']['visible_objects']) == 0:
+                    if len(turn_logs[target_turn_idx]['exploration_log']['visible_objects']) == 0:
                         per_turn_types = ['global']
                     else:
                         per_turn_types = ['local', 'global']
@@ -134,7 +165,7 @@ def evaluate_cognitive_maps_from_turnlogs(
 
         elif env_config.get('exp_type') == 'passive':
             # Check if cogmap response already exists in history
-            if history_manager.has_cogmap_response(0) and not override_cogmap:
+            if history_manager.get_cogmap(0) and not override_cogmap:
                 continue
 
             assert env_messages[0]["role"] == "user", f"Expected user message but got {env_messages[0]['role']}"
@@ -179,32 +210,13 @@ def evaluate_cognitive_maps_from_turnlogs(
             history_manager = env_history_managers[env_idx]
             env_config = env_summary['env_info']['config']
 
-            cogmap_log = None
-            if responses_by_type and turn_log.get('room_state') and turn_log.get('agent_state'):
-                # Reconstruct Room and Agent states from turn log first
-                room_state = Room.from_dict(turn_log['room_state'])
-                agent_state = Agent.from_dict(turn_log['agent_state'])
+            assert responses_by_type and turn_log.get('room_state') and turn_log.get('agent_state')
 
-                # Determine observed items
-                if env_config.get('exp_type') == 'active' and turn_log.get('is_exploration_phase'):
-                    observed_items = turn_log.get('exploration_log').get('observed_items', [])
-                elif (not turn_log.get('is_exploration_phase', True)) and 'falsebelief' in turn_log.get('evaluation_log', {}).get('task_type', '').lower():
-                    observed_items = [turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('kwargs', {}).get('rotated_object')]
-                else:
-                    observed_items = [obj.name for obj in room_state.all_objects]
-
-                # Evaluate cognitive maps using selected responses
-                cogmap_log = cognitive_map_manager.evaluate_cogmaps(
-                    responses_by_type,
-                    room_state,
-                    agent_state,
-                    observed_items
-                )
-
-            turn_log['cogmap_log'] = cogmap_log.to_dict() if cogmap_log else None
+            # Evaluate cognitive maps using selected responses
+            cogmap_log = _evaluate_cogmaps(cognitive_map_manager,responses_by_type,turn_log)
+            turn_log['cogmap_log'] = cogmap_log.to_dict() if cogmap_log else {}
             history_manager.update_cogmap(turn_log)
 
-    # Save all history managers to persist cached cognitive map responses
     for env_idx, history_manager in env_history_managers.items():
         history_manager.save()
 

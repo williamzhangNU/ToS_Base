@@ -511,7 +511,7 @@ class CognitiveMapManager:
         # Correctness: last global_full and relations_full
         correctness = {
             'last_global_vs_gt_full': (lambda _m: (_m.to_dict() if _m.valid else {}))(MapCogMetrics.from_dict((((last or {}).get('global') or {}).get('metrics_full') or {}))),
-            'last_relations_vs_gt_full': (lambda _r: (_r.to_dict() if _r.valid else {}))(RelationMetrics.from_dict((((last or {}).get('relations') or {}).get('metrics_full') or {}))),
+            'last_relations_vs_gt_full': (lambda _r: (_r.to_dict() if _r.valid else {}))(RelationMetrics.from_dict((((last or {}).get('relations') or {}).get('metrics') or {}))),
         }
 
         # Consistency

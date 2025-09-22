@@ -148,10 +148,11 @@ class HistoryManager:
 
             self.evaluation_turn_logs[task_type][question_id]['cogmap_log'] = turn_log['cogmap_log']
 
-    def has_cogmap_response(self, turn_idx: int = None) -> bool:
-        """Check if cognitive map response exists for a specific turn (0-indexed)"""
-        return (0 <= turn_idx < len(self.exploration_turn_logs) and
-                self.exploration_turn_logs[turn_idx].get('cogmap_log'))
+    def get_cogmap(self, turn_idx) -> Optional[Dict]:
+        """Get cognitive map response for a specific turn (0-indexed)"""
+        if not (0 <= turn_idx < len(self.exploration_turn_logs)):
+            return None
+        return self.exploration_turn_logs[turn_idx].get('cogmap_log')
 
     def has_question(self, question_id: str) -> bool:
         """Check if a question with the given ID already exists in evaluation logs"""
