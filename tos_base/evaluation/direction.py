@@ -167,9 +167,30 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         return choices, correct_idx
 
     # ---------- shared finalize ----------
-    def _finalize(self, template: str, choices: List[str], correct_idx: int) -> str:
-        choices_text, correct_label = self.format_choices(choices, correct_idx)
-        self.eval_data.question = template.format(choices_text=choices_text)
+    def _finalize(self, template: str, *args) -> str:
+        """Finalize question text and store eval data.
+
+        Supports two calling conventions for backward compatibility:
+          1) _finalize(template, choices, correct_idx)
+          2) _finalize(template, obj_name, anchor_obj_name, choices, correct_idx)
+        """
+        if len(args) == 2:
+            choices, correct_idx = args
+            choices_text, correct_label = self.format_choices(choices, correct_idx)
+            self.eval_data.question = template.format(choices_text=choices_text)
+        elif len(args) == 4:
+            obj_name, anchor_obj_name, choices, correct_idx = args
+            choices_text, correct_label = self.format_choices(choices, correct_idx)
+            self.eval_data.question = template.format(
+                obj_name=obj_name,
+                anchor_obj_name=anchor_obj_name,
+                choices_text=choices_text,
+            )
+        else:
+            raise TypeError(
+                f"_finalize() expected 3 or 5 arguments (including template), got {1 + len(args)}"
+            )
+
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
         return self.eval_data.question

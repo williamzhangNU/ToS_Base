@@ -104,7 +104,7 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
 
-    task_name = 'dir'
+    task_name = 'pov'
     for seed in tqdm(range(0, 20)):
         np_random = np.random.default_rng(seed)
         room, agent = RoomGenerator.generate_room(
