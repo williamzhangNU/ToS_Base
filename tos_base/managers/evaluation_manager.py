@@ -179,8 +179,8 @@ class EvaluationManager:
 
         per_samples = [((s.get('metrics') or {}).get('evaluation') or {}) for s in env_data_list]
 
-        total_count = sum(int(m['overall'].get('n_total', 0)) for m in per_samples)
-        total_correct = sum(int(m['overall'].get('n_correct', 0)) for m in per_samples)
+        total_count = sum(int(m.get('overall',{}).get('n_total', 0)) for m in per_samples)
+        total_correct = sum(int(m.get('overall',{}).get('n_correct', 0)) for m in per_samples)
         agg_task: Dict[str, Dict[str, int]] = {}
         for m in per_samples:
             for t, tm in (m.get('per_task') or {}).items():

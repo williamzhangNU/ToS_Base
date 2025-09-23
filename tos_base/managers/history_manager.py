@@ -74,9 +74,9 @@ class HistoryManager:
             with open(self.sample_config_path, "w") as f:
                 json.dump(sample_cfg, f, ensure_ascii=False, indent=2)
 
-    def is_history_exist(self):
-        return os.path.exists(self.exploration_path)
-    
+
+    def has_exploration(self, index):
+        return 0 <= index < len(self.exploration_turn_logs)
 
     def _generate_room_key(self, room_dict, agent_dict):
         room_str = json.dumps({**room_dict, **agent_dict}, sort_keys=True)
@@ -91,6 +91,12 @@ class HistoryManager:
         if os.path.exists(self.evaluation_path):
             with open(self.evaluation_path, "r") as f:
                 self.evaluation_turn_logs = json.load(f)
+
+    def save_exploration(self) -> None:
+        """Save env turn logs to JSON file"""
+        if self.exploration_turn_logs:
+            with open(self.exploration_path, "w") as f:
+                json.dump(self.exploration_turn_logs, f, ensure_ascii=False, indent=2)
 
     def save(self) -> None:
         """Save env turn logs to JSON file"""
@@ -112,7 +118,7 @@ class HistoryManager:
             Must be added in sequence
         """
         if turn_log['is_exploration_phase']:
-            assert not self.is_history_exist()
+            assert not self.has_exploration(turn_log['turn_number'] - 1)
             if turn_log['room_state'] and turn_log['agent_state']:
                 img_path = os.path.join(self.output_dir, IMAGES_DIRNAME, f"room_turn_{turn_log['turn_number']}.png")
                 RoomPlotter.plot(Room.from_dict(turn_log['room_state']), Agent.from_dict(turn_log['agent_state']), mode='img', save_path=img_path)
