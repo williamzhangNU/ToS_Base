@@ -502,32 +502,3 @@ class ActionSequence:
             costs="\n".join(f"- {cls.format_desc}: {cls.cost}" for cls in [ObserveAction, QueryAction]),
             answer_label=ANSWER_LABEL
         )
-
-
-if __name__ == "__main__":
-    # simple smoke tests
-    import numpy as np
-    from ..core.object import Object, Agent
-    from ..core.room import Room
-    from ..managers.exploration_manager import ExplorationManager
-
-    objs = [
-        Object('table', np.array([1, 2]), np.array([0, 1])),
-        Object('chair', np.array([2, 2]), np.array([0, 1])),
-        Object('lamp', np.array([1, 3]), np.array([0, 1])),
-    ]
-    mask = np.ones((6, 6), dtype=np.int8)
-    room = Room(objects=objs, mask=mask, name='r')
-    agent = Agent(pos=np.array([1, 1]), ori=np.array([0, 1]), room_id=1, init_room_id=1)
-    mgr = ExplorationManager(room, agent)
-
-    # Observe
-    seq = ActionSequence.parse("Actions: [Observe()]")
-    results = mgr.execute_action_sequence(seq)
-    print('Observe ->', results[0].message)
-
-    # Query (initial-frame coordinates)
-    seq = ActionSequence.parse("Actions: [Query(table)]")
-    results = mgr.execute_action_sequence(seq)
-    print('Query ->', "; ".join(r.message for r in results))
-    print('Counts:', mgr.action_counts, 'Cost:', mgr.action_cost)
