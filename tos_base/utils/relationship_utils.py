@@ -61,7 +61,7 @@ def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -
 
     if isinstance(relationship, ProximityRelationship):
         th = float(getattr(relationship, 'PROXIMITY_THRESHOLD', 5.0))
-        if not (dsq < th * th):
+        if not (dsq <= th * th + 1e-6):
             return False
         # Must match the discrete pairwise inside the proximity relation
         return relationship_applies(p1, p2, relationship.pairwise_rel, anchor_ori)

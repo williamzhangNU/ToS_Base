@@ -39,15 +39,15 @@ def parse_llm_response(text: str, enable_think: bool = True) -> Tuple[str, str, 
         if legacy_think:
             think_content = legacy_think.group(1).strip()
 
+    # If answer still missing, treat whole text as the answer (answer is critical)
+    if not answer_content:
+        answer_content = text.strip()
+
     # Clean GLM-4.5V box tokens if present
     if answer_content:
         answer_content = (
             answer_content.replace("<|begin_of_box|>", "").replace("<|end_of_box|>", "").strip()
         )
-
-    # If answer still missing, treat whole text as the answer (answer is critical)
-    if not answer_content:
-        answer_content = text.strip()
 
     if not enable_think:
         return "", answer_content, bool(answer_content)
