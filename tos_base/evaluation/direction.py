@@ -27,6 +27,10 @@ class DirectionEvaluationTask(BaseEvaluationTask):
     # ---------- small helpers ----------
     def _fmt(self, d: str, s: str) -> str: return f"{d}, {s}"
 
+    def _pair_id(self, a: str, b: str) -> str:
+        names = sorted([str(a), str(b)])
+        return hash("|".join(names))
+
     def _labels(self, rel):
         dir_labels = rel.direction.bin_system.LABELS
         dist_labels = rel.dist.bin_system.LABELS
@@ -135,7 +139,7 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         obj1, obj2, rel, template = self.generate_question_data()
         choices, idx = self.generate_choices(rel)
         question = self._finalize(template, obj1.name, obj2.name, choices, idx)
-        self.eval_data.id = hash(question)
+        self.eval_data.id = self._pair_id(obj1.name, obj2.name)
         return question
 
 

@@ -31,13 +31,21 @@ class Prompter:
         )
 
     def get_format_footer(self, is_exploration: bool) -> str:
+        # Decide answer hint
+        if is_exploration:
+            answer_hint = "Actions: [ ... ]"
+        else:
+            # Special stricter format for InternVL during evaluation
+            if self._is_internvl_model():
+                answer_hint = "[ONLY the letter (A, B, C, ...)]"
+            else:
+                answer_hint = "[your answer (only required answer, no extra text, notes, formatting or anything else)]"
+
         if self.enable_think:
             think = "[Your thoughts on next step actions]" if is_exploration else "[Your thoughts on the question]"
-            answer = "Actions: [ ... ]" if is_exploration else "[your answer (only required answer, no extra text, notes, formatting or anything else)]"
-            return f"Strictly follow this format:\n{THINK_LABEL}\n{think}\n{ANSWER_LABEL}\n{answer}"
+            return f"Strictly follow this format:\n{THINK_LABEL}\n{think}\n{ANSWER_LABEL}\n{answer_hint}"
         else:
-            answer = "Actions: [ ... ]" if is_exploration else "[your answer (only required answer, no extra text, notes, formatting or anything else)]"
-            return f"Strictly follow this format:\n{ANSWER_LABEL}\n{answer}"
+            return f"Strictly follow this format:\n{ANSWER_LABEL}\n{answer_hint}"
 
     # Add image prompt constants
     TOPDOWN_PROMPT = "\n\nTopdown view: {placeholder}\n{object_info}"
@@ -48,6 +56,13 @@ class Prompter:
         self.image_handler = image_handler
         self.np_random = np_random
         self.enable_think = bool(self.config.prompt_config.get('enable_think', True))
+
+    def _is_internvl_model(self) -> bool:
+        """Return True if current model is InternVL (e.g., internvl3_5)."""
+        model_cfg = self.config.get_model_config()
+        model_name = str((model_cfg or {}).get('model_name', '')).lower()
+        print(f"Model name: {model_name}")
+        return 'internvl' in model_name
 
     def _get_topdown_prompt(self, prompt_template: str, room) -> str:
         """Generate topdown view prompt with object information."""
