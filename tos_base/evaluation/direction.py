@@ -17,8 +17,8 @@ class DirectionEvaluationTask(BaseEvaluationTask):
 
     QUESTION_TEMPLATE_DIR = (
         "Your starting facing direction is north.\n"
-        "From a top-down view, what is the spatial relationship of {obj_name} relative to {anchor_obj_name}?\n"
-        "Each choice is \"<direction-bin>, <distance-bin>\" (allocentric).\n\n"
+        "From a top-down view, which spatial relationship is correct?\n"
+        "Each choice shows \"<object> is <direction-bin>, <distance-bin> relative to <anchor>\" (allocentric).\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
@@ -27,9 +27,6 @@ class DirectionEvaluationTask(BaseEvaluationTask):
     # ---------- small helpers ----------
     def _fmt(self, d: str, s: str) -> str: return f"{d}, {s}"
 
-    def _pair_id(self, a: str, b: str) -> str:
-        names = sorted([str(a), str(b)])
-        return hash("|".join(names))
 
     def _labels(self, rel):
         dir_labels = rel.direction.bin_system.LABELS
@@ -67,29 +64,29 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         out = []
         
         # Single-axis mistakes: same dir, adjacent distance
-        for sk in [-2, -2]:
+        for sk in [1, -1]:
             s = self._fmt(dir_labels[d_idx], dist_labels[self._clamp(s_idx + sk, len(dist_labels))])
             out.append(s)
         
         # Single-axis mistakes: same distance, adjacent dir
-        for dk in [2, -2]:
+        for dk in [1, -1]:
             new_d_idx = self._wrap(d_idx + dk, len(dir_labels))
             if self.task_type != "pov" or new_d_idx not in (0, len(dir_labels) - 1):
                 s = self._fmt(dir_labels[new_d_idx], dist_labels[s_idx])
                 out.append(s)
         
         # Coupled errors: dir ±1 and dist ±1
-        for dk in [1, -1]:
-            for sk in [1, -1]:
-                new_d_idx = self._wrap(d_idx + dk, len(dir_labels))
-                if self.task_type != "pov" or new_d_idx not in (0, len(dir_labels) - 1):
-                    s = self._fmt(dir_labels[new_d_idx],
-                                  dist_labels[self._clamp(s_idx + sk, len(dist_labels))])
-                    out.append(s)
+        for dk, sk in self.np_random.choice([(1, 1), (1, -1), (-1, 1), (-1, -1)], size=2, replace=False):
+            new_d_idx = self._wrap(d_idx + dk, len(dir_labels))
+            if self.task_type != "pov" or new_d_idx not in (0, len(dir_labels) - 1):
+                s = self._fmt(dir_labels[new_d_idx],
+                              dist_labels[self._clamp(s_idx + sk, len(dist_labels))])
+                out.append(s)
         return out
 
     # ---------- shared choice builder ----------
     def generate_choices(self, rel) -> Tuple[List[str], int]:
+        """Legacy method for other task types."""
         dir_labels, dist_labels, d_idx, s_idx = self._labels(rel)
         assert s_idx >= 0, "Distance bin must be positive"
 
@@ -113,33 +110,81 @@ class DirectionEvaluationTask(BaseEvaluationTask):
 
         self.np_random.shuffle(choices)
         return choices, choices.index(correct)
+    
+    def generate_choices_with_pairs(self) -> Tuple[List[str], int]:
+        n = len(self.room.objects)
+        if n < 2:
+            raise ValueError("Need at least 2 objects in room")
+            
+        choices = []
+        used_pairs = set()
+        
+        # Generate one correct choice
+        i, j = self.np_random.choice(n, size=2, replace=False)
+        obj1, obj2 = self.room.objects[i], self.room.objects[j]
+        rel = self._compute_discrete_rel(obj1.pos, obj2.pos, CardinalBinsAllo())
+        correct_choice = f"{obj1.name} is {rel.direction.bin_label}, {rel.dist.bin_label} relative to {obj2.name}"
+        choices.append(correct_choice)
+        used_pairs.add((i, j))
+        used_pairs.add((j, i))  # Also block reverse pair
+        
+        # Generate three wrong choices
+        for _ in range(3):
+            # Find unused pair
+            attempts = 0
+            while attempts < 50:
+                i, j = self.np_random.choice(n, size=2, replace=False)
+                if (i, j) not in used_pairs:
+                    break
+                attempts += 1
+            else:
+                # Fallback if can't find unused pair
+                i, j = self.np_random.choice(n, size=2, replace=False)
+                
+            obj1, obj2 = self.room.objects[i], self.room.objects[j]
+            rel = self._compute_discrete_rel(obj1.pos, obj2.pos, CardinalBinsAllo())
+            
+            # Apply wrong option generation to this relationship
+            wrong_options = self._gen_wrong_options(rel)
+            if wrong_options:
+                wrong_rel = self.np_random.choice(wrong_options)
+                choice = f"{obj1.name} is {wrong_rel} relative to {obj2.name}"
+            else:
+                # Fallback to random wrong relationship
+                dir_labels = CardinalBinsAllo().LABELS
+                dist_labels = rel.dist.bin_system.LABELS
+                wrong_dir = self.np_random.choice(dir_labels)
+                wrong_dist = self.np_random.choice(dist_labels)
+                choice = f"{obj1.name} is {wrong_dir}, {wrong_dist} relative to {obj2.name}"
+                
+            choices.append(choice)
+            used_pairs.add((i, j))
+            used_pairs.add((j, i))
+        
+        # Shuffle choices and find correct index
+        self.np_random.shuffle(choices)
+        correct_idx = choices.index(correct_choice)
+        return choices, correct_idx
 
     # ---------- shared finalize ----------
-    def _finalize(self, template: str, obj_name: str, anchor_obj_name: str,
-                  choices: List[str], correct_idx: int) -> str:
+    def _finalize(self, template: str, choices: List[str], correct_idx: int) -> str:
         choices_text, correct_label = self.format_choices(choices, correct_idx)
-        self.eval_data.question = template.format(
-            obj_name=obj_name, anchor_obj_name=anchor_obj_name, choices_text=choices_text
-        )
+        self.eval_data.question = template.format(choices_text=choices_text)
         self.eval_data.answer = correct_label
         self.eval_data.choices = choices
         return self.eval_data.question
 
     # ---------- allocentric ----------
     def generate_question_data(self):
-        """Generate question setup data (objects, relationship, etc.)."""
-        n = len(self.room.objects)
-        i, j = self.np_random.choice(n, size=2, replace=False)
-        obj1, obj2 = self.room.objects[i], self.room.objects[j]
-        rel = self._compute_discrete_rel(obj1.pos, obj2.pos, CardinalBinsAllo())
-        return obj1, obj2, rel, self.QUESTION_TEMPLATE_DIR
+        """Generate question setup data."""
+        return self.QUESTION_TEMPLATE_DIR
 
     @retry_generate_question
     def generate_question(self) -> str:
-        obj1, obj2, rel, template = self.generate_question_data()
-        choices, idx = self.generate_choices(rel)
-        question = self._finalize(template, obj1.name, obj2.name, choices, idx)
-        self.eval_data.id = self._pair_id(obj1.name, obj2.name)
+        template = self.generate_question_data()
+        choices, idx = self.generate_choices_with_pairs()
+        question = self._finalize(template, choices, idx)
+        self.eval_data.id = hash(question)
         return question
 
 

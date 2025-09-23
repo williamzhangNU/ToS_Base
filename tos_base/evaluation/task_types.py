@@ -104,8 +104,8 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
 
-    task_name = 'false_belief'
-    for seed in tqdm(range(1, 2)):
+    task_name = 'dir'
+    for seed in tqdm(range(0, 20)):
         np_random = np.random.default_rng(seed)
         room, agent = RoomGenerator.generate_room(
             room_size=(15, 15),
@@ -115,8 +115,10 @@ if __name__ == "__main__":
             level=0,
             main=12,
         )
-        print(f'room: {room}')
-        print(f'agent: {agent}')
-        RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
+        # print(f'room: {room}')
+        # print(f'agent: {agent}')
+        # RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
         task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
-        print(task.generate_question(), task.answer)
+        # print(task.generate_question(), task.answer)
+        task.generate_question()
+        print(task.answer)
