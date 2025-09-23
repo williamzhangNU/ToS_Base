@@ -184,7 +184,7 @@ def evaluate_cognitive_maps_from_turnlogs(
             # let cogmaplog be reused in passive
             turn_log = {'turn_number': 1 ,"user_message": base_user, "is_exploration_phase": True, "room_state": room_config, "agent_state": agent_config}
             turn_logs[0] = turn_log
-            if not history_manager.is_history_exist():
+            if not history_manager.has_exploration(0):
                 history_manager.update_turn_log(turn_log)
 
 

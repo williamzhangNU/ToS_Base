@@ -588,6 +588,4 @@ class RelationTriple:
 
 
 if __name__ == "__main__":
-    relationship = PairwiseRelationshipDiscrete.relationship((4, 6), (0, 0), anchor_ori=(1, 0), bin_system=CardinalBinsEgo(), distance_bin_system=StandardDistanceBins())
-    print(relationship)
-    print(relationship.to_string())
+    pass
