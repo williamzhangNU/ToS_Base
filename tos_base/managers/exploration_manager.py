@@ -137,28 +137,29 @@ class ExplorationManager:
         assert action_sequence.final_action, "Action sequence requires a final action."
 
         action_results = []
-        
+        is_action_fail = False
         # Execute motion actions
         for action in action_sequence.motion_actions:
             result = self._execute_and_update(action)
             action_results.append(result)
             if not result.success:
+                is_action_fail = True
                 # On failure, perform an observe action and end
                 obs_result = self._execute_and_update(ObserveAction())
                 obs_result.message = f"Subsequent actions are skipped due to failure, instead an observe is executed: {obs_result.message}"
                 action_results.append(obs_result)
                 assert obs_result.success, f"Observe action failed: {obs_result.message}"
-                self._log_exploration(action_results, is_action_fail=True)
+                self._log_exploration(action_results, is_action_fail)
                 return action_results
 
         # Execute final action
         final_action = action_sequence.final_action
         result = self._execute_and_update(final_action)
         action_results.append(result)
-        assert result.success, f"Final action {final_action} failed: {result.message}"
-
+        if not result.success:
+            is_action_fail = True
         # Always log before return
-        self._log_exploration(action_results)
+        self._log_exploration(action_results, is_action_fail)
         return action_results
     
     def finish_exploration(self, return_to_origin: bool = True) -> Room:
