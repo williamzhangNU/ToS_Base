@@ -287,9 +287,10 @@ class OrientationRel:
     @classmethod
     def prompt(cls) -> str:
         return (
-            "Orientation: forward/backward/right/left (ego) or north/east/south/west (allo).\n"
-            "When agent faces north: forward = north, right = east, etc.\n"
-            "Gate's orientation: report wall position (e.g., 'on left wall')."
+            "Orientation:\n"
+            "\t-forward/backward/right/left (ego) or north/east/south/west (allo).\n"
+            "\t-When agent faces north: forward = north, right = east, etc.\n"
+            "\t-Gate's orientation: report wall position (e.g., 'on left wall')."
         )
 
     @classmethod
@@ -500,7 +501,7 @@ class PairwiseRelationshipDiscrete(PairwiseRelationship):
     def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> str:
         return (
             "Binned relationship reporting:\n"
-            f"Angles: EgoFront (egocentric); Cardinal (object-to-object).\n"
+            f"EgoFront (egocentric, object-to-agent); Cardinal (object-to-object).\n"
             f"{EgoFrontBins.prompt()}\n"
             f"{CardinalBinsAllo.prompt()}\n"
             f"{StandardDistanceBins.prompt()}"
@@ -543,7 +544,7 @@ class ProximityRelationship:
         """Create proximity relationship between two close objects (both must be in agent's FOV)."""
         # Check if objects are close enough to each other
         a_to_b_dist = np.linalg.norm(np.array(a_pos) - np.array(b_pos))
-        if not (a_to_b_dist < cls.PROXIMITY_THRESHOLD):
+        if not (a_to_b_dist <= cls.PROXIMITY_THRESHOLD + 1e-6):
             return None
             
         # Create pairwise relationship between the two objects using agent's perspective
@@ -557,8 +558,8 @@ class ProximityRelationship:
     def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> str:
         return (
             "Proximity reporting:\n"
-            f"Observe also returns nearby object-to-object relations (distance ≤ {cls.PROXIMITY_THRESHOLD}).\n"
-            "Treat your current facing as north and use cardinal angle bins; distances use the standard bins."
+            f"\t-Observe also returns relations between mutually close objects (distance ≤ {cls.PROXIMITY_THRESHOLD}).\n"
+            "\t-Treat your current facing as north and use cardinal bins; distances use the standard bins."
         )
     
     def to_string(self, a_name: str, b_name: str) -> str:

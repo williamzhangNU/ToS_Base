@@ -28,7 +28,8 @@ Your {answer_label} must match this grammar (label followed by newline):
 <M> = "JumpTo(OBJ)" | "Rotate(DEG)" | "Return()"
 <F> = "Observe()" | "Query(OBJ)" | "Term()"
 Constraints:
-- Exactly one <F>, and it must be the final element.
+- Zero, one or more <M>. No JumpTo at first step.
+- Exactly one <F>, and it must be the final action.
 - No more than one Observe().
 - Term() may appear only alone or after Return().
 - Any violation is invalid.
@@ -38,9 +39,7 @@ Examples:
 
 
 Rules:
-- You may perform zero, one or more movement actions.
-- Provide **EXACTLY ONE** final action (and it **must be last**) or your action sequence will be invalid.
-- Observe action only reports from your current position. If you jump multiple times, the final Observe() action gives the view only from your last position.
+- Observe action only reports from your current position and facing direction. If you jump multiple times, the final Observe() action gives the view only from your last position.
 - Actions execute in order. Field of view: {field_of_view}°.
 
 Observe and Query action have costs:
@@ -52,12 +51,11 @@ Observe and Query action have costs:
 class MoveAction(BaseAction):
     """Jump to a target object"""
     
-    format_desc = "JumpTo(object_name)"
+    format_desc = "JumpTo(OBJ)"
     description = (
         "Jump to the same position as the object. "
-        "Your orientation does NOT change when you jump."
-        "You can ONLY jump to objects within your field of view and you must have observed it before. "
-        "You can ONLY jump to objects by name, not directions or others. You CANNOT jump to objects by numbers. "
+        "Your orientation does NOT change. "
+        "The object you jump to MUST be in your field of view and previously observed. Use object names only. NO numbers or directions or others. "
         "Invalid: JumpTo(left), JumpTo(1)."
     )
     example = "JumpTo(table)"
@@ -106,7 +104,7 @@ class MoveAction(BaseAction):
 class RotateAction(BaseAction):
     """Rotate by specified degrees"""
     
-    format_desc = "Rotate(degrees)"
+    format_desc = "Rotate(DEG)"
     description = ("Rotate relative to your current orientation. "
                    "Positive = clockwise, negative = counterclockwise. "
                    "Valid: -270, -180, -90, 0, 90, 180, 270. "
@@ -201,19 +199,22 @@ class ObserveBase(BaseAction):
                 rel = PairwiseRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
             pairwise_str = rel.to_string()
 
-            if isinstance(obj, Gate):
-                rid = agent.room_id
-                if isinstance(rid, (list, tuple)):
-                    rid = list(set(agent.room_id) & set(obj.room_id))
-                    assert len(rid) == 1, f"intersection of room ids is not unique: {rid}"
-                    rid = rid[0]
-                gate_ori = obj.get_ori_for_room(int(rid)) if rid is not None else obj.ori
-                ori_pair = OrientationRel.get_relative_orientation(tuple(gate_ori), tuple(agent.ori))
-                ori_str = OrientationRel.to_string(ori_pair, 'ego', 'orientation', if_gate=True)
+            if hasattr(obj, 'has_orientation') and not obj.has_orientation:
+                answer_str = f"{obj.name}: {pairwise_str}"
             else:
-                ori_pair = OrientationRel.get_relative_orientation(tuple(obj.ori), tuple(agent.ori))
-                ori_str = OrientationRel.to_string(ori_pair, 'ego', 'orientation')
-            answer_str = f"{obj.name}: {pairwise_str}, {ori_str}"
+                if isinstance(obj, Gate):
+                    rid = agent.room_id
+                    if isinstance(rid, (list, tuple)):
+                        rid = list(set(agent.room_id) & set(obj.room_id))
+                        assert len(rid) == 1, f"intersection of room ids is not unique: {rid}"
+                        rid = rid[0]
+                    gate_ori = obj.get_ori_for_room(int(rid)) if rid is not None else obj.ori
+                    ori_pair = OrientationRel.get_relative_orientation(tuple(gate_ori), tuple(agent.ori))
+                    ori_str = OrientationRel.to_string(ori_pair, 'ego', 'orientation', if_gate=True)
+                else:
+                    ori_pair = OrientationRel.get_relative_orientation(tuple(obj.ori), tuple(agent.ori))
+                    ori_str = OrientationRel.to_string(ori_pair, 'ego', 'orientation')
+                answer_str = f"{obj.name}: {pairwise_str}, {ori_str}"
             relationships.append(answer_str)
             relation_triples.append(RelationTriple(subject=obj.name, anchor=anchor_name, relation=rel, orientation=tuple(agent.ori)))
         final_answer = "\n" + "\n".join(f"• {rel}" for rel in relationships)
@@ -231,8 +232,9 @@ class ObserveAction(ObserveBase):
     """Observe with approximate relations and local (near) pair descriptions"""
     format_desc = "Observe()"
     description = ("Report objects (including doors) and their spatial relationships from your current position in your FOV. "
-                   "Also return relations between mutually close objects in your FOV. "
-                   "It should NEVER be followed by a Term(). You can ONLY use ONE Observe() per step and it must be your last action. Otherwise your action sequence will be invalid.")
+                   "Also reports relations between mutually close objects in your FOV, using your current facing direction as north (a relative reference frame, not true north)."
+                   "Use exactly one Observe() per step and make it the last action. "
+                   "Never call Term() after Observe().")
     example = "Observe()"
     format_pattern = r"^Observe\(\)$"
     cost = 1
@@ -276,8 +278,7 @@ class ObserveAction(ObserveBase):
         final_answer = pairwise_answer
         if local_answer:
             final_answer += (
-                "\nAssume your current facing direction is called \"north\" (a relative reference frame, not true north)."
-                f"Based on this orientation, mutually close object relations in your FOV:\n{local_answer}"
+                "\nAssume your current facing direction is called \"north\", mutually close object relations in your FOV:\n{local_answer}"
             )
         return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe', {
             'answer': final_answer,
@@ -406,7 +407,7 @@ class QueryRelAction(QueryBase):
 # Expose all observe variants; default flows may still prefer ObserveApprox
 ACTION_CLASSES = [
     MoveAction, RotateAction, ReturnAction,
-    ObserveAction, TermAction, QueryAction
+    ObserveAction, QueryAction, TermAction
 ]
 
 
@@ -464,17 +465,26 @@ class ActionSequence:
         return None
     
     @staticmethod
-    def get_usage_instructions() -> str:
+    def get_usage_instructions(vision: bool = False) -> str:
         """Get usage instructions for action sequences"""
+        def _desc(cls):
+            if vision and cls is ObserveAction:
+                return (
+                    "Return an RGB image of your current field of view from your current position and facing. "
+                    "Use exactly one Observe() per step and make it the last action. "
+                    "Never call Term() after Observe()."
+                )
+            return cls.description
+
         motion_actions = [cls for cls in ACTION_CLASSES if not cls.is_final()]
         final_actions = [cls for cls in ACTION_CLASSES if cls.is_final()]
-        
+
         action_desc = (
             "Movement Actions:\n" +
-            "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in motion_actions) +
+            "\n".join(f"- {cls.format_desc}: {_desc(cls)}" for cls in motion_actions) +
             "\n\n" +
             "Final Actions:\n" +
-            "\n".join(f"- {cls.format_desc}: {cls.description}" for cls in final_actions)
+            "\n".join(f"- {cls.format_desc}: {_desc(cls)}" for cls in final_actions)
         )
         examples = (
             f"Valid: Actions: [JumpTo(table), Rotate(90), Observe()]\n" +

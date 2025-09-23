@@ -33,11 +33,11 @@ class Prompter:
     def get_format_footer(self, is_exploration: bool) -> str:
         if self.enable_think:
             think = "[Your thoughts on next step actions]" if is_exploration else "[Your thoughts on the question]"
-            answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
-            return f"Strictly follow this format, include only required answer in {ANSWER_LABEL}. No extra text, notes, formatting or anything else:\n{THINK_LABEL}\n{think}\n{ANSWER_LABEL}\n{answer}"
+            answer = "Actions: [ ... ]" if is_exploration else "[your answer (only required answer, no extra text, notes, formatting or anything else)]"
+            return f"Strictly follow this format:\n{THINK_LABEL}\n{think}\n{ANSWER_LABEL}\n{answer}"
         else:
-            answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
-            return f"Strictly follow this format, include only required answer in {ANSWER_LABEL}. No extra text, notes, formatting or anything else:\n{ANSWER_LABEL}\n{answer}"
+            answer = "Actions: [ ... ]" if is_exploration else "[your answer (only required answer, no extra text, notes, formatting or anything else)]"
+            return f"Strictly follow this format:\n{ANSWER_LABEL}\n{answer}"
 
     # Add image prompt constants
     TOPDOWN_PROMPT = "\n\nTopdown view: {placeholder}\n{object_info}"
@@ -88,8 +88,9 @@ class Prompter:
         if not is_vision:
             observation_instructions += f"\n{ProximityRelationship.prompt()}"
 
-        exp_instructions = ActionSequence.get_usage_instructions()
+        exp_instructions = ""
         if is_active:
+            exp_instructions = f"Action Instructions:\n{ActionSequence.get_usage_instructions(is_vision)}"
             exp_instructions += f"\n\nYou have a maximum of {self.config.max_exp_steps} exploration steps."
 
         images = None

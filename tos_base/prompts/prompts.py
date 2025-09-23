@@ -45,7 +45,6 @@ INSTRUCTION_TEMPLATE_TEXT = """\
 Relationship instructions:
 {observation_instructions}
 
-Action Instructions:
 {exp_instructions}
 
 {format_rules}
@@ -75,7 +74,6 @@ INSTRUCTION_TEMPLATE_VISION = """\
 Relationship instructions:
 {observation_instructions}
 
-Action Instructions:
 {exp_instructions}
 
 {format_rules}
