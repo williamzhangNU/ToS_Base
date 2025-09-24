@@ -82,7 +82,7 @@ class EvaluationManagerHuman:
         self.tasks = []
         for idx, task_spec in enumerate(self.eval_tasks):
             task_type = task_spec['task_type']
-            task = EvalTaskType.create_task(task_type, np.random.default_rng(int(self.seed)), room.copy(), agent.copy(), {}, history_manager)
+            task = EvalTaskType.create_task(task_type, self.np_random, room.copy(), agent.copy(), {}, history_manager)
             self.tasks.append(task)
             self.results.append({
                 "task_type": task.__class__.__name__,
