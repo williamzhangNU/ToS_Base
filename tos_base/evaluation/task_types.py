@@ -104,8 +104,8 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
 
-    task_name = 'pov'
-    for seed in tqdm(range(0, 20)):
+    task_name = 'dir_anchor'
+    for seed in tqdm(range(0, 1)):
         np_random = np.random.default_rng(seed)
         room, agent = RoomGenerator.generate_room(
             room_size=(15, 15),
@@ -119,6 +119,6 @@ if __name__ == "__main__":
         # print(f'agent: {agent}')
         # RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
         task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
-        # print(task.generate_question(), task.answer)
-        task.generate_question()
+        print(task.generate_question(), task.answer)
+        # task.generate_question()
         print(task.answer)

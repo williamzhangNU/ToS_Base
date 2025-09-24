@@ -308,31 +308,55 @@ class CognitiveMapManager:
     
     @staticmethod
     def _relations_accuracies(pred: Dict[str, str], gt: Dict[str, str]) -> Tuple[float, float, float]:
-        if not pred:
+        if not pred or not gt:
             return 0.0, 0.0, 0.0
-        tot = len(gt)
+        
         dir_correct = dist_correct = 0
-        for pair_key, gt_value in gt.items():
-            gt_dir_code, gt_dist_code = decode_relation_codes(gt_value)
-            pred_dir_code = pred_dist_code = ""
-
-            # First try the exact pair key
-            pval = pred.get(pair_key)
-            if isinstance(pval, str):
-                pred_dir_code, pred_dist_code = decode_relation_codes(pval)
-            else:
-                # If not found, try the inverse key with inverted direction
-                inverse_key = invert_pair_key(pair_key)
-                inverse_pval = pred.get(inverse_key)
-                if isinstance(inverse_pval, str):
-                    inverse_pred_dir_code, pred_dist_code = decode_relation_codes(inverse_pval)
-                    # Invert the direction code to match the original pair order
-                    pred_dir_code = invert_dir_code(inverse_pred_dir_code)
-
-            if pred_dir_code == gt_dir_code:
+        
+        # Get all unique pairs from both predicted and ground truth
+        from ..utils.relation_codes import parse_pair_key, make_ordered_pair_key
+        all_pairs = set()
+        for key in list(gt.keys()) + list(pred.keys()):
+            a, b = parse_pair_key(key)
+            if a and b:
+                canonical_key = make_ordered_pair_key(*sorted([a, b]))
+                all_pairs.add(canonical_key)
+        
+        tot = len(all_pairs)
+        
+        for canonical_pair in all_pairs:
+            a, b = parse_pair_key(canonical_pair)
+            key_ab, key_ba = f"{a}|{b}", f"{b}|{a}"
+            
+            # Find GT relation (should be in canonical form)
+            gt_rel = gt.get(canonical_pair)
+            if gt_rel is None:
+                continue  # Skip if no GT for this pair
+                
+            # Find predicted relation (could be either direction)
+            pred_rel = pred.get(key_ab)
+            needs_inversion = False
+            if pred_rel is None:
+                pred_rel = pred.get(key_ba)
+                needs_inversion = True
+            if pred_rel is None:
+                continue  # Skip if no prediction for this pair
+                
+            # If predicted relation is in opposite order, invert it
+            if needs_inversion:
+                from ..utils.relation_codes import invert_relation_codes_str
+                pred_rel = invert_relation_codes_str(pred_rel)
+            
+            gt_dir, gt_dist = decode_relation_codes(gt_rel)
+            pred_dir, pred_dist = decode_relation_codes(pred_rel)
+            
+            if pred_dir == gt_dir:
                 dir_correct += 1
-            if pred_dist_code == gt_dist_code:
+            if pred_dist == gt_dist:
                 dist_correct += 1
+        
+        if tot == 0:
+            return 0.0, 0.0, 0.0
         dir_acc, dist_acc = dir_correct / tot, dist_correct / tot
         return dir_acc, dist_acc, (dir_acc + dist_acc) / 2
 
@@ -876,7 +900,12 @@ class CognitiveMapManager:
         if map_type == "rooms":
             out_rooms = {}
             for rid, sec in jd.items():
-                if  not isinstance(sec, dict):
+                if not isinstance(sec, dict):
+                    continue
+                try:
+                    rid = int(rid)
+                except Exception:
+                    print(f"Error parsing room id: {rid}")
                     continue
                 inner = sec.get("objects", sec)  # sometimes wrapped in {"origin":..., "objects":{...}}
                 keep = {

@@ -213,9 +213,12 @@ def evaluate_cognitive_maps_from_turnlogs(
             assert responses_by_type and turn_log.get('room_state') and turn_log.get('agent_state')
 
             # Evaluate cognitive maps using selected responses
-            cogmap_log = _evaluate_cogmaps(cognitive_map_manager,responses_by_type,turn_log)
-            turn_log['cogmap_log'] = cogmap_log.to_dict() if cogmap_log else {}
-            history_manager.update_cogmap(turn_log)
+            try:
+                cogmap_log = _evaluate_cogmaps(cognitive_map_manager,responses_by_type,turn_log)
+                turn_log['cogmap_log'] = cogmap_log.to_dict() if cogmap_log else {}
+                history_manager.update_cogmap(turn_log)
+            except Exception as e:
+                print(f"Error evaluating cognitive map: {e}")
 
     for env_idx, history_manager in env_history_managers.items():
         history_manager.save()

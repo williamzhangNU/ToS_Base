@@ -2,6 +2,7 @@ from typing import Dict, Tuple, List
 import math
 import numpy as np
 from itertools import combinations
+import copy
 
 from ...core.room import BaseRoom, Room, Object
 from ...core.object import Agent 
@@ -14,6 +15,7 @@ from ..relation_codes import (
     decode_relation_codes, encode_relation_codes, discrete_relation_from_codes,
     make_ordered_pair_key, parse_pair_key, invert_relation_codes_str, invert_pair_key)
 from ..relationship_utils import room_to_ordered_relations
+from .transforms import transform_baseroom
 
 
 def compare_on_common_subset(a: BaseRoom | None, b: BaseRoom | None, allow_scale: bool, pos_norm_L: float | None) -> MapCogMetrics:
@@ -35,8 +37,19 @@ def compare_on_common_subset(a: BaseRoom | None, b: BaseRoom | None, allow_scale
 def local_vs_global_consistency(pred_local: BaseRoom | None, pred_global: BaseRoom | None, agent: Agent, allow_scale: bool, pos_norm_L: float | None) -> MapCogMetrics:
     if pred_local is None or pred_global is None:
         return MapCogMetrics.invalid()
-    local_in_initial = br_from_anchor_to_initial(pred_local, np.array(agent.pos, dtype=float), np.array(agent.ori, dtype=int), agent)
-    return compare_on_common_subset(local_in_initial, pred_global, allow_scale=allow_scale, pos_norm_L=pos_norm_L)
+    
+    # Find predicted agent in global map
+    global_agent = next((o for o in pred_global.objects if o.name == 'agent'), None)
+    if global_agent is None:
+        return MapCogMetrics.invalid()
+    
+    # Transform global map to use predicted agent as origin (make copy to avoid modifying original)
+    
+    global_copy = copy.deepcopy(pred_global)
+    global_agent_centered = transform_baseroom(global_copy, global_agent.pos, global_agent.ori)
+    
+    # Compare directly (local should already be agent-centered)
+    return compare_on_common_subset(pred_local, global_agent_centered, allow_scale=allow_scale, pos_norm_L=pos_norm_L)
 
 
 def rooms_vs_global_consistency(pred_rooms: Dict[str, BaseRoom], pred_global: BaseRoom | None, room: Room, agent: Agent, entry_gate_by_room: Dict[int, str], allow_scale: bool, pos_norm_L: float | None) -> Tuple[MapCogMetrics, Dict[str, MapCogMetrics]]:

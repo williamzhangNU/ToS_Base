@@ -379,3 +379,11 @@ class DirectionPov(DirectionEvaluationTask):
             rel = self._compute_discrete_rel(target_obj.pos, anchor.pos, CardinalBinsAllo(), anchor_ori=anchor.ori)
             return target_obj, anchor, rel, self.QUESTION_TEMPLATE_ANCHOR_NORTH
         raise ValueError("No oriented objects in the room")
+
+    @retry_generate_question
+    def generate_question(self) -> str:
+        target_obj, anchor, rel, template = self.generate_question_data()
+        choices, idx = self.generate_choices(rel)
+        question = self._finalize(template, target_obj.name, anchor.name, choices, idx)
+        self.eval_data.id = hash(question)
+        return question

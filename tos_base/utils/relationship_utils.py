@@ -92,10 +92,10 @@ def room_to_ordered_relations(
 
     names_sorted = sorted(names)
     out: dict[str, str] = {}
-    for a in names_sorted:
-        for b in names_sorted:
-            if a == b:
-                continue
+    # Only generate one relation per unique pair (avoid A|B and B|A)
+    for i, a in enumerate(names_sorted):
+        for j in range(i + 1, len(names_sorted)):
+            b = names_sorted[j]
             rel = PairwiseRelationshipDiscrete.relationship(tuple(pos_by_name[a]), tuple(pos_by_name[b]), anchor_ori=None, bin_system=bin_system, distance_bin_system=distance_bin_system)
             out[make_ordered_pair_key(a, b)] = encode_relation_codes(rel.direction.bin_label, rel.dist.bin_label)
     return out
