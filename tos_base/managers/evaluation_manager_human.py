@@ -36,7 +36,7 @@ class EvaluationTurnLog:
         }
 
 
-class EvaluationManager:
+class EvaluationManagerHuman:
     """
     Manages evaluation tasks for the SpatialGym environment.
     
@@ -51,27 +51,33 @@ class EvaluationManager:
         "unanswered_count": 0
     }
     
-    def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent, history_manager=None, seed: int | None = None):
+    def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent, is_human_eval: bool, history_manager=None, seed: int | None = None):
         # In current implementation, only one evaluation task is allowed
-        assert len(eval_tasks) == 1, "Only one evaluation task is supported"
+        if not is_human_eval:
+            assert len(eval_tasks) == 1, "Only one evaluation task is supported"
         self.history_manager = history_manager
         self.eval_tasks = []
-        spec = eval_tasks[0]
-        ttype = spec['task_type']
-        num = int(spec.pop('num', 1))
-        counts = self.history_manager.get_eval_counts() if self.history_manager else {}
-        done_count = 0
-        if counts:
-            class_name = EvalTaskType.from_short_name(ttype).class_name
-            done_count = counts.get(class_name, 0)
-
-        if num > done_count:
-            self.eval_tasks = [spec]
         self.np_random = np_random
         self.results = []
         self.turn_logs: List[EvaluationTurnLog] = []
         self.seed = seed
-        
+        # Collect eligible task specs
+        for spec in eval_tasks:
+            spec_copy = spec.copy()
+            ttype = spec_copy['task_type']
+            num = int(spec_copy.get('num', 1))
+
+            counts = self.history_manager.get_eval_counts() if self.history_manager else {}
+            done_count = 0
+            if counts and not is_human_eval:   
+                class_name = EvalTaskType.from_short_name(ttype).class_name
+                done_count = counts.get(class_name, 0)
+
+            remaining = max(0, num - done_count) if not is_human_eval else num
+
+            for _ in range(remaining):
+                self.eval_tasks.append(spec_copy.copy())
+
         # Initialize tasks
         self.tasks = []
         for idx, task_spec in enumerate(self.eval_tasks):
@@ -117,7 +123,6 @@ class EvaluationManager:
             evaluation_data=task.eval_data
         )
         self.turn_logs.append(turn_log)
-        
         return correct, info
 
     def next_task(self) -> bool:
