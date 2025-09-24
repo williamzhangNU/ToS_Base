@@ -186,9 +186,7 @@ class EvaluationManager:
             if metrics is None or not isinstance(metrics, dict):
                 s['metrics'] = {}
                 metrics = s['metrics']
-            ev = metrics.get('evaluation')
-            if not isinstance(ev, dict) or not ev:
-                metrics['evaluation'] = EvaluationManager.aggregate_per_sample(s)
+            metrics['evaluation'] = EvaluationManager.aggregate_per_sample(s)
 
         per_samples = [((s.get('metrics') or {}).get('evaluation') or {}) for s in env_data_list]
         total_count = sum(int(m.get('overall',{}).get('n_total', 0)) for m in per_samples)
