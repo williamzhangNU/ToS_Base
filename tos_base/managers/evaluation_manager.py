@@ -165,10 +165,10 @@ class EvaluationManager:
                 'avg_accuracy': (n_correct / n_total) if n_total else 0.0,
             }
         # temp code, TODO
-        per_task = {t: v for t, v in per_task.items() if t not in ['PovEvaluationTask', 'BackwardPovEvaluationTask', 'FalseBeliefDirectionPov', 'DirectionPov']}
+        filtered_per_task = {t: v for t, v in per_task.items() if t not in ['PovEvaluationTask', 'BackwardPovEvaluationTask', 'FalseBeliefDirectionPov', 'DirectionPov']}
 
-        total = sum(v['n_total'] for v in per_task.values())
-        correct = sum(v['n_correct'] for v in per_task.values())
+        total = sum(v['n_total'] for v in filtered_per_task.values())
+        correct = sum(v['n_correct'] for v in filtered_per_task.values())
         return {
             'overall': {'n_total': total, 'n_correct': correct, 'avg_accuracy': (correct / total) if total else 0.0},
             'per_task': per_task,
