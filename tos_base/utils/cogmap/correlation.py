@@ -65,7 +65,7 @@ def compute_correlation_metrics(env_data_list: Dict, exp_type: str = 'active') -
             # Accuracy for each task - fill missing tasks with None
             per_task = evaluation_metric.get('per_task') or {}
             for task_name in all_task_names:
-                task_acc = (per_task.get(task_name) or {}).get('accuracy')
+                task_acc = (per_task.get(task_name) or {}).get('avg_accuracy')
                 evaluation_metric_list[task_name].append(float(task_acc) if isinstance(task_acc, (int, float)) else None)
 
             # Add information gain data (aligned)

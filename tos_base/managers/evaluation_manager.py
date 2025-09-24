@@ -164,8 +164,11 @@ class EvaluationManager:
                 'n_correct': n_correct,
                 'avg_accuracy': (n_correct / n_total) if n_total else 0.0,
             }
-        total = sum(v['n_total'] for v in per_task.values())
-        correct = sum(v['n_correct'] for v in per_task.values())
+        # temp code, TODO
+        filtered_per_task = {t: v for t, v in per_task.items() if t not in ['PovEvaluationTask', 'BackwardPovEvaluationTask', 'FalseBeliefDirectionPov', 'DirectionPov']}
+
+        total = sum(v['n_total'] for v in filtered_per_task.values())
+        correct = sum(v['n_correct'] for v in filtered_per_task.values())
         return {
             'overall': {'n_total': total, 'n_correct': correct, 'avg_accuracy': (correct / total) if total else 0.0},
             'per_task': per_task,
@@ -177,8 +180,15 @@ class EvaluationManager:
         if not env_data_list:
             return {'avg_accuracy': 0.0, 'task_metrics': {}}
 
-        per_samples = [((s.get('metrics') or {}).get('evaluation') or {}) for s in env_data_list]
+        # temp code, TODO
+        for s in env_data_list:
+            metrics = s.get('metrics')
+            if metrics is None or not isinstance(metrics, dict):
+                s['metrics'] = {}
+                metrics = s['metrics']
+            metrics['evaluation'] = EvaluationManager.aggregate_per_sample(s)
 
+        per_samples = [((s.get('metrics') or {}).get('evaluation') or {}) for s in env_data_list]
         total_count = sum(int(m.get('overall',{}).get('n_total', 0)) for m in per_samples)
         total_correct = sum(int(m.get('overall',{}).get('n_correct', 0)) for m in per_samples)
         agg_task: Dict[str, Dict[str, int]] = {}

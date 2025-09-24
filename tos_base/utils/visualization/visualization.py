@@ -480,7 +480,8 @@ class HTMLGenerator:
             ('global', '🗺️ Global Cognitive Map Response'),
             ('local', '🗺️ Local Cognitive Map Response'),
             ('relations', '🗺️ Relations Cognitive Map Response'),
-            ('rooms', '🗺️ Rooms Cognitive Map Response')
+            ('rooms', '🗺️ Rooms Cognitive Map Response'),
+            ('false_belief', '🧭 False Belief Cognitive Map Response')
         ]
 
         for map_type, title in cogmap_types:
@@ -574,6 +575,30 @@ class HTMLGenerator:
                             f.write("</div>\n")
                         else:
                             f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        f.write("</div>\n")  # End json-compare
+                        f.write("</div>\n")  # End json-content
+                        f.write("</div>\n")  # End json-container
+
+                elif map_type == 'false_belief':
+                    # For false_belief, display only pred_json in single column
+                    pred_json = data.get('pred_json', {})
+
+                    if pred_json:
+                        f.write("<div class='json-container false-belief'>\n")
+                        f.write("<div class='json-header'>")
+                        f.write("<strong>📊 False Belief Prediction JSON</strong>")
+                        f.write("</div>\n")
+                        f.write("<div class='json-content'>\n")
+                        f.write("<div class='json-compare false-belief'>\n")
+
+                        # Single column - pred_json
+                        f.write("<div class='json-box single predicted'>\n")
+                        f.write("<strong>🤖 Predicted</strong>\n")
+                        f.write("<div class='json-content-inner'>\n")
+                        f.write(f"<pre>{escape(json.dumps(pred_json, indent=2))}</pre>\n")
+                        f.write("</div>\n")
                         f.write("</div>\n")
 
                         f.write("</div>\n")  # End json-compare
@@ -733,7 +758,7 @@ class HTMLGenerator:
                     self._render_simple_block(f, eval_log.get('assistant_parsed_message', ''), "💬 Assistant Answer", "answer")
                     if eval_log.get('cogmap_log'):
                         self._render_cogmap_responses(f, eval_log['cogmap_log'], page_idx, t_idx)
-                        self._render_cogmap_metrics(f, eval_log['cogmap_log'], page_idx, t_idx)
+                        self._render_cogmap_metrics(f, eval_log['cogmap_log'])
                     # Display evaluation results
                     if eval_log.get('evaluation_log'):
                         eval_info = eval_log['evaluation_log']
