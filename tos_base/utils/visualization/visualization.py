@@ -733,7 +733,7 @@ class HTMLGenerator:
                     self._render_simple_block(f, eval_log.get('assistant_parsed_message', ''), "💬 Assistant Answer", "answer")
                     if eval_log.get('cogmap_log'):
                         self._render_cogmap_responses(f, eval_log['cogmap_log'], page_idx, t_idx)
-                        self._render_cogmap_metrics(f, eval_log['cogmap_log'], page_idx, t_idx)
+                        self._render_cogmap_metrics(f, eval_log['cogmap_log'])
                     # Display evaluation results
                     if eval_log.get('evaluation_log'):
                         eval_info = eval_log['evaluation_log']

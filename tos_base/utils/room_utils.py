@@ -525,8 +525,9 @@ def get_room_description(room: Room, agent: Agent, with_topdown: bool = False) -
     assert isinstance(agent.room_id, int), f"Agent room id must be an integer, got {agent.room_id}"
 
     # Separate objects and gates for clearer description
-    # objects = [o.label + ": " + o.name for o in room.all_objects if not isinstance(o, Gate)]
-    objects = [o.name for o in sorted([o for o in room.all_objects if not isinstance(o, Gate)], key=lambda x: x.label) ]
+    # objects = [o.label + ": " + o.name + "(has facing direction)" if o.has_orientation else "" for o in room.all_objects if not isinstance(o, Gate)]
+    objects = [o.label + ": " + o.name  for o in room.all_objects if not isinstance(o, Gate)]
+    # objects = [o.name for o in sorted([o for o in room.all_objects if not isinstance(o, Gate)], key=lambda x: x.label) ]
     gates = [o.name for o in room.all_objects if isinstance(o, Gate)]
 
     desc = f"Imagine {room_type}: {', '.join(room_names)}. You are currently in room {agent.room_id}. You face north."

@@ -12,11 +12,12 @@ Represent the scene as a JSON map.
 
 ### Schema (shared)
 - position: [x, y] integers (or integer-like)
-- facing: use cardinal words ("north|south|east|west") for global/rooms frames; use axis signs ("+x|-x|+y|-y") for local frames
+- facing: "north|south|east|west" (global) or "+x|-x|+y|-y" (local/rooms)
 
 ### General rules (shared)
-- Coordinate frame MUST be explicit in the content.
-- Include only observed/known information, do not invent.
+- Include only observed objects.
+- Approximate positions to nearest integer.
+- MUST include facing key if the object has facing direction according to the label image that has two copies.
 """
 
 from ..utils.utils import THINK_LABEL, ANSWER_LABEL
@@ -41,7 +42,7 @@ COGMAP_INSTRUCTION_GLOBAL_ONLY = """\
 ## Cognitive Map — Global (specifics)
 
 - Grid: concise global map on an N×M grid.
-- Frame: origin [0,0] is your initial position; +Y is your initial facing direction (north).
+- Frame: origin [0,0] is your initial position; your initial facing direction is north.
 - Content: include all observed objects and gates; include the agent
 - Facing: use "north|south|east|west".
 
@@ -49,7 +50,7 @@ Example:
 ```json
 {
     "agent": {"position": [2, 3], "facing": "east"},
-    "chair": {"position": [2, 4], "facing": "north"}
+    "chair": {"position": [2, 4], "facing": "north"},
 }
 ```
 """
@@ -72,7 +73,7 @@ Example:
     "origin": "agent",
     "objects": {
       "chair": {"position": [0, 1], "facing": "-x"}
-    }
+    } 
 }
 ```
 """

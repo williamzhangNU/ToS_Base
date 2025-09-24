@@ -131,7 +131,7 @@ def evaluate_cognitive_maps_from_turnlogs(
                         per_turn_types = ['global']
                     else:
                         per_turn_types = ['local', 'global']
-                    final_only_types = ['rooms', 'relations'] if turn_log['is_last_exp'] else []
+                    final_only_types = ['rooms'] if turn_log['is_last_exp'] else []
                     for map_type in per_turn_types + final_only_types:
                         msgs = [m.copy() for m in messages]
                         enable_think = bool(env_config.get('prompt_config', {}).get('enable_think', True))
