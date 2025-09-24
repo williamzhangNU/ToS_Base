@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Dict
 
-from ...core.room import BaseRoom
+from ...core.room import BaseRoom, Object, Gate
 from ...core.relationship import (
     PairwiseRelationshipDiscrete,
     CardinalBinsAllo,
@@ -10,8 +10,8 @@ from .types import MapCogMetrics
 
 
 def compute_dir_sim(pred_room: BaseRoom, gt_room: BaseRoom) -> float:
-    pred = {o.name: o for o in pred_room.objects}
-    gt = {o.name: o for o in gt_room.objects}
+    pred = {o.name: o for o in pred_room.objects} | {'initial': Object(name='initial', pos=np.array([0.0, 0.0]), ori=np.array([0.0, 1.0]))}
+    gt = {o.name: o for o in gt_room.objects} | {'initial': Object(name='initial', pos=np.array([0.0, 0.0]), ori=np.array([0.0, 1.0]))}
     names = sorted(gt.keys())
     if len(names) < 2:
         return 1.0
@@ -37,7 +37,7 @@ def compute_facing_sim(pred_room: BaseRoom, gt_room: BaseRoom) -> float:
     tot = cor = 0.0
     for name in names:
         g = gt[name]
-        if not g.has_orientation:
+        if not g.has_orientation or "door" in g.name:
             continue
         p = pred.get(name)
         tot += 1.0
