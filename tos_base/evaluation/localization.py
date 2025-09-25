@@ -185,6 +185,7 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
                     if choice_text not in seen:
                         out.append(choice_text); seen.add(choice_text)
 
+        self.np_random.shuffle(out)
         return out, out.index(correct_text)
 
 

@@ -203,6 +203,11 @@ class AgentProxy:
         acts.append(obs)
         self._update_known_from_observe(obs)
         self._add_turn(acts)
+        # Log this turn for info gain metrics
+        try:
+            self.mgr._log_exploration(acts)
+        except Exception:
+            pass
 
     def _unknown_nodes_in_room(self, rid: int) -> Set[str]:
         return self.nodes_by_room.get(rid, set()) - self.known_nodes_by_room.get(rid, set())
@@ -849,7 +854,7 @@ def get_agent_proxy(name: str, room: Room, agent: Agent, grid_size: int | None =
     """
     assert name in ['scout', 'strategist', 'oracle'], f"Invalid agent proxy name: {name}"
     if name == 'scout':
-        return OracleAgentProxy(room, agent, grid_size=grid_size)
+        return StrategistAgentProxy(room, agent, grid_size=grid_size)
     elif name == 'strategist':
         return AnalystAgentProxy(room, agent, delegate='candidate_planner', observer_delegate='strategist', grid_size=grid_size)
     elif name == 'oracle':
@@ -857,52 +862,53 @@ def get_agent_proxy(name: str, room: Room, agent: Agent, grid_size: int | None =
 
 
 if __name__ == "__main__":
-    from ..utils.room_utils import RoomGenerator, RoomPlotter
-    from collections import defaultdict
+    import os, json
     from tqdm import tqdm
+    from ..utils.room_utils import initialize_room_from_json
 
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'room_data'))
+    runs = [f"run{idx:02d}" for idx in range(100)]
 
-    def multiple_runs(n_runs: int, proxy_name: str):
-        action_counts, action_costs, edge_coverages, node_coverages, qualities = [], [], [], [], []
-        for seed in tqdm(range(n_runs), desc=f'Running experiments for {proxy_name}'):
-            room, agent = RoomGenerator.generate_room(
-                room_size=[15, 15],
-                n_objects=8,
-                np_random=np.random.default_rng(seed),
-                level=2,
-                main=4
-            )
-            # RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
-            proxy = get_agent_proxy(proxy_name, room, agent)
-            proxy.run()
-            # print(proxy.to_text())
-            summary = proxy.mgr.get_exp_summary()
-            quality = summary.get('avg_info_gain', 0.0)
-            action_count, action_cost, edge_coverage, node_coverage = summary['action_counts'], summary['action_cost'], summary['edge_coverage'], summary['node_coverage']
-        
-            action_counts.append(action_count)
-            action_costs.append(action_cost)
-            edge_coverages.append(edge_coverage)
-            node_coverages.append(node_coverage)
-            qualities.append(quality)
-        return action_counts, action_costs, edge_coverages, node_coverages, qualities
+    scout_cost, strategist_cost, n = 0.0, 0.0, 0
+    strat_info_lists, scout_info_lists = [], []
+    scout_counts_sum, strat_counts_sum = {}, {}
+    for r in tqdm(runs, desc="Processing environments"):
+        meta = os.path.join(root, r, 'meta_data.json')
+        if not os.path.isfile(meta):
+            continue
+        with open(meta, 'r') as f:
+            data = json.load(f)
+        room, agent = initialize_room_from_json(data)
+        scout = get_agent_proxy('scout', room, agent)
+        scout.run()
+        scout_cost += scout.mgr.get_exp_summary().get('action_cost', 0.0)
+        scout_info_lists.append(scout.mgr.get_exp_summary().get('info_gain_list', []) or [])
+        s_counts = scout.mgr.get_exp_summary().get('action_counts', {}) or {}
+        for k, v in s_counts.items():
+            scout_counts_sum[k] = scout_counts_sum.get(k, 0.0) + float(v)
+        room2, agent2 = initialize_room_from_json(data)
+        strat = get_agent_proxy('strategist', room2, agent2)
+        strat.run()
+        strategist_cost += strat.mgr.get_exp_summary().get('action_cost', 0.0)
+        strat_info_lists.append(strat.mgr.get_exp_summary().get('info_gain_list', []) or [])
+        t_counts = strat.mgr.get_exp_summary().get('action_counts', {}) or {}
+        for k, v in t_counts.items():
+            strat_counts_sum[k] = strat_counts_sum.get(k, 0.0) + float(v)
+        n += 1
 
-    # Calculate average action counts per action type
-    action_counts: list = []
-    action_costs: list = []
-    edge_coverages: list = []
-    node_coverages: list = []
-    qualities: list = []
-    action_counts, action_costs, edge_coverages, node_coverages, qualities = multiple_runs(10, 'strategist')
-    if action_counts:
-        avg_action_counts = defaultdict(float)
-        for action_count in action_counts:
-            for action_name, count in action_count.items():
-                avg_action_counts[action_name] += count
-        for action_name in avg_action_counts:
-            avg_action_counts[action_name] /= len(action_counts)
-        print(f"Average Action Counts: {avg_action_counts}")
-        print(f"Average Action Cost: {sum(action_costs) / len(action_costs)}")
-        print(f"Average Edge Coverage: {sum(edge_coverages) / len(edge_coverages)}")
-        print(f"Average Node Coverage: {sum(node_coverages) / len(node_coverages)}")
-        print(f"Average Quality: {sum(qualities) / len(qualities)}")
+    if n > 0:
+        print(f"Envs: {n}")
+        print(f"Avg action cost (scout): {scout_cost / n:.3f}")
+        print(f"Avg action cost (strategist): {strategist_cost / n:.3f}")
+        avg_info = ExplorationManager._avg_lists_carry_forward(strat_info_lists)
+        print(f"Avg info gain per step (strategist): {[round(x, 4) for x in avg_info]}")
+
+        avg_info = ExplorationManager._avg_lists_carry_forward(scout_info_lists)
+        print(f"Avg info gain per step (scout): {[round(x, 4) for x in avg_info]}")
+        if n > 0:
+            avg_scout_counts = {k: scout_counts_sum.get(k, 0.0) / n for k in sorted(scout_counts_sum.keys())}
+            avg_strat_counts = {k: strat_counts_sum.get(k, 0.0) / n for k in sorted(strat_counts_sum.keys())}
+            print(f"Avg action counts (scout): {avg_scout_counts}")
+            print(f"Avg action counts (strategist): {avg_strat_counts}")
+    else:
+        print("No environments found.")

@@ -880,18 +880,73 @@ class CognitiveMapManager:
 
             return False, key
 
-        # --- Global: keep observed + gates + agent; drop initial_pos ---
+        def _flatten_nested_json(jd: Dict[str, Any]) -> Dict[str, Any]:
+            """Convert nested JSON format (objects/gates arrays) to flat format."""
+            if not (isinstance(jd, dict) and ("objects" in jd or "gates" in jd)):
+                return jd
+                
+            flat = {}
+
+            # keep other top-level dict entries (e.g., "agent")
+            for k, v in jd.items():
+                if k in ("objects", "gates"):
+                    continue
+                if isinstance(v, dict):
+                    flat[str(k).replace('_', ' ')] = v
+
+            def _norm_name(x):
+                s = x.get("label") or x.get("name") or x.get("id") or x.get("type") or ""
+                s = str(s).strip()
+                return s.replace("_", " ") if s else ""
+
+            def _emit(name, info):
+                if not name:
+                    return
+                # require a position-like field
+                pos = info.get("position") or info.get("pos") or info.get("xy")
+                if pos is None:
+                    return
+                out = {"position": pos}
+                if "facing" in info:
+                    out["facing"] = info["facing"]
+                # keep other fields, but don't clobber position/facing
+                for k, v in info.items():
+                    if k not in ("position", "pos", "xy", "facing", "id", "label", "name", "type"):
+                        out[k] = v
+                flat[name] = out
+
+            def _add(sec):
+                if isinstance(sec, list):
+                    for it in sec:
+                        if isinstance(it, dict):
+                            _emit(_norm_name(it), it)
+                elif isinstance(sec, dict):
+                    for name, info in sec.items():
+                        if isinstance(info, dict):
+                            _emit(str(name).replace('_', ' '), info)
+
+            _add(jd.get("objects"))
+            _add(jd.get("gates"))
+            return flat or jd
+
+        # --- Global: keep observed + gates + agent; also handle list-based sections ---
         if map_type == "global":
+            # Flatten {"objects":[...], "gates":[...]} into {name: {position, facing, ...}}
+            jd = _flatten_nested_json(jd)
             keep = set(observed) | gate_names | {"agent"}
             jd = _norm_map(jd, keep)
             return self._parse_section_to_baseroom(jd, "pred_global") or BaseRoom(objects=[], name="pred_global")
 
         if map_type == "false_belief":
+            # Handle nested format same as global
+            jd = _flatten_nested_json(jd)
             # keep all objects
             jd = _norm_map(jd, observed)
             return self._parse_section_to_baseroom(jd, "pred_false_belief") or BaseRoom(objects=[], name="pred_false_belief")
         # --- Local: drop origin + keep only visible objects ---
         if map_type == "local":
+            # Handle nested format if present
+            jd = _flatten_nested_json(jd)
             if "objects" in jd:
                 jd = jd["objects"]
             jd = _norm_map(jd, visible, gt_agent.ori)
@@ -907,6 +962,8 @@ class CognitiveMapManager:
                 except Exception:
                     print(f"Error parsing room id: {rid}")
                     continue
+                # Handle nested format within each room section
+                sec = _flatten_nested_json(sec)
                 inner = sec.get("objects", sec)  # sometimes wrapped in {"origin":..., "objects":{...}}
                 keep = {
                     n

@@ -72,7 +72,7 @@ def compute_pos_sim(pred_room: BaseRoom, gt_room: BaseRoom, allow_scale: bool, p
 
 
 def compute_overall(dir_sim: float, facing_sim: float, pos_sim: float) -> float:
-    return 0.5 * dir_sim + 0.2 * facing_sim + 0.3 * pos_sim
+    return (dir_sim + facing_sim + pos_sim) / 3.0
 
 
 def compute_map_metrics(pred_room: BaseRoom, gt_room: BaseRoom, allow_scale: bool, pos_norm_L: float | None) -> MapCogMetrics:
