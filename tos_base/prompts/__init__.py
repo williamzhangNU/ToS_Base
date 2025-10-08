@@ -1,1 +1,1 @@
-from .prompter import Prompter
+from .prompter import PromptManager

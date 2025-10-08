@@ -11,7 +11,23 @@ from ..core.relationship import (
 from .prompts import *
 from ..utils.utils import THINK_LABEL, ANSWER_LABEL
 
-class Prompter:
+class PromptManager:
+    @staticmethod
+    def system_prompt() -> str:
+        return "You are an AI assistant that answers visual questions based on images."
+
+    # Simple env message helpers
+    def invalid_action_message(self) -> str:
+        return "Invalid action. You should provide only one final action"
+
+    def invalid_format_message(self) -> str:
+        return "Invalid output format."
+
+    def steps_left_message(self, remaining_steps: int) -> str:
+        return f"You have a maximum of {remaining_steps} exploration steps left."
+
+    def task_finished_message(self) -> str:
+        return "Task finished"
     # Dynamic, reusable format blocks
     def _build_format_rules(self, is_exploration: bool) -> str:
         if self.enable_think:
