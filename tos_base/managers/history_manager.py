@@ -38,6 +38,7 @@ class HistoryManager:
         self.messages: List[Dict] = []
         self.run_seed: int | None = None
         self.exp_type = observation_config['exp_type']
+        self.enable_think = bool(((observation_config or {}).get('prompt_config') or {}).get('enable_think', False))
         self.model_path= HistoryManager.get_model_dir(output_dir, model_config)
         self.sample_path = os.path.join(self.model_path,self._generate_room_key(room_dict, agent_dict))
         self.output_dir = os.path.abspath(os.path.join(
@@ -429,10 +430,8 @@ class HistoryManager:
         state = {
             "observation_config": {
                 "render_mode": os.path.basename(os.path.dirname(os.path.dirname(self.output_dir))),
-                "exp_type": os.path.basename(os.path.dirname(self.output_dir)),
-                "prompt_config": {
-                    "enable_think": os.path.basename(self.output_dir) == "think" or os.path.basename(os.path.dirname(self.output_dir)) == "think"
-                },
+                "exp_type": self.exp_type,
+                "prompt_config": {"enable_think": bool(self.enable_think)},
             },
             "model_config": json.load(open(self.model_config_path)) if os.path.exists(self.model_config_path) else {},
             "room_dict": json.load(open(self.sample_config_path)).get("room_dict", {}) if os.path.exists(self.sample_config_path) else {},
@@ -469,3 +468,10 @@ class HistoryManager:
     def set_run_seed(self, seed: int | None) -> None:
         self.run_seed = None if seed is None else int(seed)
 
+    # -------- Accessors for builder/inference --------
+    def get_enable_think(self) -> bool:
+        return bool(self.enable_think)
+
+    def get_observation_config(self) -> Dict:
+        with open(self.state_path, "r") as f:
+            return (json.load(f) or {}).get("observation_config", {})

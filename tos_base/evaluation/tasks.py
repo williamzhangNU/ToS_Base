@@ -59,6 +59,28 @@ class EvaluationData:
         return cls(**data)
 
 
+# ---- Lightweight evaluation helper for offline/builder usage ----
+def evaluate_from_dict(eval_data_dict: Dict[str, Any], user_answer: Any) -> tuple[bool, Dict[str, Any]]:
+    """Evaluate a user's answer given a serialized EvaluationData dict.
+
+    Keeps behavior identical to EvaluationData.evaluate used in env runtime.
+    """
+    try:
+        data = EvaluationData.from_dict(eval_data_dict)
+    except Exception:
+        # Fallback: minimal dict support
+        data = EvaluationData(
+            id=str(eval_data_dict.get('id', '')),
+            question=str(eval_data_dict.get('question', '')),
+            answer=str(eval_data_dict.get('answer', '')),
+            action=eval_data_dict.get('action'),
+            task_type=str(eval_data_dict.get('task_type', '')),
+            choices=list(eval_data_dict.get('choices', []) or []),
+            kwargs=dict(eval_data_dict.get('kwargs', {}) or {}),
+        )
+    return data.evaluate(user_answer)
+
+
 class BaseEvaluationTask(ABC):
     """Abstract base class for all spatial evaluation tasks."""
     
