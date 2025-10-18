@@ -46,6 +46,7 @@ class HistoryManager:
             observation_config['exp_type'],
             "think" if observation_config['prompt_config']["enable_think"] else "nothink",
         ))
+        self.observation_config = observation_config
         if observation_config['exp_type'] == 'passive':
             self.output_dir = os.path.join(self.output_dir, observation_config["proxy_agent"])
         self.exploration_path = os.path.join(self.output_dir, EXPLORATION_LOG_BASENAME)
@@ -428,9 +429,10 @@ class HistoryManager:
         """Persist minimal state to reload this HistoryManager later without reconstruction."""
         state = {
             "observation_config": {
-                "render_mode": os.path.basename(os.path.dirname(os.path.dirname(self.output_dir))),
+                "render_mode": self.observation_config['render_mode'],
                 "exp_type": self.exp_type,
                 "prompt_config": {"enable_think": bool(self.enable_think)},
+                "proxy_agent": self.observation_config['proxy_agent'] if self.exp_type == 'passive' else None,
             },
             "model_config": json.load(open(self.model_config_path)) if os.path.exists(self.model_config_path) else {},
             "room_dict": json.load(open(self.sample_config_path)).get("room_dict", {}) if os.path.exists(self.sample_config_path) else {},

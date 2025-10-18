@@ -161,8 +161,8 @@ class PromptManager:
         }
 
         obs_str = template.format(**fmt_kwargs)
-        if not is_active:
-            obs_str += f"\n{self.get_evaluation_prompt(eval_manager)}"
+        # if not is_active:
+        #     obs_str += f"\n{self.get_evaluation_prompt(eval_manager)}"
         if is_vision:
             obs['multi_modal_data'] = {self.config.image_placeholder: images}
 
