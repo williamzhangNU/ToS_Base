@@ -40,9 +40,8 @@ class HistoryManager:
         self.exp_type = observation_config['exp_type']
         self.enable_think = bool(((observation_config or {}).get('prompt_config') or {}).get('enable_think', False))
         self.model_path= HistoryManager.get_model_dir(output_dir, model_config)
-        self.sample_path = os.path.join(self.model_path,self._generate_room_key(room_dict, agent_dict))
         self.output_dir = os.path.abspath(os.path.join(
-            self.sample_path,
+            self.model_path, self._generate_room_key(room_dict, agent_dict),
             observation_config['render_mode'],
             observation_config['exp_type'],
             "think" if observation_config['prompt_config']["enable_think"] else "nothink",
@@ -52,7 +51,7 @@ class HistoryManager:
         self.exploration_path = os.path.join(self.output_dir, EXPLORATION_LOG_BASENAME)
         self.evaluation_path = os.path.join(self.output_dir, EVALUATION_LOG_BASENAME)
         self.model_config_path = os.path.join(self.model_path, CONFIG_BASENAME)
-        self.sample_config_path = os.path.join(self.sample_path, CONFIG_BASENAME)
+        self.sample_config_path = os.path.join(self.output_dir, CONFIG_BASENAME)
         self.metrics_path = os.path.join(self.output_dir, METRICS_BASENAME)
         self.messages_path = os.path.join(self.output_dir, MESSAGES_BASENAME)
         self.eval_tasks_dir = os.path.join(self.output_dir, EVAL_TASKS_DIRNAME)
@@ -443,7 +442,7 @@ class HistoryManager:
         with open(self.state_path, "w") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
 
-    @classmethod
+    @staticmethod
     def load_from_dir(combo_dir: str) -> "HistoryManager":
         """Load a HistoryManager using state saved in combo_dir/history_state.json."""
         combo_dir = os.path.abspath(combo_dir)
