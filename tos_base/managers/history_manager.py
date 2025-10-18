@@ -443,7 +443,7 @@ class HistoryManager:
             json.dump(state, f, ensure_ascii=False, indent=2)
 
     @staticmethod
-    def load_from_dir(combo_dir: str) -> "HistoryManager":
+    def load_from_dir(combo_dir: str, eval_override: bool) -> "HistoryManager":
         """Load a HistoryManager using state saved in combo_dir/history_state.json."""
         combo_dir = os.path.abspath(combo_dir)
         state_file = os.path.join(combo_dir, STATE_BASENAME)
@@ -457,7 +457,7 @@ class HistoryManager:
             agent_dict=s.get("agent_dict", {}),
             output_dir=s.get("base_output_dir", os.path.dirname(os.path.dirname(os.path.dirname(combo_dir)))),
             image_dir=s.get("image_dir"),
-            eval_override=False,
+            eval_override=eval_override,
             all_override=False,
             task_type=None,
         )
@@ -465,7 +465,7 @@ class HistoryManager:
         return hm
 
     def set_run_seed(self, seed: int | None) -> None:
-        self.run_seed = None if seed is None else int(seed)
+        self.run_seed = 0
 
     # -------- Accessors for builder/inference --------
     def get_enable_think(self) -> bool:
