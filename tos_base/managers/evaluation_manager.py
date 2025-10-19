@@ -24,7 +24,6 @@ class EvaluationTurnLog:
         evaluation_data = self.evaluation_data.to_dict()
         if "question" in evaluation_data:
             evaluation_data.pop("question")
-        evaluation_data['choices'] = '\n'.join([f"{chr(65+i)}. {choice}" for i, choice in enumerate(evaluation_data['choices'])])
         return {
             "task_type": self.task_type,
             "user_answer": self.user_answer,

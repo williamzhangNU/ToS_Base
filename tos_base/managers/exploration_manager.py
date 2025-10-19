@@ -1,6 +1,6 @@
 import copy
 from copy import deepcopy
-from typing import List, Tuple, Dict, Any, Optional, Set
+from typing import List, Tuple, Dict, Any, Optional, Set, TYPE_CHECKING
 import numpy as np
 from dataclasses import dataclass
 from collections import defaultdict
@@ -8,9 +8,13 @@ from collections import defaultdict
 import random
 
 from ..core.object import Agent
-from ..actions import *
 from ..core.room import Room
 from .spatial_solver import SpatialSolver
+
+if TYPE_CHECKING:
+    from ..actions import ActionSequence
+    
+from ..actions import *
 
 @dataclass
 class ExplorationTurnLog:
@@ -128,7 +132,7 @@ class ExplorationManager:
         assert result.success, f"Action {action} with kwargs {kwargs} failed: {result.message}"
         return result
 
-    def execute_action_sequence(self, action_sequence: ActionSequence) -> List[ActionResult]:
+    def execute_action_sequence(self, action_sequence: 'ActionSequence') -> List[ActionResult]:
         """
         Execute a sequence of motion actions followed by a final action.
         If any motion action fails, execute an observe action and end.
