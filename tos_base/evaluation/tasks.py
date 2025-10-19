@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from functools import wraps
 
 from ..core.room import Room
-from ..core.object import Agent, Object
-from ..utils.eval_utilities import multi_choice_eval_fn
+from ..core.object import Agent
+from ..utils.eval_utilities import evaluate_task_answer
 from ..actions import RotateAction, ObserveAction
 from ..utils.action_utils import action_results_to_text
 from ..core.relationship import (
@@ -23,11 +23,11 @@ from ..utils.utils import hash
 class EvaluationData:
     id: str
     question: str
-    answer: str
+    answer: Any
     task_type: str
-    action: str = None
-    choices: List[str] = None
-    kwargs: Dict = None
+    action: Optional[str] = None
+    choices: Optional[List[str]] = None
+    kwargs: Optional[Dict] = None
 
     def __post_init__(self):
         # Lazy import to avoid circular dependency during module import
@@ -38,8 +38,7 @@ class EvaluationData:
             self.choices = []
     
     def evaluate(self, pred: Any) -> Tuple[bool, Dict[str, Any]]:
-        """Evaluate an answer to the given question using multi-choice evaluation"""
-        return multi_choice_eval_fn(pred, self.answer), {}
+        return evaluate_task_answer(self.task_type, pred, self.answer, self.choices)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert the evaluation data to a dictionary"""
@@ -57,6 +56,28 @@ class EvaluationData:
     def from_dict(cls, data: Dict[str, Any]) -> 'EvaluationData':
         """Initialize the evaluation data from a dictionary"""
         return cls(**data)
+
+
+# ---- Lightweight evaluation helper for offline/builder usage ----
+def evaluate_from_dict(eval_data_dict: Dict[str, Any], user_answer: Any) -> tuple[bool, Dict[str, Any]]:
+    """Evaluate a user's answer given a serialized EvaluationData dict.
+
+    Keeps behavior identical to EvaluationData.evaluate used in env runtime.
+    """
+    try:
+        data = EvaluationData.from_dict(eval_data_dict)
+    except Exception:
+        # Fallback: minimal dict support
+        data = EvaluationData(
+            id=str(eval_data_dict.get('id', '')),
+            question=str(eval_data_dict.get('question', '')),
+            answer=eval_data_dict.get('answer', ''),
+            action=eval_data_dict.get('action'),
+            task_type=str(eval_data_dict.get('task_type', '')),
+            choices=list(eval_data_dict.get('choices', []) or []),
+            kwargs=dict(eval_data_dict.get('kwargs', {}) or {}),
+        )
+    return data.evaluate(user_answer)
 
 
 class BaseEvaluationTask(ABC):
@@ -94,11 +115,6 @@ class BaseEvaluationTask(ABC):
     def format_choices(self, choices: List[str], correct_index: int) -> Tuple[str, str]:
         """Format choices as lines and return (choices_text, correct_label)."""
         return "\n".join([f"{chr(65+i)}. {choice}" for i, choice in enumerate(choices)]), chr(65 + correct_index)
-    
-    @abstractmethod
-    def generate_choices(self, correct_answer: Any) -> Tuple[List[str], int]:
-        """Return (choices, correct_index)."""
-        raise NotImplementedError
     
     @abstractmethod
     def generate_question(self) -> str:
