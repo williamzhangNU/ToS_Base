@@ -496,22 +496,7 @@ class RoomPlotter:
         return imageio.v2.imread(buf)
 
 
-def get_topdown_info(room: Room, agent: Agent) -> str:
-    mapping = {(0, 1): "north", (0, -1): "south", (1, 0): "east", (-1, 0): "west"}
-    lines = [f"Agent at ({agent.pos[0]}, {agent.pos[1]}) facing {mapping[tuple(agent.ori)]}"]
-    for obj in room.all_objects:
-        if isinstance(obj, Gate):
-            rs = obj.room_id if isinstance(obj.room_id, (list, tuple)) else [obj.room_id]
-            rooms = [int(r) for r in rs]
-            gate_ori_info = f'on east-west wall' if mapping[tuple(obj.ori)] in ('north', 'south') else f'on north-south wall'
-            obj_info = f"Gate: {obj.name} at ({obj.pos[0]}, {obj.pos[1]}) {gate_ori_info}, connects rooms {rooms}"
-        else:
-            obj_info = f"Object: {obj.name} at ({obj.pos[0]}, {obj.pos[1]}) facing {mapping[tuple(obj.ori)]}"
-        lines.append(obj_info)
-    return "\n".join(lines)
-
-
-def get_room_description(room: Room, agent: Agent, with_topdown: bool = False) -> str:
+def get_room_description(room: Room, agent: Agent) -> str:
     # Get room information
     if hasattr(room, 'mask') and room.mask is not None:
         room_ids = [int(rid) for rid in np.unique(room.mask) if 1 <= int(rid) < 100]
@@ -535,8 +520,6 @@ def get_room_description(room: Room, agent: Agent, with_topdown: bool = False) -
     desc += f"\nObjects: {', '.join(objects)}" if objects else ""
     desc += f"\nDoors: {', '.join(gates)}" if gates else ""
 
-    if with_topdown:
-        desc += "\n" + get_topdown_info(room, agent)
     return desc
 
 def initialize_room_from_json(json_data: Dict[str, Any]) ->  Tuple[Room, Agent]:

@@ -30,13 +30,13 @@ class HistoryManager:
     Example: gpt-4o/1d54fa/vision/active/
     """
 
-    def __init__(self, observation_config: Dict, model_config: Dict , room_dict: Dict, agent_dict: Dict, output_dir:str, 
+    def __init__(self, observation_config: Dict, model_config: Dict , room_dict: Dict, agent_dict: Dict, output_dir:str, seed: int,
                  image_dir:str = None, eval_override: bool = False, all_override: bool = False, task_type: str = None):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.evaluation_turn_logs: Dict[str, Dict[str, Dict]] = {}
         self.messages: List[Dict] = []
-        self.run_seed: int | None = None
+        self.seed: int  = seed
         self.exp_type = observation_config['exp_type']
         self.enable_think = bool(((observation_config or {}).get('prompt_config') or {}).get('enable_think', False))
         self.model_path= HistoryManager.get_model_dir(output_dir, model_config)
@@ -55,7 +55,6 @@ class HistoryManager:
         self.sample_config_path = os.path.join(self.output_dir, CONFIG_BASENAME)
         self.metrics_path = os.path.join(self.output_dir, METRICS_BASENAME)
         self.messages_path = os.path.join(self.output_dir, MESSAGES_BASENAME)
-        self.eval_tasks_dir = os.path.join(self.output_dir, EVAL_TASKS_DIRNAME)
         self.state_path = os.path.join(self.output_dir, STATE_BASENAME)
 
         # Apply granular overrides
@@ -70,7 +69,6 @@ class HistoryManager:
 
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(os.path.join(self.output_dir, IMAGES_DIRNAME), exist_ok=True)
-        os.makedirs(self.eval_tasks_dir, exist_ok=True)
         if not os.path.exists(self.model_config_path):
             with open(self.model_config_path, "w") as f:
                 json.dump(model_config, f, ensure_ascii=False, indent=2)
@@ -209,10 +207,6 @@ class HistoryManager:
             self.evaluation_turn_logs[task_type] = {}
         self.evaluation_turn_logs[task_type][question_id] = turn_log
 
-        # Save per-question evaluation turn log
-        file_path = os.path.join(self.eval_tasks_dir, f"{question_id}.json")
-        self._save_json(file_path, turn_log)
-
     def update_turn_log(self, turn_log: Dict) -> None:
         """Dispatch to specific update functions (kept for compatibility)."""
         if turn_log['is_exploration_phase']:
@@ -250,6 +244,10 @@ class HistoryManager:
     def has_question(self, question_id: str) -> bool:
         """Check if a question with the given ID already exists in evaluation logs"""
         return any(question_id in questions for questions in self.evaluation_turn_logs.values())
+
+    def get_eval_ids(self) -> Dict[str, int]:
+        """Return list of completed eval question IDs per task class name."""
+        return {task_type: [question["evaluation_log"]["evaluation_data"]['id'] for question in questions.values()] for task_type, questions in self.evaluation_turn_logs.items()}
 
     def get_eval_counts(self) -> Dict[str, int]:
         """Return number of completed eval questions per task class name."""
@@ -439,7 +437,7 @@ class HistoryManager:
             "agent_dict": json.load(open(self.sample_config_path)).get("agent_dict", {}) if os.path.exists(self.sample_config_path) else {},
             "image_dir": json.load(open(self.sample_config_path)).get("image_dir") if os.path.exists(self.sample_config_path) else None,
             "base_output_dir": os.path.dirname(self.model_path),
-            "run_seed": self.run_seed,
+            "seed": self.seed,
         }
         with open(self.state_path, "w") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
@@ -458,16 +456,14 @@ class HistoryManager:
             room_dict=s.get("room_dict", {}),
             agent_dict=s.get("agent_dict", {}),
             output_dir=s.get("base_output_dir", os.path.dirname(os.path.dirname(os.path.dirname(combo_dir)))),
+            seed=s.get("seed", 0),
             image_dir=s.get("image_dir"),
             eval_override=eval_override,
             all_override=False,
             task_type=None,
         )
-        hm.run_seed = s.get("run_seed")
         return hm
 
-    def set_run_seed(self, seed: int | None) -> None:
-        self.run_seed = 0
 
     # -------- Accessors for builder/inference --------
     def get_enable_think(self) -> bool:

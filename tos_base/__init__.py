@@ -44,7 +44,7 @@ from .evaluation.tasks import BaseEvaluationTask
 from .evaluation.task_types import EvalTaskType
 
 # Utilities
-from .utils.room_utils import RoomGenerator, get_topdown_info, get_room_description, RoomPlotter
+from .utils.room_utils import RoomGenerator, get_room_description, RoomPlotter
 from .utils.eval_utilities import *
 
 __all__ = [
@@ -64,5 +64,5 @@ __all__ = [
     'BaseEvaluationTask', 'EvalTaskType',
     
     # Utils
-    'RoomGenerator', 'get_topdown_info', 'get_room_description', 'RoomPlotter',
+    'RoomGenerator',  'get_room_description', 'RoomPlotter',
 ]
