@@ -31,7 +31,7 @@ class HistoryManager:
     """
 
     def __init__(self, observation_config: Dict, model_config: Dict , room_dict: Dict, agent_dict: Dict, output_dir:str, seed: int,
-                 image_dir:str = None, eval_override: bool = False, all_override: bool = False, task_type: str = None):
+                 image_dir:str = None, eval_override: bool = False, all_override: bool = False, all_tasks: List = None):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.evaluation_turn_logs: Dict[str, Dict[str, Dict]] = {}
@@ -39,7 +39,7 @@ class HistoryManager:
         self.seed: int  = seed
         self.exp_type = observation_config['exp_type']
         self.enable_think = bool(((observation_config or {}).get('prompt_config') or {}).get('enable_think', False))
-        self.model_path= HistoryManager.get_model_dir(output_dir, model_config)
+        self.model_path = HistoryManager.get_model_dir(output_dir, model_config['model_name'])
         self.output_dir = os.path.abspath(os.path.join(
             self.model_path, self._generate_room_key(room_dict, agent_dict),
             observation_config['render_mode'],
@@ -63,11 +63,16 @@ class HistoryManager:
                 shutil.rmtree(self.output_dir)
 
         self._load()
-        if eval_override:
-            if task_type in self.evaluation_turn_logs:
-                self.evaluation_turn_logs[task_type] = {}
-
         os.makedirs(self.output_dir, exist_ok=True)
+        if eval_override:
+            from ..evaluation.task_types import EvalTaskType
+            task_map = EvalTaskType.get_task_map()
+            for task_type in all_tasks:
+                mapped_task = task_map.get(task_type).__name__
+                if mapped_task in self.evaluation_turn_logs:
+                    self.evaluation_turn_logs[mapped_task] = {}
+            self.save_evaluation()
+            
         os.makedirs(os.path.join(self.output_dir, IMAGES_DIRNAME), exist_ok=True)
         if not os.path.exists(self.model_config_path):
             with open(self.model_config_path, "w") as f:
@@ -108,14 +113,14 @@ class HistoryManager:
         if self.exploration_turn_logs:
             with open(self.exploration_path, "w") as f:
                 json.dump(self.exploration_turn_logs, f, ensure_ascii=False, indent=2)
-
-    def save(self) -> None:
-        """Save env turn logs to JSON file"""
-        if self.exploration_turn_logs:
-            with open(self.exploration_path, "w") as f:
-                json.dump(self.exploration_turn_logs, f, ensure_ascii=False, indent=2)
+    def save_evaluation(self) -> None:
+        """Save evaluation turn logs to JSON file"""
         with open(self.evaluation_path, "w") as f:
             json.dump(self.evaluation_turn_logs, f, ensure_ascii=False, indent=2)
+    def save(self) -> None:
+        """Save env turn logs to JSON file"""
+        self.save_exploration()
+        self.save_evaluation()
         # Also compute and save metrics for this sample
         metrics = self._compute_sample_metrics()
         with open(self.metrics_path, "w") as f:
@@ -273,9 +278,9 @@ class HistoryManager:
     #     return os.path.join(output_dir, model_name)
 
     @staticmethod
-    def get_model_dir(output_dir: str, model_config: Dict) -> str:
+    def get_model_dir(output_dir: str, model_name: str) -> str:
         """Generate a unique directory name for the model configuration"""
-        model_name = model_config['model_name'].replace("/", "-")
+        model_name = model_name.replace("/", "-")
         return os.path.join(output_dir, model_name)
     
     @staticmethod
@@ -308,7 +313,7 @@ class HistoryManager:
             # Skip if subdirs is empty (invalid sample)
             if not subdirs:
                 continue
-            with open(os.path.join(sample_path, CONFIG_BASENAME), 'r') as f:
+            with open(os.path.join(subdirs[0], CONFIG_BASENAME), 'r') as f:
                 sample_cfg = json.load(f)
             sample_key = f"sample_{os.path.basename(sample_cfg['image_dir'])}"
             assert sample_key not in samples, f"Duplicate sample key {sample_key}"
@@ -443,7 +448,7 @@ class HistoryManager:
             json.dump(state, f, ensure_ascii=False, indent=2)
 
     @staticmethod
-    def load_from_dir(combo_dir: str, eval_override: bool) -> "HistoryManager":
+    def load_from_dir(combo_dir: str, eval_override: bool, all_tasks: List = None) -> "HistoryManager":
         """Load a HistoryManager using state saved in combo_dir/history_state.json."""
         combo_dir = os.path.abspath(combo_dir)
         state_file = os.path.join(combo_dir, STATE_BASENAME)
@@ -459,8 +464,7 @@ class HistoryManager:
             seed=s.get("seed", 0),
             image_dir=s.get("image_dir"),
             eval_override=eval_override,
-            all_override=False,
-            task_type=None,
+            all_tasks=all_tasks,
         )
         return hm
 
