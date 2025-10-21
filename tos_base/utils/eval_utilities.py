@@ -431,9 +431,12 @@ def _eval_direction_text(pred: str, answer: Union[str, Sequence[str]]) -> Tuple[
     if not parsed or not normalized_answer:
         return False, {}
     
+    # Canonicalize parsed prediction
+    normalized_pred = (_canonicalize_label(parsed[0]), _canonicalize_label(parsed[1]))
+    
     return (
-        _labels_match(parsed[0], normalized_answer[0]) and
-        _labels_match(parsed[1], normalized_answer[1])
+        _labels_match(normalized_pred[0], normalized_answer[0]) and
+        _labels_match(normalized_pred[1], normalized_answer[1])
     ), {}
 
 def _eval_coordinate_list(pred: str, answer: Sequence[Tuple[int, int]]) -> Tuple[bool, Dict[str, Any]]:
@@ -765,6 +768,7 @@ TASK_EVALUATORS: Dict[str, TaskEvaluator] = {
     'BackwardNavEvaluationTask': _wrap_eval(_eval_backward_nav, pred_cast=str, answer_cast=None),
     'ForwardLocEvaluationTask': _wrap_eval(_eval_forward_nav),
     'BackwardLocEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
+    'FalseBeliefDirectionPov': _wrap_eval(_eval_direction_text),
 }
 
 def evaluate_task_answer(
@@ -775,13 +779,13 @@ def evaluate_task_answer(
 ) -> Tuple[bool, Dict[str, Any]]:
     """Main entry point for task evaluation."""
     evaluator = TASK_EVALUATORS.get(task_type)
-    if evaluator:
-        return evaluator(pred, answer, choices)
+    assert evaluator is not None, f"Unknown task evaluator: {task_type}"
+    return evaluator(pred, answer, choices)
     
     # Fallback to multiple choice evaluation
-    if choices:
-        return _eval_multiple_choice(str(pred), str(answer), choices)
-    return _eval_multiple_choice(str(pred), str(answer), None)
+    # if choices:
+    #     return _eval_multiple_choice(str(pred), str(answer), choices)
+    # return _eval_multiple_choice(str(pred), str(answer), None)
 
 
 # ========== Exports ==========
