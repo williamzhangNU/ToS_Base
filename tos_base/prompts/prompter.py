@@ -104,6 +104,7 @@ class PromptManager:
             exp_instructions += f"\n\nYou have a maximum of {self.config.max_exp_steps} exploration steps."
         else:
             exp_history_str = f"## Exploration History\n{exp_history['obs_str']}" 
+        images_path = []
         if is_vision:
             images = [self.image_handler.get_image('instruction'), self.image_handler.get_image('label')]
             images_path = [self.image_handler.get_image_path('instruction'), self.image_handler.get_image_path('label')]
