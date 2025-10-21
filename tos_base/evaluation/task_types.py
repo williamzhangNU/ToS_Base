@@ -143,5 +143,5 @@ if __name__ == "__main__":
         task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
         print(task.generate_question(), task.answer)
         user_pred = task.answer
-        is_correct, info = EvalTaskType.evaluate_prediction(task_name, user_pred, task.answer, task.choices)
-        print(f"Evaluation result: {is_correct}, details: {info}")
+        score, info = EvalTaskType.evaluate_prediction(task_name, user_pred, task.answer, task.choices)
+        print(f"Evaluation result: {score}, details: {info}")

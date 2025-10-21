@@ -299,8 +299,8 @@ class BackwardNavEvaluationTask(BaseNavEvaluationTask):
         "You observe the following:\n"
         "{final_obs}\n\n"
         "What action sequence led to this final view?\n\n"
-        "Answer format: JumpTo(object1), JumpTo(object2), Rotate(degrees)\n"
-        "Example: JumpTo(lamp), JumpTo(chair), Rotate(90)\n"
+        "Answer format: use a valid action sequence\n"
+        "Example: Rotate(90), JumpTo(lamp), JumpTo(chair), Rotate(90)\n"
     )
 
     @retry_generate_question

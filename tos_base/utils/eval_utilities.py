@@ -471,9 +471,9 @@ def _eval_forward_nav(pred: str, answer: str) -> Tuple[bool, Dict[str, Any]]:
                 for obj, dir_, dist in ans_rels}
     
     correct = sum(1 for obj, rel in pred_dict.items() if obj in ans_dict and rel == ans_dict[obj])
-    is_correct = len(pred_dict) > 0 and correct == len(pred_dict) == len(ans_dict)
+    score = len(pred_dict) > 0 and correct == len(pred_dict) == len(ans_dict)
     
-    return is_correct, {'correct': correct, 'total': len(ans_dict)}
+    return score, {'correct': correct, 'total': len(ans_dict)}
 
 def _eval_backward_nav(pred: str, answer: Union[str, Dict]) -> Tuple[bool, Dict[str, Any]]:
     """Evaluate backward navigation task."""
@@ -540,7 +540,37 @@ def _eval_backward_nav(pred: str, answer: Union[str, Dict]) -> Tuple[bool, Dict[
     
     return False, best_info
 
-def _eval_backward_loc(pred: str, answer: Any) -> Tuple[bool, Dict[str, Any]]:
+def _calculate_coord_similarity(pred_coord: tuple[float, float], gt_coord: tuple[float, float]) -> float:
+    pred = np.array(pred_coord, dtype=float)
+    gt = np.array(gt_coord, dtype=float)
+
+    rmse = np.linalg.norm(pred - gt)
+    L = np.linalg.norm(gt)
+
+    if L == 0:
+        return 1.0 if rmse == 0 else 0.0
+    similarity_score = np.exp(-rmse / L)
+
+    return similarity_score
+
+def _score_similarity_mra_style(similarity: float) -> float:
+    similarity = max(0, min(1, similarity))
+    
+    quality_thresholds = [
+        0.50, 0.55, 0.60, 0.65, 0.70, 
+        0.75, 0.80, 0.85, 0.90, 0.95
+    ]
+    
+    passed_levels = 0
+    for threshold in quality_thresholds:
+        if similarity >= threshold:
+            passed_levels += 1
+            
+    final_score = passed_levels / len(quality_thresholds)
+    
+    return final_score
+
+def _eval_backward_loc(pred: str, answer: Any) -> Tuple[float, Dict[str, Any]]:
     """Evaluate backward localization task."""
     if not isinstance(answer, dict):
         return False, {}
@@ -556,23 +586,19 @@ def _eval_backward_loc(pred: str, answer: Any) -> Tuple[bool, Dict[str, Any]]:
     except ValueError:
         return False, {}
     
-    threshold = float(answer.get('threshold', _BACKWARD_LOC_DEFAULT_THRESHOLD))
     ori_ans = str(answer.get('orientation', '')).strip().lower()
-    
-    coord_diff = math.dist(coord_pred, coord_ans)
-    coord_ok = coord_diff <= threshold
+    similarity = _calculate_coord_similarity(coord_pred, coord_ans)
+    score = _score_similarity_mra_style(similarity)
     ori_ok = ori_pred == ori_ans
-    
-    return coord_ok and ori_ok, {
-        'coord_match': coord_ok,
+
+    return (score + ori_ok) / 2, {
         'orientation_match': ori_ok,
-        'coord_distance': coord_diff,
-        'coord_threshold': threshold,
+        'similarity': similarity,
     }
 
 
 # ========== E2A Evaluation ==========
-def e2a_eval_fn(pred: Any, answer: Any) -> Tuple[bool, Dict[str, Any]]:
+def e2a_eval_fn(pred: Any, answer: Any) -> Tuple[float, Dict[str, Any]]:
     """Evaluate E2A (Egocentric to Allocentric) coordinate prediction.
     
     Answer can be:
@@ -628,7 +654,7 @@ def e2a_eval_fn(pred: Any, answer: Any) -> Tuple[bool, Dict[str, Any]]:
     pos_norm_L = _coord_norm_from_gt(norm_coords)
     
     similarity = compute_pos_sim(pred_room, gt_room, allow_scale=False, pos_norm_L=pos_norm_L)
-    return similarity >= threshold, {'similarity': similarity, 'threshold': threshold}
+    return _score_similarity_mra_style(similarity), {'similarity': similarity, 'threshold': threshold}
 
 
 # ========== Public Helper Functions ==========
@@ -776,7 +802,7 @@ def evaluate_task_answer(
     pred: Any,
     answer: Any,
     choices: Optional[List[str]],
-) -> Tuple[bool, Dict[str, Any]]:
+) -> Tuple[float, Dict[str, Any]]:
     """Main entry point for task evaluation."""
     evaluator = TASK_EVALUATORS.get(task_type)
     assert evaluator is not None, f"Unknown task evaluator: {task_type}"

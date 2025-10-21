@@ -14,7 +14,7 @@ class EvaluationTurnLog:
     """Log data for a single evaluation turn."""
     task_type: str
     user_answer: str
-    is_correct: bool
+    score: bool
     evaluation_info: Dict[str, Any]
     evaluation_data: EvaluationData
     room_state: Optional['Room'] = None
@@ -28,7 +28,7 @@ class EvaluationTurnLog:
         return {
             "task_type": self.task_type,
             "user_answer": self.user_answer,
-            "is_correct": self.is_correct,
+            "score": self.score,
             "room_state": self.room_state.to_dict() if self.room_state else {},
             "agent_state": self.agent_state.to_dict() if self.agent_state else {},
             "evaluation_info": self.evaluation_info,
@@ -110,7 +110,7 @@ class EvaluationManager:
         turn_log = EvaluationTurnLog(
             task_type=task.__class__.__name__,
             user_answer=answer,
-            is_correct=correct,
+            score=correct,
             room_state=task.room,
             agent_state=task.agent,
             evaluation_info=info,
@@ -135,7 +135,7 @@ class EvaluationManager:
         total_tasks = len(self.tasks)
         answered_tasks = len(self.turn_logs)
         unanswered_count = total_tasks - answered_tasks
-        correct_count = sum(1 for log in self.turn_logs if log.is_correct)
+        correct_count = sum(1 for log in self.turn_logs if log.score)
         incorrect_count = answered_tasks - correct_count
         
         return {
@@ -158,19 +158,19 @@ class EvaluationManager:
         per_task = {}
         for task_type, questions in tasks.items():
             n_total = len(questions)
-            n_correct = sum(1 for q in questions.values() if q.get('evaluation_log', {}).get('is_correct'))
+            total_score = sum(q.get('evaluation_log', {}).get('score') for q in questions.values())
             per_task[task_type] = {
                 'n_total': n_total,
-                'n_correct': n_correct,
-                'avg_accuracy': (n_correct / n_total) if n_total else 0.0,
+                'total_score': total_score,
+                'avg_accuracy': (total_score / n_total) if n_total else 0.0,
             }
         # temp code, TODO
         filtered_per_task = {t: v for t, v in per_task.items() if t not in ['PovEvaluationTask', 'BackwardPovEvaluationTask', 'FalseBeliefDirectionPov', 'DirectionPov']}
 
         total = sum(v['n_total'] for v in filtered_per_task.values())
-        correct = sum(v['n_correct'] for v in filtered_per_task.values())
+        correct = sum(v['total_score'] for v in filtered_per_task.values())
         return {
-            'overall': {'n_total': total, 'n_correct': correct, 'avg_accuracy': (correct / total) if total else 0.0},
+            'overall': {'n_total': total, 'total_score': correct, 'avg_accuracy': (correct / total) if total else 0.0},
             'per_task': per_task,
         }
 
@@ -190,13 +190,13 @@ class EvaluationManager:
 
         per_samples = [((s.get('metrics') or {}).get('evaluation') or {}) for s in env_data_list]
         total_count = sum(int(m.get('overall',{}).get('n_total', 0)) for m in per_samples)
-        total_correct = sum(int(m.get('overall',{}).get('n_correct', 0)) for m in per_samples)
+        total_correct = sum(int(m.get('overall',{}).get('total_score', 0)) for m in per_samples)
         agg_task: Dict[str, Dict[str, int]] = {}
         for m in per_samples:
             for t, tm in (m.get('per_task') or {}).items():
                 d = agg_task.setdefault(t, {'total': 0, 'correct': 0})
                 d['total'] += int(tm.get('n_total', 0))
-                d['correct'] += int(tm.get('n_correct', 0))
+                d['correct'] += int(tm.get('total_score', 0))
         task_metrics = {t: {
             'accuracy': (v['correct'] / v['total']) if v['total'] else 0.0,
             'total_count': v['total'],

@@ -766,7 +766,7 @@ class HTMLGenerator:
                         details = {
                             **eval_info.get("evaluation_data", {}),
                             **eval_info.get("evaluation_info", {}),
-                            "Correct": eval_info.get("is_correct"),
+                            "score": float(eval_info.get("score")),
                         }
                         f.write(VisualizationHelper.dict_to_html(details))
                         f.write("</div>\n")
