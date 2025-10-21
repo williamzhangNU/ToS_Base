@@ -81,7 +81,7 @@ class PromptManager:
             room: Room,
             agent: Agent,
             exp_history = None
-        ) -> dict:
+        ) -> tuple:
         """
         Generates the initial observation prompt based on the exploration type.
         """
@@ -99,21 +99,20 @@ class PromptManager:
         if not is_vision:
             observation_instructions += f"\n{ProximityRelationship.prompt()}"
 
-        exp_instructions = ""
         if is_active:
             exp_instructions = f"Action Instructions:\n{ActionSequence.get_usage_instructions(is_vision)}"
             exp_instructions += f"\n\nYou have a maximum of {self.config.max_exp_steps} exploration steps."
-
-        images = None
+        else:
+            exp_history_str = f"## Exploration History\n{exp_history['obs_str']}" 
         if is_vision:
             images = [self.image_handler.get_image('instruction'), self.image_handler.get_image('label')]
+            images_path = [self.image_handler.get_image_path('instruction'), self.image_handler.get_image_path('label')]
             if not is_active:
                 images.extend(exp_history['multi_modal_data'][self.config.image_placeholder])
+                images_path.extend(exp_history['multi_modal_data_paths'])
+            obs['multi_modal_data'] = {self.config.image_placeholder: images}
 
-        exp_history_str = ""
-        if not is_active:
-            exp_history_str = f"## Exploration History\n{exp_history['obs_str']}" 
-
+        
         template = INSTRUCTION_TEMPLATE_VISION if is_vision else INSTRUCTION_TEMPLATE_TEXT
 
         fmt_kwargs = {
@@ -125,7 +124,7 @@ class PromptManager:
             ),
             'format_rules': self._build_format_rules(is_active),
             'observation_instructions': observation_instructions,
-            'exp_instructions': exp_instructions,
+            'exp_instructions': exp_instructions if is_active else '',
             'room_info': room_desc,
             'multiroom_rules': SHARED_MULTIROOM_RULES,
             'active_rules_extra': ACTIVE_RULES_EXTRA if is_active else '',
@@ -135,12 +134,11 @@ class PromptManager:
         }
 
         obs_str = template.format(**fmt_kwargs)
-
-        if is_vision:
-            obs['multi_modal_data'] = {self.config.image_placeholder: images}
-
-        obs['obs_str'] = obs_str + "\n" + self.get_format_footer(is_active)
-        return obs
+        if is_active:
+            obs['obs_str'] = obs_str + "\n" + self.get_format_footer(is_active)
+        else:
+            obs['obs_str'] = obs_str
+        return obs, images_path
         
             
 
