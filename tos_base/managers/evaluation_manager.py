@@ -42,14 +42,6 @@ class EvaluationManager:
     Handles task initialization, question generation, answer evaluation,
     and tracking of evaluation results across multiple tasks.
     """
-    DEFAULT_EVAL_SUMMARY = {
-        "accuracy": 0.0,
-        "total_tasks": 0,
-        "correct_count": 0,
-        "incorrect_count": 0,
-        "unanswered_count": 0
-    }
-    
     def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent, history_manager=None, seed: int | None = None):
         # In current implementation, only one evaluation task is allowed
         assert len(eval_tasks) == 1, "Only one evaluation task is supported"
@@ -79,7 +71,7 @@ class EvaluationManager:
             self.tasks.append(task)
             self.results.append({
                 "task_type": task.__class__.__name__,
-                "correct": False,
+                "score": 0,
                 "info": {}
             })
         self.current_index = 0
@@ -174,14 +166,6 @@ class EvaluationManager:
         """Group aggregation; use precomputed per-sample metrics or reuse per-sample aggregation."""
         if not env_data_list:
             return {'avg_accuracy': 0.0, 'task_metrics': {}}
-
-        # temp code, TODO
-        for s in env_data_list:
-            metrics = s.get('metrics')
-            if metrics is None or not isinstance(metrics, dict):
-                s['metrics'] = {}
-                metrics = s['metrics']
-            metrics['evaluation'] = EvaluationManager.aggregate_per_sample(s)
 
         per_samples = [((s.get('metrics') or {}).get('evaluation') or {}) for s in env_data_list]
         total_count = sum(int(m.get('overall',{}).get('n_total', 0)) for m in per_samples)

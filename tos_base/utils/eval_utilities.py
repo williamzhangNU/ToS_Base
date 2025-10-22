@@ -434,10 +434,7 @@ def _eval_direction_text(pred: str, answer: Union[str, Sequence[str]]) -> Tuple[
     # Canonicalize parsed prediction
     normalized_pred = (_canonicalize_label(parsed[0]), _canonicalize_label(parsed[1]))
     
-    return (
-        _labels_match(normalized_pred[0], normalized_answer[0]) and
-        _labels_match(normalized_pred[1], normalized_answer[1])
-    ), {}
+    return (_labels_match(normalized_pred[0], normalized_answer[0]) + _labels_match(normalized_pred[1], normalized_answer[1])) / 2, {}
 
 def _eval_coordinate_list(pred: str, answer: Sequence[Tuple[int, int]]) -> Tuple[bool, Dict[str, Any]]:
     """Evaluate list of coordinates."""
@@ -470,10 +467,17 @@ def _eval_forward_nav(pred: str, answer: str) -> Tuple[bool, Dict[str, Any]]:
     ans_dict = {obj: (_canonicalize_label(dir_), _canonicalize_label(dist)) 
                 for obj, dir_, dist in ans_rels}
     
-    correct = sum(1 for obj, rel in pred_dict.items() if obj in ans_dict and rel == ans_dict[obj])
-    score = len(pred_dict) > 0 and correct == len(pred_dict) == len(ans_dict)
+    score = 0
+    assert len(ans_dict) == 1, "Ground truth must have exactly one object"
+    for obj in ans_dict:
+        if obj in pred_dict:
+            pred_dir, pred_dist = pred_dict[obj]
+            ans_dir, ans_dist = ans_dict[obj]
+            dir_match = _labels_match(pred_dir, ans_dir)
+            dist_match = _labels_match(pred_dist, ans_dist)
+            score = (dir_match + dist_match) / 2
     
-    return score, {'correct': correct, 'total': len(ans_dict)}
+    return score, {}
 
 def _eval_backward_nav(pred: str, answer: Union[str, Dict]) -> Tuple[bool, Dict[str, Any]]:
     """Evaluate backward navigation task."""
@@ -609,7 +613,7 @@ def e2a_eval_fn(pred: Any, answer: Any) -> Tuple[float, Dict[str, Any]]:
         - 'threshold': similarity threshold (optional, default 0.9)
     """
     # Import here to avoid circular dependency
-    from .cogmap.metrics import compute_pos_sim
+    from .cogmap.metrics import compute_pos_sim, compute_dir_sim
     
     if not isinstance(pred, str):
         return False, {'error': 'prediction_not_string'}
@@ -653,7 +657,9 @@ def e2a_eval_fn(pred: Any, answer: Any) -> Tuple[float, Dict[str, Any]]:
     gt_room = _coords_to_room(gt_coords)
     pos_norm_L = _coord_norm_from_gt(norm_coords)
     
-    similarity = compute_pos_sim(pred_room, gt_room, allow_scale=False, pos_norm_L=pos_norm_L)
+    pos_sim = compute_pos_sim(pred_room, gt_room, allow_scale=False, pos_norm_L=pos_norm_L)
+    dir_sim = compute_dir_sim(pred_room, gt_room)
+    similarity = (pos_sim + dir_sim) / 2
     return _score_similarity_mra_style(similarity), {'similarity': similarity, 'threshold': threshold}
 
 
