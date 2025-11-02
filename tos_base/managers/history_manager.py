@@ -78,11 +78,11 @@ class HistoryManager:
             with open(self.model_config_path, "w") as f:
                 json.dump(model_config, f, ensure_ascii=False, indent=2)
         if not os.path.exists(self.sample_config_path):
-            assert image_dir is not None
             sample_cfg = {
                 "room_dict": room_dict,
                 "agent_dict": agent_dict,
                 "image_dir": image_dir,
+                "seed": seed,
             }
             with open(self.sample_config_path, "w") as f:
                 json.dump(sample_cfg, f, ensure_ascii=False, indent=2)
@@ -301,6 +301,7 @@ class HistoryManager:
         sample_dirs = [d for d in os.listdir(model_dir) if os.path.isdir(os.path.join(model_dir, d))]
 
         # Sequential numbering only for valid samples (with valid subdirs)
+        sample_counter = 0
         for sample_dir in sample_dirs:
             sample_path = os.path.join(model_dir, sample_dir)
 
@@ -315,7 +316,11 @@ class HistoryManager:
                 continue
             with open(os.path.join(subdirs[0], CONFIG_BASENAME), 'r') as f:
                 sample_cfg = json.load(f)
-            sample_key = f"sample_{os.path.basename(sample_cfg['image_dir'])}"
+            if sample_cfg.get("image_dir") is None:
+                sample_key = f"sample_{sample_counter}"
+                sample_counter += 1
+            else:
+                sample_key = f"sample_{os.path.basename(sample_cfg['image_dir'])}"
             assert sample_key not in samples, f"Duplicate sample key {sample_key}"
             samples[sample_key] = {}
 

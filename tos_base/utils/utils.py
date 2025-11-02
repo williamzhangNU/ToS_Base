@@ -1,10 +1,21 @@
 import re
 from typing import Tuple
 import hashlib
+import numpy as np
 
 # Reusable labels for formatting and parsing
 THINK_LABEL = "THINK:"
 ANSWER_LABEL = "FINAL ANSWER:"
+
+def numpy_to_python(obj):
+    """Convert numpy types to native Python types for JSON serialization."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 def parse_llm_response(text: str, enable_think: bool = True) -> Tuple[str, str, bool]:
     """Parse LLM response for optional THINK and required FINAL ANSWER blocks.

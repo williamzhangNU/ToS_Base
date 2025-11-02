@@ -91,8 +91,8 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
 
         origin_pos = tuple(origin_obj.pos)
         correct_coord = (
-            int(self.agent.pos[0]) - origin_pos[0],
-            int(self.agent.pos[1]) - origin_pos[1],
+            int(self.agent.pos[0]) - int(origin_pos[0]),
+            int(self.agent.pos[1]) - int(origin_pos[1]),
         )
         correct_orientation = _ori_to_name(tuple(self.agent.ori))
 
