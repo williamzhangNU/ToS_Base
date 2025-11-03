@@ -186,7 +186,7 @@ class HistoryManager:
                 Agent.from_dict(turn_log['agent_state']),
                 mode='img', save_path=img_path,
             )
-            turn_log['room_image'] = img_path
+            turn_log['room_image'] = os.path.relpath(img_path, self.model_path)
 
     def _save_json(self, path: str, data: Dict) -> None:
         with open(path, "w") as f:
@@ -406,16 +406,12 @@ class HistoryManager:
         if save_images:
             # Process exploration turn logs
             for turn_log in sample_data["env_turn_logs"]:
-                if turn_log.get("room_image"):
-                    turn_log['room_image'] = os.path.relpath(turn_log['room_image'], model_dir)
                 if turn_log.get('message_images'):
                     turn_log['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in turn_log['message_images']]
 
             # Process evaluation tasks
             for task in sample_data["evaluation_tasks"].values():
                 for question_data in task.values():
-                    if question_data.get("room_image"):
-                        question_data['room_image'] = os.path.relpath(question_data['room_image'], model_dir)
                     if question_data.get('message_images'):
                         question_data['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in question_data['message_images']]
 
@@ -460,12 +456,14 @@ class HistoryManager:
         assert os.path.exists(state_file), f"Missing state file: {state_file}"
         with open(state_file, "r") as f:
             s = json.load(f)
+        model_name = s.get("model_config", {}).get("model_name", "").replace("/", "-")
+        output_dir = combo_dir.split(model_name)[0]
         hm = HistoryManager(
             observation_config=s.get("observation_config", {}),
             model_config=s.get("model_config", {}),
             room_dict=s.get("room_dict", {}),
             agent_dict=s.get("agent_dict", {}),
-            output_dir=s.get("base_output_dir", os.path.dirname(os.path.dirname(os.path.dirname(combo_dir)))),
+            output_dir=output_dir,
             seed=s.get("seed", 0),
             image_dir=s.get("image_dir"),
             eval_override=eval_override,
