@@ -122,6 +122,31 @@ class RoomGenerator:
         return gates
 
     @staticmethod
+    def _has_corner_gap(mask: np.ndarray) -> bool:
+        """
+        detect if there is a corner gap in the mask, return True if there is, False otherwise   
+        """
+        H, W = mask.shape
+        def is_room(v): return 1 <= int(v) < 100
+        for y in range(H - 1):
+            for x in range(W - 1):
+                a = int(mask[y, x])
+                b = int(mask[y, x + 1])
+                c = int(mask[y + 1, x])
+                d = int(mask[y + 1, x + 1])
+
+               
+                if is_room(a) and is_room(d) and a != d:
+                    if b != 0 and c != 0:
+                        return True
+
+                
+                if is_room(b) and is_room(c) and b != c:
+                    if a != 0 and d != 0:
+                        return True
+        return False
+
+    @staticmethod
     def generate_room(
         room_size: Tuple[int, int],
         n_objects: int,
@@ -140,7 +165,7 @@ class RoomGenerator:
         - If fixed_mask is True, uses seed=42 for mask generation while preserving original randomness for object/agent placement.
         """
         eval_tasks = kwargs.get('eval_tasks', [])
-        max_retries = kwargs.get('max_retries', 10)
+        max_retries = kwargs.get('max_retries', 30)
         fix_room_size = kwargs.get('fix_room_size', None)
         same_room_size = kwargs.get('same_room_size', False)
         
@@ -287,6 +312,13 @@ class RoomGenerator:
                 
                 if mask is None:
                     continue
+                # print(mask)
+
+                corner_gap_strategy = kwargs.get('corner_gap_strategy', 'retry')  # 'retry' | 'off'
+                if corner_gap_strategy == 'retry':
+                    if RoomGenerator._has_corner_gap(mask):
+                        continue  # switch to next attempt with a new sub-seed
+
                 # Generate gates from mask
                 gates = RoomGenerator._gen_gates_from_mask(mask)
 
@@ -513,6 +545,10 @@ class RoomGenerator:
         # Add walls around rooms
         RoomGenerator._add_walls_to_multi_room(grid, rooms)
 
+        # check if there is a corner gap in the mask
+        if RoomGenerator._has_corner_gap(grid):
+            return None
+
         # Validate that no two rooms are directly adjacent (without a wall between them)
         if not RoomGenerator._validate_room_separation(grid, rooms):
             return None
@@ -555,6 +591,47 @@ class RoomGenerator:
         trimmed = mask[y_min:y_max+1, x_min:x_max+1]
 
         return trimmed
+
+    @staticmethod
+    def _find_corner_gaps(msk: np.ndarray) -> list:
+        """
+        Detect 2x2 diagonal-room corner gaps.
+        Pattern A:
+            a (room)   c (wall=0)
+            b (wall=0) d (room), a!=d
+
+        Pattern B (the other diagonal):
+            a (wall=0) c (room)
+            b (room)   d (wall=0), b!=c
+
+        Doors (100/101) are NOT walls (also invalid separators).
+        Returns a list of gap descriptors (tuples of coordinates).
+        """
+        H, W = msk.shape
+        gaps = []
+        is_room = lambda v: 1 <= int(v) < 100
+        is_wall = lambda v: int(v) == 0
+
+        for x in range(H - 1):
+            for y in range(W - 1):
+                a = int(msk[x, y])
+                b = int(msk[x + 1, y])
+                c = int(msk[x, y + 1])
+                d = int(msk[x + 1, y + 1])
+
+                # Pattern A: diagonal a (room) - d (room), with b,c as walls
+                if is_room(a) and is_room(d) and a != d and is_wall(b) and is_wall(c):
+                    gaps.append(((x, y), (x + 1, y + 1)))
+
+                # Pattern B: diagonal b (room) - c (room), with a,d as walls
+                if is_room(b) and is_room(c) and b != c and is_wall(a) and is_wall(d):
+                    gaps.append(((x + 1, y), (x, y + 1)))
+        return gaps
+
+    @staticmethod
+    def _has_corner_gap(msk: np.ndarray) -> bool:
+        """Boolean shortcut."""
+        return len(RoomGenerator._find_corner_gaps(msk)) > 0
 
     @staticmethod
     def _calculate_adjacent_room_position(
