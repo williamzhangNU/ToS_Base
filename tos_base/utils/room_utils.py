@@ -122,30 +122,6 @@ class RoomGenerator:
         return gates
 
     @staticmethod
-    def _has_corner_gap(mask: np.ndarray) -> bool:
-        """
-        detect if there is a corner gap in the mask, return True if there is, False otherwise   
-        """
-        H, W = mask.shape
-        def is_room(v): return 1 <= int(v) < 100
-        for y in range(H - 1):
-            for x in range(W - 1):
-                a = int(mask[y, x])
-                b = int(mask[y, x + 1])
-                c = int(mask[y + 1, x])
-                d = int(mask[y + 1, x + 1])
-
-               
-                if is_room(a) and is_room(d) and a != d:
-                    if b != 0 and c != 0:
-                        return True
-
-                
-                if is_room(b) and is_room(c) and b != c:
-                    if a != 0 and d != 0:
-                        return True
-        return False
-
     @staticmethod
     def generate_room(
         room_size: Tuple[int, int],
