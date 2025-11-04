@@ -442,7 +442,6 @@ class HistoryManager:
             "room_dict": json.load(open(self.sample_config_path)).get("room_dict", {}) if os.path.exists(self.sample_config_path) else {},
             "agent_dict": json.load(open(self.sample_config_path)).get("agent_dict", {}) if os.path.exists(self.sample_config_path) else {},
             "image_dir": json.load(open(self.sample_config_path)).get("image_dir") if os.path.exists(self.sample_config_path) else None,
-            "base_output_dir": os.path.dirname(self.model_path),
             "seed": self.seed,
         }
         with open(self.state_path, "w") as f:

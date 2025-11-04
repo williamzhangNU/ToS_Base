@@ -22,6 +22,7 @@ class EvalTaskType(Enum):
     BWD_LOC = ("bwd_loc", "BackwardLocEvaluationTask")
     FWD_FOV = ("fwd_fov", "ForwardFOVEvaluationTask")
     BWD_NAV = ("bwd_nav", "BackwardNavEvaluationTask")
+    BWD_NAV_REV = ("bwd_nav_rev", "BackwardNavRevEvaluationTask")
     FALSE_BELIEF = ("false_belief", "FalseBeliefDirectionPov")
     DIR_ANCHOR = ("dir_anchor", "DirectionPov")
     
@@ -48,7 +49,7 @@ class EvalTaskType(Enum):
         from .e2a import E2AEvaluationTask
         from .localization import ForwardLocEvaluationTask, BackwardLocEvaluationTask
         from .false_belief import FalseBeliefDirectionPov
-        from .navigation_tasks import ForwardFOVEvaluationTask, BackwardNavEvaluationTask
+        from .navigation_tasks import ForwardFOVEvaluationTask, BackwardNavEvaluationTask, BackwardNavRevEvaluationTask
         
         task_map = {
             cls.DIR.short_name: DirectionEvaluationTask,
@@ -62,6 +63,7 @@ class EvalTaskType(Enum):
             cls.FALSE_BELIEF.short_name: FalseBeliefDirectionPov,
             cls.FWD_FOV.short_name: ForwardFOVEvaluationTask,
             cls.BWD_NAV.short_name: BackwardNavEvaluationTask,
+            cls.BWD_NAV_REV.short_name: BackwardNavRevEvaluationTask,
             cls.BWD_POV.short_name: BackwardPovEvaluationTask,
         }
         return task_map

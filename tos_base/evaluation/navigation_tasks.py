@@ -2,6 +2,7 @@
 
 ForwardFOVEvaluationTask: predict final observation from an action sequence.
 BackwardNavEvaluationTask: infer action sequence from a final observation.
+BackwardNavRevEvaluationTask: navigate back to starting point from termination location.
 """
 
 from typing import Any, List, Tuple
@@ -309,14 +310,14 @@ class BackwardNavEvaluationTask(BaseNavEvaluationTask):
         plan, end_agent, visible = self._sample_plan_with_visible(steps)
         self.np_random.shuffle(visible)
         visible = visible[:3]
-        obs_parts = [f"{name} is at {direction}, {distance}" 
+        obs_parts = [f"{name} is at {direction}, {distance}"
                     for name, direction, distance in visible]
         final_obs = "; ".join(obs_parts)
-        
+
         # Store expected final state and object positions for evaluation
         init_agent = self._agent_from_init()
         object_positions = {obj.name: tuple(map(int, obj.pos)) for obj in self.room.all_objects}
-        
+
         answer = {
             'final_pos': tuple(map(int, end_agent.pos)),
             'final_ori': tuple(map(int, end_agent.ori)),
@@ -332,8 +333,99 @@ class BackwardNavEvaluationTask(BaseNavEvaluationTask):
                 for name, direction, distance in visible
             ],
         }
-        
+
         self.eval_data.question = self.QUESTION_TEMPLATE.format(final_obs=final_obs)
+        self.eval_data.answer = answer
+        self.eval_data.choices = []
+        self.eval_data.id = hash(self.eval_data.question)
+        return self.eval_data.question
+
+
+class BackwardNavRevEvaluationTask(BaseNavEvaluationTask):
+    """Navigate back to starting point from termination location."""
+    QUESTION_TEMPLATE = (
+        "You changed to a new location and facing direction.\n"
+        "You observe the following:\n"
+        "{current_obs}\n\n"
+        "What action sequence will navigate you back to your starting position?\n\n"
+        "Answer format: use a valid action sequence\n"
+        "You must end with a JumpTo(initial_pos) action.\n"
+        "Example: Rotate(90), JumpTo(lamp), Rotate(90), JumpTo(initial_pos)\n"
+    )
+
+    def _is_initial_pos_visible(self, agent: Agent, init_pos: np.ndarray) -> bool:
+        """Check if initial position is visible from agent's current position and orientation."""
+        from ..actions import MoveAction
+
+        # Check if initial_pos is visible from agent's perspective
+        # We need to check all 4 cardinal orientations
+        for ori in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+            tmp_agent = agent.copy()
+            tmp_agent.ori = np.array(ori)
+            if MoveAction._is_visible(tmp_agent, type('obj', (), {'pos': init_pos})(), field_of_view=90):
+                return True
+        return False
+
+    @retry_generate_question
+    def generate_question(self) -> str:
+        steps = int(self.config.get('steps', 2))
+
+        # Get number of rooms
+        num_rooms = len([rid for rid in np.unique(self.room.mask) if 1 <= int(rid) < 100])
+
+        # Get initial agent position
+        init_agent = self._agent_from_init()
+        init_pos = init_agent.pos
+
+        # Generate plan with constraints
+        max_attempts = 20
+        for attempt in range(max_attempts):
+            plan, end_agent, visible = self._sample_plan_with_visible(steps)
+
+            # Check constraints based on number of rooms
+            if num_rooms > 1:
+                # Constraint 1: If multiple rooms, end position must NOT be in room 1
+                end_room_id = self._current_rooms(end_agent)
+                if end_room_id and 1 in end_room_id:
+                    continue  # Retry if in room 1
+            else:
+                # Constraint 2: If single room, end position must NOT directly see initial_pos
+                if self._is_initial_pos_visible(end_agent, init_pos):
+                    continue  # Retry if initial_pos is visible
+
+            # Valid plan found
+            break
+        else:
+            # If no valid plan found after max_attempts, raise error to trigger retry
+            raise ValueError(f"Failed to generate valid plan after {max_attempts} attempts")
+
+        # Current observation at termination location
+        self.np_random.shuffle(visible)
+        visible = visible[:3]
+        obs_parts = [f"{name} is at {direction}, {distance}"
+                    for name, direction, distance in visible]
+        current_obs = "; ".join(obs_parts)
+
+        # Store initial and final states for evaluation
+        object_positions = {obj.name: tuple(map(int, obj.pos)) for obj in self.room.all_objects}
+
+        answer = {
+            'start_pos': tuple(map(int, end_agent.pos)),  # Starting from termination location
+            'start_ori': tuple(map(int, end_agent.ori)),
+            'target_pos': tuple(map(int, init_agent.pos)),  # Target is the initial position
+            'target_ori': tuple(map(int, init_agent.ori)),
+            'object_positions': object_positions,
+            'current_observation': [
+                {
+                    'name': name,
+                    'direction': direction,
+                    'distance': distance,
+                }
+                for name, direction, distance in visible
+            ],
+        }
+
+        self.eval_data.question = self.QUESTION_TEMPLATE.format(current_obs=current_obs)
         self.eval_data.answer = answer
         self.eval_data.choices = []
         self.eval_data.id = hash(self.eval_data.question)

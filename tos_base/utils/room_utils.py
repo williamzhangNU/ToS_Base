@@ -287,7 +287,6 @@ class RoomGenerator:
                 
                 if mask is None:
                     continue
-                print(mask)
                 # Generate gates from mask
                 gates = RoomGenerator._gen_gates_from_mask(mask)
 

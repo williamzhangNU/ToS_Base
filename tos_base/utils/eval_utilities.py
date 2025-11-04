@@ -544,6 +544,58 @@ def _eval_backward_nav(pred: str, answer: Union[str, Dict]) -> Tuple[bool, Dict[
     
     return False, best_info
 
+def _eval_backward_nav_rev(pred: str, answer: Union[str, Dict]) -> Tuple[bool, Dict[str, Any]]:
+    """Evaluate backward navigation reverse task.
+
+    This task requires navigating back to the starting position from a termination location.
+    The action sequence must end with JumpTo(initial_pos).
+    After removing the final JumpTo(initial_pos), the remaining actions should position
+    the agent such that initial_pos is visible.
+    """
+    if not isinstance(answer, dict):
+        return False, {}
+
+    pred_actions = _parse_action_sequence(pred)
+    if not pred_actions:
+        return False, {'error': 'invalid_format'}
+
+    # Check if last action is JumpTo(initial_pos)
+    last_action_type, last_action_param = pred_actions[-1]
+    if last_action_type != 'jumpto' or str(last_action_param).lower() != 'initial_pos':
+        return False, {'error': 'missing_final_jumpto_initial_pos'}
+
+    # Remove the last action
+    actions_without_final = pred_actions[:-1]
+
+    # Extract ground truth data
+    start_pos = _coerce_point(answer['start_pos'])  # Starting from termination location
+    start_ori = _normalize_orientation(answer['start_ori'])
+    target_pos = _coerce_point(answer['target_pos'])  # Target is the initial position
+    object_positions = {str(k).lower(): _coerce_point(v) for k, v in answer['object_positions'].items()}
+
+    # Add initial_pos to object_positions for visibility check
+    object_positions['initial_pos'] = target_pos
+
+    # Simulate navigation without the final JumpTo(initial_pos)
+    final_pos, final_ori, error = _simulate_navigation(actions_without_final, start_pos, start_ori, object_positions)
+    if error:
+        return False, {'error': error}
+
+    # Check if initial_pos (target_pos) is visible from the final position
+    if final_pos is None or final_ori is None:
+        return False, {'error': 'simulation_failed'}
+
+    is_visible = _is_visible_from(final_pos, final_ori, target_pos)
+
+    best_info = {
+        'initial_pos_visible': is_visible,
+        'final_pos': final_pos,
+        'final_ori': final_ori,
+        'target_pos': target_pos,
+    }
+
+    return is_visible, best_info
+
 def _calculate_coord_similarity(pred_coord: tuple[float, float], gt_coord: tuple[float, float]) -> float:
     pred = np.array(pred_coord, dtype=float)
     gt = np.array(gt_coord, dtype=float)
@@ -798,6 +850,7 @@ TASK_EVALUATORS: Dict[str, TaskEvaluator] = {
     'E2AEvaluationTask': lambda pred, answer, _choices: e2a_eval_fn(pred, answer),
     'ForwardFOVEvaluationTask': _wrap_eval(_eval_forward_nav),
     'BackwardNavEvaluationTask': _wrap_eval(_eval_backward_nav, pred_cast=str, answer_cast=None),
+    'BackwardNavRevEvaluationTask': _wrap_eval(_eval_backward_nav_rev, pred_cast=str, answer_cast=None),
     'ForwardLocEvaluationTask': _wrap_eval(_eval_forward_nav),
     'BackwardLocEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
     'FalseBeliefDirectionPov': _wrap_eval(_eval_direction_text),
