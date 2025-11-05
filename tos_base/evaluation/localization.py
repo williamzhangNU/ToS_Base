@@ -2,6 +2,7 @@
 
 from typing import List, Tuple
 import numpy as np
+import json
 
 from .tasks import BaseEvaluationTask, retry_generate_question
 from ..core.object import Object
@@ -96,7 +97,7 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
         )
         correct_orientation = _ori_to_name(tuple(self.agent.ori))
 
-        self.eval_data.action = self.ACTION_TEMPLATE.format(observations=observations)
+        self.eval_data.action = self.ACTION_TEMPLATE.format(observations= "<image>" if self.config['image_dir'] else observations )
         self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(
             origin_name=origin_obj.name,
         )
@@ -105,7 +106,7 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
             'orientation': correct_orientation,
         }
         self.eval_data.choices = []
-        self.eval_data.id = hash(self.eval_data.question)
+        self.eval_data.id = hash(json.dumps(self.eval_data.answer) + self.eval_data.question)
         return self.eval_data.question
 
 

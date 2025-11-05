@@ -1,7 +1,7 @@
 """Direction and POV evaluation tasks."""
 
 from typing import Iterable, Tuple, List
-
+import json
 from .tasks import BaseEvaluationTask, retry_generate_question
 from ..core.relationship import (
     PairwiseRelationshipDiscrete,
@@ -105,7 +105,7 @@ class BackwardPovEvaluationTask(BaseEvaluationTask):
 
     QUESTION_TEMPLATE = (
         "You are standing at an oriented object's position, facing its direction.\n"
-        "You observe that {obj_name} is {relation_text}.\n"
+        "You observe that {observation}.\n"
         "Which object are you standing at?\n"
         "Answer format: object name\n"
         "Example: lamp\n"
@@ -128,11 +128,11 @@ class BackwardPovEvaluationTask(BaseEvaluationTask):
             raise ValueError("No visible objects from available anchors")
         target, rel = self.np_random.choice(visibles)
         relation_text = f"{rel.direction.bin_label}, {rel.dist.bin_label}"
-        question = self.QUESTION_TEMPLATE.format(obj_name=target.name, relation_text=relation_text)
+        question = self.QUESTION_TEMPLATE.format(observation= "<image>" if self.config['image_dir'] else f"{target.name} is {relation_text}")
         self.eval_data.question = question
         self.eval_data.answer = anchor.name
         self.eval_data.choices = []
-        self.eval_data.id = hash(question)
+        self.eval_data.id = hash(json.dumps(self.eval_data.answer) + question)
         return question
 
 

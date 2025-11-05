@@ -7,6 +7,7 @@ BackwardNavRevEvaluationTask: navigate back to starting point from termination l
 
 from typing import Any, List, Tuple
 import numpy as np
+import json
 
 from .tasks import BaseEvaluationTask, retry_generate_question
 from ..core.object import Agent, Gate
@@ -334,10 +335,10 @@ class BackwardNavEvaluationTask(BaseNavEvaluationTask):
             ],
         }
 
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(final_obs=final_obs)
+        self.eval_data.question = self.QUESTION_TEMPLATE.format(final_obs="<image>" if self.config['image_dir'] else final_obs)
         self.eval_data.answer = answer
         self.eval_data.choices = []
-        self.eval_data.id = hash(self.eval_data.question)
+        self.eval_data.id = hash(self.eval_data.question + json.dumps(answer, sort_keys=True))
         return self.eval_data.question
 
 
