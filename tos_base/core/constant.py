@@ -33,11 +33,11 @@ OBJECTS_WITH_ORIENTATION = [ObjectInfo(name, True) for name in OBJECT_NAMES_WITH
 
 # Objects without orientation (omnidirectional, no clear front/back)
 OBJECT_NAMES_WITHOUT_ORIENTATION = [
-    # 'table',
-    # 'lamp',
-    # 'plant',
-    # 'vase',
-    # 'trash can',
+    'table',
+    'lamp',
+    'plant',
+    'vase',
+    'trash can',
 ]
 OBJECTS_WITHOUT_ORIENTATION = [ObjectInfo(name, False) for name in OBJECT_NAMES_WITHOUT_ORIENTATION]
 

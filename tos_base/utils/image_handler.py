@@ -25,7 +25,7 @@ class ImageHandler:
         self.base_dir = base_dir
         self.image_size = image_size
         self.preload_images = preload_images
-        self.image_dir, self.json_data = self._load_data(base_dir, seed)
+        self.image_dir, self.json_data = ImageHandler.load_data(base_dir, seed)
         self.objects = {obj['object_id']: obj for obj in self.json_data.get('objects', [])}
         self._image_map, self._image_path_map = self._load_images()
         tmp = {obj['name']: obj['object_id'] for obj in self.objects.values()}
@@ -33,8 +33,8 @@ class ImageHandler:
         tmp['agent'] = 'agent'
         self.name_2_cam_id = tmp
     
-
-    def _load_data(self, base_dir: str, seed: int) -> tuple:
+    @staticmethod
+    def load_data(base_dir: str, seed: int) -> tuple:
         """Load JSON data from a 'runNN' subdirectory (sorted by NN)."""
         target_run = f"run{seed:02d}"
         image_dir = os.path.join(base_dir, target_run)
@@ -70,12 +70,7 @@ class ImageHandler:
             image_path_map[key] = path
             if self.preload_images:
                 image_map[key] = Image.open(path).resize(self.image_size, Image.LANCZOS)
-        topdown_path = os.path.join(self.image_dir, 'top_down_annotated.png')
-        assert os.path.exists(topdown_path)
-        image_path_map['topdown'] = topdown_path
-        if self.preload_images:
-            image_map['topdown'] = Image.open(topdown_path).resize(self.image_size, Image.LANCZOS)
-
+        
         instruction_path = os.path.join(self.base_dir, 'instruction.png')
         assert os.path.exists(instruction_path)
         image_path_map['instruction'] = instruction_path
@@ -95,7 +90,7 @@ class ImageHandler:
         Get image for given camera ID and direction.
         
         Args:
-            name: Name of the object ('agent' or object_name or 'topdown' or 'instruction' as string)
+            name: Name of the object ('agent' or object_name or 'instruction' as string)
             direction: Cardinal direction ('north', 'south', 'east', 'west')
             
         Returns:
@@ -105,7 +100,7 @@ class ImageHandler:
             KeyError: If image not found
         """
         # Handle special static images that don't need direction
-        if name in ['topdown', 'instruction', 'label']:
+        if name in ['instruction', 'label']:
             key = name
         else:
             key = f"{self.name_2_cam_id[name]}_facing_{direction}"
@@ -124,7 +119,7 @@ class ImageHandler:
         Get image path for given camera ID and direction.
         
         Args:
-            name: Name of the object ('agent' or object_name or 'topdown' or 'instruction' as string)
+            name: Name of the object ('agent' or object_name or 'instruction' as string)
             direction: Cardinal direction ('north', 'south', 'east', 'west')
             
         Returns:
@@ -134,7 +129,7 @@ class ImageHandler:
             KeyError: If image path not found
         """
         # Handle special static images that don't need direction
-        if name in ['topdown', 'instruction', 'label']:
+        if name in ['instruction', 'label']:
             key = name
         else:
             key = f"{self.name_2_cam_id[name]}_facing_{direction}"

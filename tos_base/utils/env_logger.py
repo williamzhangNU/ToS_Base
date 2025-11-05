@@ -138,7 +138,7 @@ class SpatialEnvLogger:
 
 
     @staticmethod
-    def log_each_env_info(output_dir: str, model_config, save_images: bool = True):
+    def log_each_env_info(output_dir: str, model_name, save_images: bool = True):
         """Logs detailed information for each environment and overall performance metrics.
 
         New implementation that reads from directory structure:
@@ -150,10 +150,10 @@ class SpatialEnvLogger:
 
         # Use new directory-based aggregation instead of env_summaries
         # output_dir is results/debug, model_name from kwargs
-        model_dir = HistoryManager.get_model_dir(output_dir, model_config)
+        model_dir = HistoryManager.get_model_dir(output_dir, model_name)
         aggregated_data = HistoryManager.aggregate_from_directories(
             model_dir=model_dir,
             save_images=save_images,
         )
 
-        return SpatialEnvLogger._save_data(aggregated_data, model_dir, model_name=model_config['model_name'])
+        return SpatialEnvLogger._save_data(aggregated_data, model_dir, model_name)

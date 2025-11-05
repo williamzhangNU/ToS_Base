@@ -556,12 +556,17 @@ class CognitiveMapManager:
             return MapCogMetrics.average(mats) if mats else MapCogMetrics.invalid()
 
         cons_last = (last or {}).get('consistency') or {}
+
+        # Compute stability metrics (now returns two values: update and stability_check)
+        update_metrics, stability_check_metrics = stability(env_data)
+
         consistency = {
             'local_vs_global_avg': _avg_consistency_lvsg(cog_logs).to_dict(),
             'rooms_vs_global_last': MapCogMetrics.from_dict(((cons_last.get('rooms_vs_global') or {}).get('average') or {})).to_dict(),
             'map_vs_relations_last': (float(cons_last.get('map_vs_relations')) if isinstance(cons_last.get('map_vs_relations'), (int, float)) else None),
             'relations_consistency_last': (float(cons_last.get('relations_consistency')) if isinstance(cons_last.get('relations_consistency'), (int, float)) else None),
-            'stability_avg': MapCogMetrics.average(stability(env_data)).to_dict(),
+            'update_avg': float(np.mean(update_metrics)) if update_metrics else 0.0,
+            'stability_avg': MapCogMetrics.average(stability_check_metrics).to_dict(),
         }
 
         # Per-turn global metrics (concise helper)

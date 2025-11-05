@@ -30,32 +30,31 @@ class HistoryManager:
     Example: gpt-4o/1d54fa/vision/active/
     """
 
-    def __init__(self, observation_config: Dict, model_config: Dict , room_dict: Dict, agent_dict: Dict, output_dir:str, 
-                 image_dir:str = None, eval_override: bool = False, all_override: bool = False, task_type: str = None):
+    def __init__(self, observation_config: Dict, model_config: Dict , room_dict: Dict, agent_dict: Dict, output_dir:str, seed: int,
+                 image_dir:str = None, eval_override: bool = False, all_override: bool = False, all_tasks: List = None):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.evaluation_turn_logs: Dict[str, Dict[str, Dict]] = {}
         self.messages: List[Dict] = []
-        self.run_seed: int | None = None
+        self.seed: int  = seed
         self.exp_type = observation_config['exp_type']
         self.enable_think = bool(((observation_config or {}).get('prompt_config') or {}).get('enable_think', False))
-        self.model_path= HistoryManager.get_model_dir(output_dir, model_config)
-        self.sample_path = os.path.join(self.model_path,self._generate_room_key(room_dict, agent_dict))
+        self.model_path = HistoryManager.get_model_dir(output_dir, model_config['model_name'])
         self.output_dir = os.path.abspath(os.path.join(
-            self.sample_path,
+            self.model_path, self._generate_room_key(room_dict, agent_dict),
             observation_config['render_mode'],
             observation_config['exp_type'],
             "think" if observation_config['prompt_config']["enable_think"] else "nothink",
         ))
+        self.observation_config = observation_config
         if observation_config['exp_type'] == 'passive':
             self.output_dir = os.path.join(self.output_dir, observation_config["proxy_agent"])
         self.exploration_path = os.path.join(self.output_dir, EXPLORATION_LOG_BASENAME)
         self.evaluation_path = os.path.join(self.output_dir, EVALUATION_LOG_BASENAME)
         self.model_config_path = os.path.join(self.model_path, CONFIG_BASENAME)
-        self.sample_config_path = os.path.join(self.sample_path, CONFIG_BASENAME)
+        self.sample_config_path = os.path.join(self.output_dir, CONFIG_BASENAME)
         self.metrics_path = os.path.join(self.output_dir, METRICS_BASENAME)
         self.messages_path = os.path.join(self.output_dir, MESSAGES_BASENAME)
-        self.eval_tasks_dir = os.path.join(self.output_dir, EVAL_TASKS_DIRNAME)
         self.state_path = os.path.join(self.output_dir, STATE_BASENAME)
 
         # Apply granular overrides
@@ -64,22 +63,26 @@ class HistoryManager:
                 shutil.rmtree(self.output_dir)
 
         self._load()
-        if eval_override:
-            if task_type in self.evaluation_turn_logs:
-                self.evaluation_turn_logs[task_type] = {}
-
         os.makedirs(self.output_dir, exist_ok=True)
+        if eval_override:
+            from ..evaluation.task_types import EvalTaskType
+            task_map = EvalTaskType.get_task_map()
+            for task_type in all_tasks:
+                mapped_task = task_map.get(task_type).__name__
+                if mapped_task in self.evaluation_turn_logs:
+                    self.evaluation_turn_logs[mapped_task] = {}
+            self.save_evaluation()
+            
         os.makedirs(os.path.join(self.output_dir, IMAGES_DIRNAME), exist_ok=True)
-        os.makedirs(self.eval_tasks_dir, exist_ok=True)
         if not os.path.exists(self.model_config_path):
             with open(self.model_config_path, "w") as f:
                 json.dump(model_config, f, ensure_ascii=False, indent=2)
         if not os.path.exists(self.sample_config_path):
-            assert image_dir is not None
             sample_cfg = {
                 "room_dict": room_dict,
                 "agent_dict": agent_dict,
                 "image_dir": image_dir,
+                "seed": seed,
             }
             with open(self.sample_config_path, "w") as f:
                 json.dump(sample_cfg, f, ensure_ascii=False, indent=2)
@@ -110,14 +113,14 @@ class HistoryManager:
         if self.exploration_turn_logs:
             with open(self.exploration_path, "w") as f:
                 json.dump(self.exploration_turn_logs, f, ensure_ascii=False, indent=2)
-
-    def save(self) -> None:
-        """Save env turn logs to JSON file"""
-        if self.exploration_turn_logs:
-            with open(self.exploration_path, "w") as f:
-                json.dump(self.exploration_turn_logs, f, ensure_ascii=False, indent=2)
+    def save_evaluation(self) -> None:
+        """Save evaluation turn logs to JSON file"""
         with open(self.evaluation_path, "w") as f:
             json.dump(self.evaluation_turn_logs, f, ensure_ascii=False, indent=2)
+    def save(self) -> None:
+        """Save env turn logs to JSON file"""
+        self.save_exploration()
+        self.save_evaluation()
         # Also compute and save metrics for this sample
         metrics = self._compute_sample_metrics()
         with open(self.metrics_path, "w") as f:
@@ -183,7 +186,7 @@ class HistoryManager:
                 Agent.from_dict(turn_log['agent_state']),
                 mode='img', save_path=img_path,
             )
-            turn_log['room_image'] = img_path
+            turn_log['room_image'] = os.path.relpath(img_path, self.model_path)
 
     def _save_json(self, path: str, data: Dict) -> None:
         with open(path, "w") as f:
@@ -208,10 +211,6 @@ class HistoryManager:
         if task_type not in self.evaluation_turn_logs:
             self.evaluation_turn_logs[task_type] = {}
         self.evaluation_turn_logs[task_type][question_id] = turn_log
-
-        # Save per-question evaluation turn log
-        file_path = os.path.join(self.eval_tasks_dir, f"{question_id}.json")
-        self._save_json(file_path, turn_log)
 
     def update_turn_log(self, turn_log: Dict) -> None:
         """Dispatch to specific update functions (kept for compatibility)."""
@@ -251,6 +250,10 @@ class HistoryManager:
         """Check if a question with the given ID already exists in evaluation logs"""
         return any(question_id in questions for questions in self.evaluation_turn_logs.values())
 
+    def get_eval_ids(self) -> Dict[str, int]:
+        """Return list of completed eval question IDs per task class name."""
+        return {task_type: [question["evaluation_log"]["evaluation_data"]['id'] for question in questions.values()] for task_type, questions in self.evaluation_turn_logs.items()}
+
     def get_eval_counts(self) -> Dict[str, int]:
         """Return number of completed eval questions per task class name."""
         return {task_type: len(questions or {}) for task_type, questions in self.evaluation_turn_logs.items()}
@@ -275,9 +278,9 @@ class HistoryManager:
     #     return os.path.join(output_dir, model_name)
 
     @staticmethod
-    def get_model_dir(output_dir: str, model_config: Dict) -> str:
+    def get_model_dir(output_dir: str, model_name: str) -> str:
         """Generate a unique directory name for the model configuration"""
-        model_name = model_config['model_name'].replace("/", "-")
+        model_name = model_name.replace("/", "-")
         return os.path.join(output_dir, model_name)
     
     @staticmethod
@@ -298,6 +301,7 @@ class HistoryManager:
         sample_dirs = [d for d in os.listdir(model_dir) if os.path.isdir(os.path.join(model_dir, d))]
 
         # Sequential numbering only for valid samples (with valid subdirs)
+        sample_counter = 0
         for sample_dir in sample_dirs:
             sample_path = os.path.join(model_dir, sample_dir)
 
@@ -310,9 +314,13 @@ class HistoryManager:
             # Skip if subdirs is empty (invalid sample)
             if not subdirs:
                 continue
-            with open(os.path.join(sample_path, CONFIG_BASENAME), 'r') as f:
+            with open(os.path.join(subdirs[0], CONFIG_BASENAME), 'r') as f:
                 sample_cfg = json.load(f)
-            sample_key = f"sample_{os.path.basename(sample_cfg['image_dir'])}"
+            if sample_cfg.get("image_dir") is None:
+                sample_key = f"sample_{sample_counter}"
+                sample_counter += 1
+            else:
+                sample_key = f"sample_{os.path.basename(sample_cfg['image_dir'])}"
             assert sample_key not in samples, f"Duplicate sample key {sample_key}"
             samples[sample_key] = {}
 
@@ -398,16 +406,12 @@ class HistoryManager:
         if save_images:
             # Process exploration turn logs
             for turn_log in sample_data["env_turn_logs"]:
-                if turn_log.get("room_image"):
-                    turn_log['room_image'] = os.path.relpath(turn_log['room_image'], model_dir)
                 if turn_log.get('message_images'):
                     turn_log['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in turn_log['message_images']]
 
             # Process evaluation tasks
             for task in sample_data["evaluation_tasks"].values():
                 for question_data in task.values():
-                    if question_data.get("room_image"):
-                        question_data['room_image'] = os.path.relpath(question_data['room_image'], model_dir)
                     if question_data.get('message_images'):
                         question_data['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in question_data['message_images']]
 
@@ -429,44 +433,43 @@ class HistoryManager:
         """Persist minimal state to reload this HistoryManager later without reconstruction."""
         state = {
             "observation_config": {
-                "render_mode": os.path.basename(os.path.dirname(os.path.dirname(self.output_dir))),
+                "render_mode": self.observation_config['render_mode'],
                 "exp_type": self.exp_type,
                 "prompt_config": {"enable_think": bool(self.enable_think)},
+                "proxy_agent": self.observation_config['proxy_agent'] if self.exp_type == 'passive' else None,
             },
             "model_config": json.load(open(self.model_config_path)) if os.path.exists(self.model_config_path) else {},
             "room_dict": json.load(open(self.sample_config_path)).get("room_dict", {}) if os.path.exists(self.sample_config_path) else {},
             "agent_dict": json.load(open(self.sample_config_path)).get("agent_dict", {}) if os.path.exists(self.sample_config_path) else {},
             "image_dir": json.load(open(self.sample_config_path)).get("image_dir") if os.path.exists(self.sample_config_path) else None,
-            "base_output_dir": os.path.dirname(self.model_path),
-            "run_seed": self.run_seed,
+            "seed": self.seed,
         }
         with open(self.state_path, "w") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
 
-    @classmethod
-    def load_from_dir(combo_dir: str) -> "HistoryManager":
+    @staticmethod
+    def load_from_dir(combo_dir: str, eval_override: bool, all_tasks: List = None) -> "HistoryManager":
         """Load a HistoryManager using state saved in combo_dir/history_state.json."""
         combo_dir = os.path.abspath(combo_dir)
         state_file = os.path.join(combo_dir, STATE_BASENAME)
         assert os.path.exists(state_file), f"Missing state file: {state_file}"
         with open(state_file, "r") as f:
             s = json.load(f)
+        model_name = s.get("model_config", {}).get("model_name", "").replace("/", "-")
+        output_dir = combo_dir.split(model_name)[0]
         hm = HistoryManager(
             observation_config=s.get("observation_config", {}),
             model_config=s.get("model_config", {}),
             room_dict=s.get("room_dict", {}),
             agent_dict=s.get("agent_dict", {}),
-            output_dir=s.get("base_output_dir", os.path.dirname(os.path.dirname(os.path.dirname(combo_dir)))),
+            output_dir=output_dir,
+            seed=s.get("seed", 0),
             image_dir=s.get("image_dir"),
-            eval_override=False,
-            all_override=False,
-            task_type=None,
+            eval_override=eval_override,
+            all_tasks=all_tasks,
         )
-        hm.run_seed = s.get("run_seed")
         return hm
 
-    def set_run_seed(self, seed: int | None) -> None:
-        self.run_seed = None if seed is None else int(seed)
 
     # -------- Accessors for builder/inference --------
     def get_enable_think(self) -> bool:

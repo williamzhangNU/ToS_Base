@@ -256,14 +256,19 @@ def _check_triple_consistency(name_a: str, name_b: str, name_c: str,
 
 
 def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 5,
-              allow_scale: bool = False, pos_norm_L: float | None = None) -> List[MapCogMetrics]:
-    """Per-adjacent-turn stability using predicted vs GT global maps on unchanged objects.
+              allow_scale: bool = False, pos_norm_L: float | None = None) -> Tuple[List[float], List[MapCogMetrics]]:
+    """Per-adjacent-turn stability decoupled into update and stability check metrics.
 
     For each adjacent exploration turn (t-1 -> t):
-    - Select objects with small domain-size change based on possible_positions between t-1 and t
-    - Compare current predicted global map vs current GT global (restricted to selected objects)
+    - Update metric: For objects in previous turn's observed_items (re-observed objects),
+      check if predicted position at turn t is getting closer to GT compared to turn t-1
+    - Stability check metric: For objects with small domain-size change (based on possible_positions),
+      compare current predicted global map vs current GT global
 
-    Returns a list of MapCogMetrics (one per adjacent pair). Invalid metric for missing data.
+    Returns:
+        Tuple of (update_metrics, stability_check_metrics):
+        - update_metrics: List[float] - Average of boolean values indicating if each re-observed object is getting closer to GT
+        - stability_check_metrics: List[MapCogMetrics] - Stability comparison metrics for unchanged objects
     """
     # Normalize input to a list of exploration turns
     if isinstance(env_data_or_logs, dict):
@@ -272,9 +277,10 @@ def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 5,
         logs = env_data_or_logs or []
 
     expl = [t for t in logs if t.get('is_exploration_phase')]
-    out: List[MapCogMetrics] = []
+    update_out: List[float] = []
+    stability_out: List[MapCogMetrics] = []
     if len(expl) <= 1:
-        return out
+        return update_out, stability_out
 
     def _filter_room(br: BaseRoom, keep: set[str]) -> BaseRoom:
         objs = [o for o in br.objects if o.name in keep]
@@ -286,30 +292,64 @@ def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 5,
         prev_pp: Dict[str, List[List[int]]] = (prev_log.get('exploration_log') or {}).get('possible_positions') or {}
         curr_pp: Dict[str, List[List[int]]] = (curr_log.get('exploration_log') or {}).get('possible_positions') or {}
 
-        # Need current predicted and GT global rooms
+        # Get observed items from previous turn's exploration log (re-observed objects)
+        prev_observed: List[str] = (prev_log.get('exploration_log') or {}).get('observed_items') or []
+        observed_set = set(prev_observed)
+
+        # Need previous and current predicted and GT global rooms
+        g_prev = ((prev_log.get('cogmap_log') or {}).get('global') or {})
+        pred_prev = BaseRoom.from_dict((g_prev.get('pred_room_state')) or {})
+        gt_prev = BaseRoom.from_dict((g_prev.get('gt_room_state_full') or g_prev.get('gt_room_state')) or {})
+
         g_curr = ((curr_log.get('cogmap_log') or {}).get('global') or {})
         pred_curr = BaseRoom.from_dict((g_curr.get('pred_room_state')) or {})
         gt_curr = BaseRoom.from_dict((g_curr.get('gt_room_state_full') or g_curr.get('gt_room_state')) or {})
 
-        if not prev_pp or not curr_pp or pred_curr is None or gt_curr is None:
-            out.append(MapCogMetrics.invalid())
+        if pred_prev is None or pred_curr is None or gt_prev is None or gt_curr is None:
+            update_out.append(0.0)
+            stability_out.append(MapCogMetrics.invalid())
             continue
 
-        # Select unchanged objects based on domain-size change
+        # Compute update metric: check if each observed object is getting closer to GT
+        update_scores: List[bool] = []
+        pred_prev_dict = {o.name: o for o in pred_prev.objects}
+        pred_curr_dict = {o.name: o for o in pred_curr.objects}
+        gt_prev_dict = {o.name: o for o in gt_prev.objects}
+        gt_curr_dict = {o.name: o for o in gt_curr.objects}
+
+        for name in observed_set:
+            # Check if object exists in all required maps
+            if name in pred_prev_dict and name in pred_curr_dict and name in gt_prev_dict and name in gt_curr_dict:
+                # Calculate distances to ground truth
+                prev_dist = np.linalg.norm(np.array(pred_prev_dict[name].pos) - np.array(gt_prev_dict[name].pos))
+                curr_dist = np.linalg.norm(np.array(pred_curr_dict[name].pos) - np.array(gt_curr_dict[name].pos))
+                # Object is updating towards GT if current distance is smaller
+                update_scores.append(curr_dist < prev_dist)
+
+        # Average of boolean values (True=1, False=0)
+        update_metric = float(np.mean(update_scores)) if update_scores else 0.0
+        update_out.append(update_metric)
+
+        # Compute stability check metric: select unchanged objects based on domain-size change
+        if not prev_pp or not curr_pp:
+            stability_out.append(MapCogMetrics.invalid())
+            continue
+
         selected: set[str] = set()
         for name, prev_pts in prev_pp.items():
             if name in curr_pp and abs(len(prev_pts) - len(curr_pp[name])) < int(threshold):
                 selected.add(name)
+
         if not selected:
-            out.append(MapCogMetrics.invalid())
+            stability_out.append(MapCogMetrics.invalid())
             continue
 
-        # Restrict rooms to selected objects and compare
+        # Existing comparison logic for stability check
         pred_sel = _filter_room(pred_curr, selected)
         gt_sel = _filter_room(gt_curr, selected)
-        out.append(compare_on_common_subset(pred_sel, gt_sel, allow_scale=allow_scale, pos_norm_L=pos_norm_L))
+        stability_out.append(compare_on_common_subset(pred_sel, gt_sel, allow_scale=allow_scale, pos_norm_L=pos_norm_L))
 
-    return out
+    return update_out, stability_out
 
 
 __all__ = [

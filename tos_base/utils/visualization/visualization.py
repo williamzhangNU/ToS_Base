@@ -751,11 +751,11 @@ class HTMLGenerator:
                         obs_id = f"obs_{page_idx}_{t_idx}_{question_idx}"
                         self._render_expandable_block(f, eval_log['user_message'], obs_id, "❓ Evaluation Question")
                     # Display assistant thinking and action
-                    if eval_log.get('assistant_think_message'):
+                    if eval_log.get('assistant_raw_message'):
                         think_id = f"think_{page_idx}_{t_idx}_{question_idx}"
-                        self._render_expandable_block(f, eval_log['assistant_think_message'], think_id, "🤔 Assistant Thinking", "think")
+                        self._render_expandable_block(f, eval_log['assistant_raw_message'], think_id, "🤔 Assistant Answer", "answer")
                     
-                    self._render_simple_block(f, eval_log.get('assistant_parsed_message', ''), "💬 Assistant Answer", "answer")
+                    # self._render_simple_block(f, eval_log.get('assistant_parsed_message', ''), "💬 Assistant Answer", "answer")
                     if eval_log.get('cogmap_log'):
                         self._render_cogmap_responses(f, eval_log['cogmap_log'], page_idx, t_idx)
                         self._render_cogmap_metrics(f, eval_log['cogmap_log'])
@@ -766,7 +766,7 @@ class HTMLGenerator:
                         details = {
                             **eval_info.get("evaluation_data", {}),
                             **eval_info.get("evaluation_info", {}),
-                            "Correct": eval_info.get("is_correct"),
+                            "score": float(eval_info.get("score")),
                         }
                         f.write(VisualizationHelper.dict_to_html(details))
                         f.write("</div>\n")

@@ -1,9 +1,10 @@
 from enum import Enum
-from typing import Dict, Type, TYPE_CHECKING
+from typing import Any, Dict, Optional, Tuple, Type, TYPE_CHECKING
 import numpy as np
 
 from ..core.room import Room
 from ..core.object import Agent
+from ..utils.eval_utilities import evaluate_task_answer
 if TYPE_CHECKING:
     from .tasks import BaseEvaluationTask
 
@@ -21,6 +22,7 @@ class EvalTaskType(Enum):
     BWD_LOC = ("bwd_loc", "BackwardLocEvaluationTask")
     FWD_FOV = ("fwd_fov", "ForwardFOVEvaluationTask")
     BWD_NAV = ("bwd_nav", "BackwardNavEvaluationTask")
+    BWD_NAV_REV = ("bwd_nav_rev", "BackwardNavRevEvaluationTask")
     FALSE_BELIEF = ("false_belief", "FalseBeliefDirectionPov")
     DIR_ANCHOR = ("dir_anchor", "DirectionPov")
     
@@ -47,7 +49,7 @@ class EvalTaskType(Enum):
         from .e2a import E2AEvaluationTask
         from .localization import ForwardLocEvaluationTask, BackwardLocEvaluationTask
         from .false_belief import FalseBeliefDirectionPov
-        from .navigation_tasks import ForwardFOVEvaluationTask, BackwardNavEvaluationTask
+        from .navigation_tasks import ForwardFOVEvaluationTask, BackwardNavEvaluationTask, BackwardNavRevEvaluationTask
         
         task_map = {
             cls.DIR.short_name: DirectionEvaluationTask,
@@ -61,6 +63,7 @@ class EvalTaskType(Enum):
             cls.FALSE_BELIEF.short_name: FalseBeliefDirectionPov,
             cls.FWD_FOV.short_name: ForwardFOVEvaluationTask,
             cls.BWD_NAV.short_name: BackwardNavEvaluationTask,
+            cls.BWD_NAV_REV.short_name: BackwardNavRevEvaluationTask,
             cls.BWD_POV.short_name: BackwardPovEvaluationTask,
         }
         return task_map
@@ -71,6 +74,27 @@ class EvalTaskType(Enum):
         task_map = cls.get_task_map()
         return {task.class_name: task_class for task, task_class in 
                 zip(cls, task_map.values())}
+
+    @classmethod
+    def resolve_class_name(cls, task_name: str) -> str:
+        """Resolve short or long task identifier to class name."""
+        if task_name in cls.get_short_names():
+            return cls.from_short_name(task_name).class_name
+        if task_name in cls.get_class_names():
+            return task_name
+        raise ValueError(f"Unknown task identifier: {task_name}")
+
+    @classmethod
+    def evaluate_prediction(
+        cls,
+        task_name: str,
+        pred: Any,
+        answer: Any,
+        choices: Optional[list[str]] = None,
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Evaluate a prediction for the given task identifier."""
+        class_name = cls.resolve_class_name(task_name)
+        return evaluate_task_answer(class_name, pred, answer, choices or [])
     
     @classmethod
     def from_short_name(cls, short_name: str) -> 'EvalTaskType':
@@ -104,7 +128,7 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
 
-    task_name = 'dir_anchor'
+    task_name = 'bwd_loc'
     for seed in tqdm(range(0, 1)):
         np_random = np.random.default_rng(seed)
         room, agent = RoomGenerator.generate_room(
@@ -120,5 +144,6 @@ if __name__ == "__main__":
         # RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
         task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
         print(task.generate_question(), task.answer)
-        # task.generate_question()
-        print(task.answer)
+        user_pred = task.answer
+        score, info = EvalTaskType.evaluate_prediction(task_name, user_pred, task.answer, task.choices)
+        print(f"Evaluation result: {score}, details: {info}")
