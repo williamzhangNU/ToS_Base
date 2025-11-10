@@ -86,17 +86,10 @@ class MoveAction(BaseAction):
         if not kwargs.get('move_anyway', False) and not self._is_visible(agent, target_obj):
             return ActionResult(False, self.get_feedback(False, "not_visible"), str(self), 'move', {'target_name': self.target})        
         
-        # extra messaging for gates and entering rooms
-        prev_room = agent.room_id
-        extra_msg = f"This gate connects rooms {target_obj.room_id[0]} and {target_obj.room_id[1]}." if isinstance(target_obj, Gate) else None
-        
         # apply move and room membership
         agent.pos, agent.room_id = target_obj.pos, target_obj.room_id
         
-        # entering room from a gate
-        if (extra_msg is None) and (not isinstance(target_obj, Gate)) and isinstance(prev_room, (list, tuple)):
-            extra_msg = f"You are in room {target_obj.room_id}."
-        return ActionResult(True, self.get_feedback(True, extra=extra_msg), str(self), 'move', {'target_name': self.target})
+        return ActionResult(True, self.get_feedback(True), str(self), 'move', {'target_name': self.target})
     
     def __repr__(self):
         return f"JumpTo({self.target})"

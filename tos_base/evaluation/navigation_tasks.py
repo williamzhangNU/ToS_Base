@@ -5,12 +5,13 @@ BackwardNavEvaluationTask: infer action sequence from a final observation.
 BackwardNavRevEvaluationTask: navigate back to starting point from termination location.
 """
 
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Set, Optional
 import numpy as np
 import json
+from collections import deque
 
 from .tasks import BaseEvaluationTask, retry_generate_question
-from ..core.object import Agent, Gate
+from ..core.object import Agent, Gate, Object
 from ..core.relationship import PairwiseRelationshipDiscrete, EgoFrontBins, StandardDistanceBins
 from ..actions import ObserveAction, RotateAction, MoveAction
 from ..managers.exploration_manager import ExplorationManager
@@ -103,7 +104,7 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
             names.extend(self.room.gates_by_room.get(int(rid), []))
         return list(dict.fromkeys(names))
 
-    def _generate_plan(self, steps: int = 2) -> List[NavAction]:
+    def _generate_plan(self, steps: int = 3) -> List[NavAction]:
         """Generate navigation plan that keeps JumpTo targets in view."""
         a = self._agent_from_init()
         plan: List[NavAction] = []
@@ -266,6 +267,65 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
                 return plan, agent, visible
         raise ValueError("Failed to generate navigation plan with visible objects")
 
+    def _compute_shortest_path(self, start_pos: Tuple[int, int], start_ori: Tuple[int, int],
+                               target_pos: Tuple[int, int]) -> int:
+        """
+        Compute shortest action sequence from start to target using BFS.
+
+        Args:
+            start_pos: Starting position (x, y)
+            start_ori: Starting orientation (dx, dy)
+            target_pos: Target position (x, y)
+
+        Returns:
+            List of NavAction tuples or None if no path exists
+        """
+        # State: (pos, ori, path)
+        # pos: (x, y), ori: (dx, dy), path: List[NavAction]
+        start_state = (tuple(start_pos), tuple(start_ori), [])
+        queue = deque([start_state])
+        visited: Set[Tuple[Tuple[int, int], Tuple[int, int]]] = {(tuple(start_pos), tuple(start_ori))}
+
+        # Create a temporary agent for visibility checks
+        temp_agent = Agent(name='temp', pos=np.array(start_pos), ori=np.array(start_ori))
+        room = self.room.copy()
+        room.add_object(Object(name="initial_pos", pos=np.array(target_pos)))
+        while queue:
+            current_pos, current_ori, path = queue.popleft()
+
+            # Check if we reached the target
+            if np.allclose(current_pos, target_pos):
+                return len(path)
+
+            # Update temp agent state
+            temp_agent.pos = np.array(current_pos)
+            temp_agent.ori = np.array(current_ori)
+            temp_agent.room_id = self.room.get_cell_info(int(current_pos[0]), int(current_pos[1])).get('room_id')
+
+            # Try all rotation actions
+            for degrees in [90, -90, 180]:
+                new_ori = _rotate_ori(current_ori, degrees)
+                state_key = (current_pos, tuple(new_ori))
+                if state_key not in visited:
+                    visited.add(state_key)
+                    new_path = path + [('rotate', degrees)]
+                    queue.append((current_pos, tuple(new_ori), new_path))
+
+            # Try jumping to all visible objects
+            for obj in room.all_objects:
+                if np.allclose(obj.pos, current_pos):
+                    continue  # Skip current position
+
+                if MoveAction._is_visible(temp_agent, obj):
+                    new_pos = tuple(map(int, obj.pos))
+                    state_key = (new_pos, current_ori)
+                    if state_key not in visited:
+                        visited.add(state_key)
+                        new_path = path + [('jumpto', obj.name)]
+                        queue.append((new_pos, current_ori, new_path))
+
+        raise ValueError("No path found")
+
 class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
     """Predict final observation from an action sequence."""
     QUESTION_TEMPLATE = (
@@ -325,6 +385,7 @@ class BackwardNavEvaluationTask(BaseNavEvaluationTask):
             'init_pos': tuple(map(int, init_agent.pos)),
             'init_ori': tuple(map(int, init_agent.ori)),
             'object_positions': object_positions,
+            "minimal_steps": self._compute_shortest_path(init_agent.pos,init_agent.ori,end_agent.pos),
             'final_observation': [
                 {
                     'name': name,
@@ -345,88 +406,40 @@ class BackwardNavEvaluationTask(BaseNavEvaluationTask):
 class BackwardNavRevEvaluationTask(BaseNavEvaluationTask):
     """Navigate back to starting point from termination location."""
     QUESTION_TEMPLATE = (
-        "You changed to a new location and facing direction.\n"
-        "You observe the following:\n"
-        "{current_obs}\n\n"
+        "You are currently at the termination location.\n"
         "What action sequence will navigate you back to your starting position?\n\n"
         "Answer format: use a valid action sequence\n"
         "You must end with a JumpTo(initial_pos) action.\n"
         "Example: Rotate(90), JumpTo(lamp), Rotate(90), JumpTo(initial_pos)\n"
     )
 
-    def _is_initial_pos_visible(self, agent: Agent, init_pos: np.ndarray) -> bool:
-        """Check if initial position is visible from agent's current position and orientation."""
-        from ..actions import MoveAction
-
-        # Check if initial_pos is visible from agent's perspective
-        # We need to check all 4 cardinal orientations
-        for ori in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-            tmp_agent = agent.copy()
-            tmp_agent.ori = np.array(ori)
-            if MoveAction._is_visible(tmp_agent, type('obj', (), {'pos': init_pos})(), field_of_view=90):
-                return True
-        return False
-
     @retry_generate_question
     def generate_question(self) -> str:
-        steps = int(self.config.get('steps', 2))
-
-        # Get number of rooms
-        num_rooms = len([rid for rid in np.unique(self.room.mask) if 1 <= int(rid) < 100])
-
-        # Get initial agent position
-        init_agent = self._agent_from_init()
-        init_pos = init_agent.pos
-
-        # Generate plan with constraints
-        max_attempts = 20
-        for attempt in range(max_attempts):
-            plan, end_agent, visible = self._sample_plan_with_visible(steps)
-
-            # Check constraints based on number of rooms
-            if num_rooms > 1:
-                # Constraint 1: If multiple rooms, end position must NOT be in room 1
-                end_room_id = self._current_rooms(end_agent)
-                if end_room_id and 1 in end_room_id:
-                    continue  # Retry if in room 1
-            else:
-                # Constraint 2: If single room, end position must NOT directly see initial_pos
-                if self._is_initial_pos_visible(end_agent, init_pos):
-                    continue  # Retry if initial_pos is visible
-
-            # Valid plan found
-            break
-        else:
-            # If no valid plan found after max_attempts, raise error to trigger retry
-            raise ValueError(f"Failed to generate valid plan after {max_attempts} attempts")
-
-        # Current observation at termination location
-        self.np_random.shuffle(visible)
-        visible = visible[:3]
-        obs_parts = [f"{name} is at {direction}, {distance}"
-                    for name, direction, distance in visible]
-        current_obs = "; ".join(obs_parts)
-
         # Store initial and final states for evaluation
+        # Current position is self.agent.pos (termination location)
+        # Initial position is self.agent.init_pos
+        start_pos = tuple(map(int, self.agent.pos))
+        start_ori = tuple(map(int, self.agent.ori))
+        target_pos = tuple(map(int, self.agent.init_pos))
+        target_ori = tuple(map(int, self.agent.init_ori))
         object_positions = {obj.name: tuple(map(int, obj.pos)) for obj in self.room.all_objects}
 
+        # Compute shortest path
+        minimal_steps = self._compute_shortest_path(start_pos, start_ori, target_pos)
+
+        if minimal_steps is None:
+            raise ValueError("No path found from current position to initial position")
+
         answer = {
-            'start_pos': tuple(map(int, end_agent.pos)),  # Starting from termination location
-            'start_ori': tuple(map(int, end_agent.ori)),
-            'target_pos': tuple(map(int, init_agent.pos)),  # Target is the initial position
-            'target_ori': tuple(map(int, init_agent.ori)),
+            'start_pos': start_pos,  # Starting from termination location
+            'start_ori': start_ori,
+            'target_pos': target_pos,  # Target is the initial position
+            'target_ori': target_ori,
             'object_positions': object_positions,
-            'current_observation': [
-                {
-                    'name': name,
-                    'direction': direction,
-                    'distance': distance,
-                }
-                for name, direction, distance in visible
-            ],
+            'minimal_steps': minimal_steps,  # Number of actions in shortest path
         }
 
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(current_obs=current_obs)
+        self.eval_data.question = self.QUESTION_TEMPLATE.format()
         self.eval_data.answer = answer
         self.eval_data.choices = []
         self.eval_data.id = hash(self.eval_data.question)
