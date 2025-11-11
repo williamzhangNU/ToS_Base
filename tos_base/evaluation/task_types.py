@@ -16,12 +16,15 @@ class EvalTaskType(Enum):
     ROT = ("rot", "RotEvaluationTask")
     ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
     POV = ("pov", "PovEvaluationTask")
-    BWD_POV = ("bwd_pov", "BackwardPovEvaluationTask")
+    BWD_POV_TEXT = ("bwd_pov_text", "BackwardPovTextEvaluationTask")
+    BWD_POV_VISION = ("bwd_pov_vision", "BackwardPovVisionEvaluationTask")
     E2A = ("e2a", "E2AEvaluationTask")
     FWD_LOC = ("fwd_loc", "ForwardLocEvaluationTask")
-    BWD_LOC = ("bwd_loc", "BackwardLocEvaluationTask")
+    BWD_LOC_TEXT = ("bwd_loc_text", "BackwardLocTextEvaluationTask")
+    BWD_LOC_VISION = ("bwd_loc_vision", "BackwardLocVisionEvaluationTask")
     FWD_FOV = ("fwd_fov", "ForwardFOVEvaluationTask")
-    BWD_NAV = ("bwd_nav", "BackwardNavEvaluationTask")
+    BWD_NAV_TEXT = ("bwd_nav_text", "BackwardNavTextEvaluationTask")
+    BWD_NAV_VISION = ("bwd_nav_vision", "BackwardNavVisionEvaluationTask")
     BWD_NAV_REV = ("bwd_nav_rev", "BackwardNavRevEvaluationTask")
     FALSE_BELIEF = ("false_belief", "FalseBeliefDirectionPov")
     DIR_ANCHOR = ("dir_anchor", "DirectionPov")
@@ -44,12 +47,12 @@ class EvalTaskType(Enum):
     def get_task_map(cls) -> Dict[str, 'Type[BaseEvaluationTask]']:
         """Get mapping from short names to task classes."""
         # Import here to avoid circular imports
-        from .direction import DirectionEvaluationTask, PovEvaluationTask, BackwardPovEvaluationTask, DirectionPov
+        from .direction import DirectionEvaluationTask, PovEvaluationTask, BackwardPovTextEvaluationTask, BackwardPovVisionEvaluationTask, DirectionPov
         from .rotation import RotEvaluationTask, RotDualEvaluationTask
         from .e2a import E2AEvaluationTask
-        from .localization import ForwardLocEvaluationTask, BackwardLocEvaluationTask
+        from .localization import ForwardLocEvaluationTask, BackwardLocTextEvaluationTask, BackwardLocVisionEvaluationTask
         from .false_belief import FalseBeliefDirectionPov
-        from .navigation_tasks import ForwardFOVEvaluationTask, BackwardNavEvaluationTask, BackwardNavRevEvaluationTask
+        from .navigation_tasks import ForwardFOVEvaluationTask, BackwardNavTextEvaluationTask, BackwardNavVisionEvaluationTask, BackwardNavRevEvaluationTask
         
         task_map = {
             cls.DIR.short_name: DirectionEvaluationTask,
@@ -59,12 +62,15 @@ class EvalTaskType(Enum):
             cls.DIR_ANCHOR.short_name: DirectionPov,
             cls.E2A.short_name: E2AEvaluationTask,
             cls.FWD_LOC.short_name: ForwardLocEvaluationTask,
-            cls.BWD_LOC.short_name: BackwardLocEvaluationTask,
+            cls.BWD_LOC_TEXT.short_name: BackwardLocTextEvaluationTask,
+            cls.BWD_LOC_VISION.short_name: BackwardLocVisionEvaluationTask,
             cls.FALSE_BELIEF.short_name: FalseBeliefDirectionPov,
             cls.FWD_FOV.short_name: ForwardFOVEvaluationTask,
-            cls.BWD_NAV.short_name: BackwardNavEvaluationTask,
+            cls.BWD_NAV_TEXT.short_name: BackwardNavTextEvaluationTask,
+            cls.BWD_NAV_VISION.short_name: BackwardNavVisionEvaluationTask,
             cls.BWD_NAV_REV.short_name: BackwardNavRevEvaluationTask,
-            cls.BWD_POV.short_name: BackwardPovEvaluationTask,
+            cls.BWD_POV_TEXT.short_name: BackwardPovTextEvaluationTask,
+            cls.BWD_POV_VISION.short_name: BackwardPovVisionEvaluationTask,
         }
         return task_map
     
