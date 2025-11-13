@@ -117,6 +117,7 @@ class HTMLGenerator:
             infogain_plot = None
             cogmap_update_plot = None
             cogmap_full_plot = None
+            cogmap_self_tracking_plot = None
 
             # Exploration infogain plot
             if self.exp_summary.get("group_performance", {}).get(gname):
@@ -130,6 +131,7 @@ class HTMLGenerator:
                 cogmap_group = self.cogmap_summary["group_performance"][gname]
                 update_data = cogmap_group.pop("cogmap_update_per_turn", {})
                 full_data = cogmap_group.pop("cogmap_full_per_turn", {})
+                self_tracking_data = cogmap_group.pop("self_tracking_per_turn", {})
 
                 # Only accept new shape (metric -> list)
                 global_update = update_data if isinstance(update_data, dict) else {}
@@ -142,6 +144,12 @@ class HTMLGenerator:
                 if global_full and any(global_full.values()):
                     title = f"{gname} - Global (Full)"
                     cogmap_full_plot = create_cogmap_metrics_plot(global_full, title)
+
+                # Self-tracking plot (agent only)
+                global_self_tracking = self_tracking_data if isinstance(self_tracking_data, dict) else {}
+                if global_self_tracking and any(global_self_tracking.values()):
+                    title = f"{gname} - Global (Self-Tracking)"
+                    cogmap_self_tracking_plot = create_cogmap_metrics_plot(global_self_tracking, title)
 
             # Generate correlation plots
             correlation_plots = {}
@@ -199,7 +207,7 @@ class HTMLGenerator:
             if cogmap_group:
                 # Display main cognitive map metrics (exclude per_turn data)
                 main_metrics = {k: v for k, v in cogmap_group.items()
-                               if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn"]}
+                               if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn", "self_tracking_per_turn"]}
                 if main_metrics:
                     f.write("<div class='metrics-box cogmap'>\n")
                     f.write("<h4>🧠 Cognitive Map</h4>\n")
@@ -221,7 +229,7 @@ class HTMLGenerator:
             # Plots section (display after metrics, but plots were generated earlier)
             f.write("<div class='plots-section'>\n")
 
-            # Display plots in a single row (up to 5 plots now)
+            # Display plots in a single row (up to 6 plots now)
             available_plots = []
             if infogain_plot:
                 available_plots.append(("Information Gain per Turn", infogain_plot, "Information Gain per Turn"))
@@ -229,6 +237,8 @@ class HTMLGenerator:
                 available_plots.append(("Cognitive Map (Update)", cogmap_update_plot, "Cognitive Map Update Turn Averages"))
             if cogmap_full_plot:
                 available_plots.append(("Cognitive Map (Full)", cogmap_full_plot, "Cognitive Map Full Turn Averages"))
+            if cogmap_self_tracking_plot:
+                available_plots.append(("Cognitive Map (Self-Tracking)", cogmap_self_tracking_plot, "Cognitive Map Self-Tracking Turn Averages"))
 
             # Add correlation plots
             if correlation_plots.get('cogmap_vs_accuracy'):
@@ -339,11 +349,13 @@ class HTMLGenerator:
         infogain_per_turn = entry['metrics'].get('exploration', {}).pop('infogain_per_turn', [])
         cogmap_update_data = entry['metrics'].get('cogmap', {}).pop('cogmap_update_per_turn', {})
         cogmap_full_data = entry['metrics'].get('cogmap', {}).pop('cogmap_full_per_turn', {})
-        
+        self_tracking_data = entry['metrics'].get('cogmap', {}).pop('self_tracking_per_turn', {})
+
         # Generate plots
         infogain_plot = None
         update_plot = None
         full_plot = None
+        self_tracking_plot = None
 
         # Information gain plot
         if infogain_per_turn:
@@ -358,7 +370,11 @@ class HTMLGenerator:
             title = f"{sample_name} - Global (Full)"
             full_plot = create_cogmap_metrics_plot(cogmap_full_data, title)
 
-        # Display all plots in horizontal layout (3 plots for samples)
+        if any(self_tracking_data.values()):
+            title = f"{sample_name} - Global (Self-Tracking)"
+            self_tracking_plot = create_cogmap_metrics_plot(self_tracking_data, title)
+
+        # Display all plots in horizontal layout (up to 4 plots for samples)
         available_plots = []
         if infogain_plot:
             available_plots.append(("Information Gain per Turn", infogain_plot, "Information Gain per Turn"))
@@ -366,6 +382,8 @@ class HTMLGenerator:
             available_plots.append(("Cognitive Map (Update)", update_plot, "Global Update Metrics"))
         if full_plot:
             available_plots.append(("Cognitive Map (Full)", full_plot, "Global Full Metrics"))
+        if self_tracking_plot:
+            available_plots.append(("Cognitive Map (Self-Tracking)", self_tracking_plot, "Global Self-Tracking Metrics"))
 
         if available_plots:
             f.write("<div class='cognitive-map-charts'>\n")

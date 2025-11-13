@@ -220,17 +220,23 @@ class Room(BaseRoom):
         if self.mask is not None:
             if 0 <= x < self.mask.shape[0] and 0 <= y < self.mask.shape[1]:
                 rid = int(self.mask[x, y])
-                info["room_id"] = rid if rid > 0 else None
+                if 0 < rid < 100:
+                    info["room_id"] = rid
         if getattr(self, 'object_map', None) is not None and self.object_map is not None:
             if 0 <= x < self.object_map.shape[0] and 0 <= y < self.object_map.shape[1]:
                 idx = int(self.object_map[x, y])
                 if idx > 0:
                     name = self.idx_to_name.get(idx)
                     if name is not None:
-                        if any(g.name == name for g in self.gates):
+                        gate_rooms = getattr(self, 'rooms_by_gate', {}).get(name)
+                        if gate_rooms:
                             info["gate_name"] = name
+                            info["room_id"] = [int(r) for r in gate_rooms]
                         else:
                             info["object_name"] = name
+                            obj_room = getattr(self, 'room_by_object', {}).get(name)
+                            if obj_room is not None:
+                                info["room_id"] = int(obj_room)
         return info
 
     def __repr__(self):

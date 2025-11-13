@@ -1,11 +1,23 @@
 import re
+from collections import deque
 from typing import Tuple
 import hashlib
 import numpy as np
 
+from ..actions.base import BaseAction
+from ..core.object import Agent, Object
+
 # Reusable labels for formatting and parsing
 THINK_LABEL = "THINK:"
 ANSWER_LABEL = "FINAL ANSWER:"
+
+_DEG_TO_VEC = {
+    0: (0, 1),
+    90: (1, 0),
+    180: (0, -1),
+    270: (-1, 0),
+}
+_VEC_TO_DEG = {v: k for k, v in _DEG_TO_VEC.items()}
 
 def numpy_to_python(obj):
     """Convert numpy types to native Python types for JSON serialization."""
@@ -79,10 +91,89 @@ def format_llm_output(think_content: str, answer_content: str, enable_think: boo
         return f"{THINK_LABEL}\n{think_content}\n{ANSWER_LABEL}\n{answer_content}"
     return f"{ANSWER_LABEL}\n{answer_content}"
 
+
+def compute_shortest_path(
+    room,
+    start_pos: Tuple[int, int],
+    start_ori: Tuple[int, int],
+    target_pos: Tuple[int, int],
+) -> int:
+    """Return shortest action count using rotate and jumpto actions."""
+    start_pos = tuple(map(int, start_pos))
+    start_ori = tuple(map(int, start_ori))
+    target_pos = tuple(map(int, target_pos))
+
+    queue = deque([(start_pos, start_ori, 0)])
+    visited = {(start_pos, start_ori)}
+
+    temp_agent = Agent(name="temp", pos=np.array(start_pos), ori=np.array(start_ori))
+    tmp_room = room.copy()
+    target_info = room.get_cell_info(int(target_pos[0]), int(target_pos[1]))
+    initial_stub = Object(name="initial_pos", pos=np.array(target_pos))
+    initial_stub.room_id = target_info.get("room_id")
+    tmp_room.add_object(initial_stub)
+
+    while queue:
+        pos, ori, steps = queue.popleft()
+        if np.allclose(pos, target_pos):
+            return steps
+
+        temp_agent.pos = np.array(pos)
+        temp_agent.ori = np.array(ori)
+        cell = room.get_cell_info(int(pos[0]), int(pos[1]))
+        temp_agent.room_id = cell.get("room_id")
+
+        cur_deg = _VEC_TO_DEG.get(tuple(int(x) for x in ori), 0)
+        for delta in (90, -90, 180):
+            new_deg = (cur_deg + int(delta)) % 360
+            new_ori = _DEG_TO_VEC.get(new_deg, ori)
+            key = (pos, new_ori)
+            if key not in visited:
+                visited.add(key)
+                queue.append((pos, new_ori, steps + 1))
+
+        for obj in tmp_room.all_objects:
+            if np.allclose(obj.pos, pos):
+                continue
+            if BaseAction._is_visible(temp_agent, obj):
+                new_pos = tuple(map(int, obj.pos))
+                key = (new_pos, ori)
+                if key not in visited:
+                    visited.add(key)
+                    queue.append((new_pos, ori, steps + 1))
+
+    raise ValueError("No path found")
+
 if __name__ == "__main__":
+    from .room_utils import RoomPlotter
     # Simple parser sanity checks
     llm_response = f"{THINK_LABEL}\nI will move then observe.{ANSWER_LABEL}\nActions: [JumpTo(table), Observe()]"
     t, a, ok = parse_llm_response(llm_response, enable_think=True)
     print('think:', t)
     print('answer:', a)
     print('ok:', ok)
+
+    # Shortest-path sanity checks on generated three-room layout
+    from .room_utils import RoomGenerator
+
+    rng = np.random.default_rng(1)
+    room, agent = RoomGenerator.generate_multi_room(room_size=[6, 6], room_num=4, n_objects=3, np_random=rng, topology=1)
+
+    start_pos = tuple(map(int, agent.init_pos))
+    start_ori = tuple(map(int, agent.init_ori))
+
+    print('steps (start->start):', compute_shortest_path(room, start_pos, start_ori, start_pos))
+
+    candidates = [
+        obj for obj in room.all_objects
+        if not np.allclose(obj.pos, agent.pos)
+    ]
+    RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
+    if candidates:
+        target = candidates[-4]
+        target_pos = tuple(map(int, target.pos))
+        print(f'steps (start->{target.name}):', compute_shortest_path(room, start_pos, start_ori, target_pos))
+        try:
+            print(f'steps ({target.name}->start):', compute_shortest_path(room, target_pos, start_ori, start_pos))
+        except ValueError as err:
+            print('return path failed:', err)

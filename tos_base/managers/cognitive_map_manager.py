@@ -484,11 +484,13 @@ class CognitiveMapManager:
             evaluation = avg_nested_dicts([m.get('evaluation') or {} for m in pre_list])
             update_turn = avg_nested_dicts([{'cogmap_update_per_turn': m.get('cogmap_update_per_turn') or {}} for m in pre_list]).get('cogmap_update_per_turn', {})
             full_turn = avg_nested_dicts([{'cogmap_full_per_turn': m.get('cogmap_full_per_turn') or {}} for m in pre_list]).get('cogmap_full_per_turn', {})
+            self_tracking_turn = avg_nested_dicts([{'self_tracking_per_turn': m.get('self_tracking_per_turn') or {}} for m in pre_list]).get('self_tracking_per_turn', {})
             return {
                 'exploration': exploration,
                 'evaluation': evaluation if evaluation else {'correctness': {}},
                 'cogmap_update_per_turn': update_turn,
                 'cogmap_full_per_turn': full_turn,
+                'self_tracking_per_turn': self_tracking_turn,
             }
         if exp_type == 'passive':
             exploration = avg_nested_dicts([m.get('exploration') or {} for m in pre_list])
@@ -541,7 +543,7 @@ class CognitiveMapManager:
         # Correctness: last global_full and relations_full
         correctness = {
             'last_global_vs_gt_full': (lambda _m: (_m.to_dict() if _m.valid else {}))(MapCogMetrics.from_dict((((last or {}).get('global') or {}).get('metrics_full') or {}))),
-            'last_relations_vs_gt_full': (lambda _r: (_r.to_dict() if _r.valid else {}))(RelationMetrics.from_dict((((last or {}).get('relations') or {}).get('metrics') or {}))),
+            # 'last_relations_vs_gt_full': (lambda _r: (_r.to_dict() if _r.valid else {}))(RelationMetrics.from_dict((((last or {}).get('relations') or {}).get('metrics') or {}))),
         }
 
         # Consistency
@@ -562,15 +564,15 @@ class CognitiveMapManager:
 
         consistency = {
             'local_vs_global_avg': _avg_consistency_lvsg(cog_logs).to_dict(),
-            'rooms_vs_global_last': MapCogMetrics.from_dict(((cons_last.get('rooms_vs_global') or {}).get('average') or {})).to_dict(),
-            'map_vs_relations_last': (float(cons_last.get('map_vs_relations')) if isinstance(cons_last.get('map_vs_relations'), (int, float)) else None),
-            'relations_consistency_last': (float(cons_last.get('relations_consistency')) if isinstance(cons_last.get('relations_consistency'), (int, float)) else None),
+            # 'rooms_vs_global_last': MapCogMetrics.from_dict(((cons_last.get('rooms_vs_global') or {}).get('average') or {})).to_dict(),
+            # 'map_vs_relations_last': (float(cons_last.get('map_vs_relations')) if isinstance(cons_last.get('map_vs_relations'), (int, float)) else None),
+            # 'relations_consistency_last': (float(cons_last.get('relations_consistency')) if isinstance(cons_last.get('relations_consistency'), (int, float)) else None),
             'update_avg': float(np.mean(update_metrics)) if update_metrics else 0.0,
             'stability_avg': MapCogMetrics.average(stability_check_metrics).to_dict(),
         }
 
         # Per-turn global metrics (concise helper)
-        per_turn_update, per_turn_full = CognitiveMapManager.compute_per_turn_global_metrics(cog_logs)
+        per_turn_update, per_turn_full, per_turn_self_tracking = CognitiveMapManager.compute_per_turn_global_metrics(cog_logs)
         false_belief_acc = BaseCogMetrics.average([BaseCogMetrics.from_dict(m) for m in false_belief_metrics]).to_dict() if false_belief_metrics else None
         if exp_type == 'passive':
             return {
@@ -592,17 +594,20 @@ class CognitiveMapManager:
             },
             'cogmap_update_per_turn': per_turn_update,
             'cogmap_full_per_turn': per_turn_full,
+            'self_tracking_per_turn': per_turn_self_tracking,
         }
 
     @staticmethod
-    def compute_per_turn_global_metrics(cog_logs: List[Dict[str, Any]]) -> Tuple[Dict[str, List[float]], Dict[str, List[float]]]:
-        """Return (update, full) per-turn global metric lists."""
+    def compute_per_turn_global_metrics(cog_logs: List[Dict[str, Any]]) -> Tuple[Dict[str, List[float]], Dict[str, List[float]], Dict[str, List[float]]]:
+        """Return (update, full, self_tracking) per-turn global metric lists."""
         per_turn_update = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
         per_turn_full = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
+        per_turn_self_tracking = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
         for d in cog_logs:
             g = d.get('global') or {}
             mu = MapCogMetrics.from_dict(g.get('metrics') or {})
             mf = MapCogMetrics.from_dict(g.get('metrics_full') or {})
+            ma = MapCogMetrics.from_dict(g.get('metric_agent') or {})
             per_turn_update['dir'].append(float(mu.dir) if mu.valid else None)
             per_turn_update['facing'].append(float(mu.facing) if mu.valid else None)
             per_turn_update['pos'].append(float(mu.pos) if mu.valid else None)
@@ -611,7 +616,11 @@ class CognitiveMapManager:
             per_turn_full['facing'].append(float(mf.facing) if mf.valid else None)
             per_turn_full['pos'].append(float(mf.pos) if mf.valid else None)
             per_turn_full['overall'].append(float(mf.overall) if mf.valid else None)
-        return per_turn_update, per_turn_full
+            per_turn_self_tracking['dir'].append(float(ma.dir) if ma.valid else None)
+            per_turn_self_tracking['facing'].append(float(ma.facing) if ma.valid else None)
+            per_turn_self_tracking['pos'].append(float(ma.pos) if ma.valid else None)
+            per_turn_self_tracking['overall'].append(float(ma.overall) if ma.valid else None)
+        return per_turn_update, per_turn_full, per_turn_self_tracking
     
     # register entry gates for active exploratoin
     def _register_active_entry_gate(self, gt_room) -> None:

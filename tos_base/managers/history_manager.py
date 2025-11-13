@@ -46,13 +46,15 @@ class HistoryManager:
             observation_config['exp_type'],
             "think" if observation_config['prompt_config']["enable_think"] else "nothink",
         ))
+        self.room_dict = room_dict
+        self.agent_dict = agent_dict
+        self.image_dir = image_dir
         self.observation_config = observation_config
         if observation_config['exp_type'] == 'passive':
             self.output_dir = os.path.join(self.output_dir, observation_config["proxy_agent"])
+        self.model_config_path = os.path.join(self.model_path, CONFIG_BASENAME)
         self.exploration_path = os.path.join(self.output_dir, EXPLORATION_LOG_BASENAME)
         self.evaluation_path = os.path.join(self.output_dir, EVALUATION_LOG_BASENAME)
-        self.model_config_path = os.path.join(self.model_path, CONFIG_BASENAME)
-        self.sample_config_path = os.path.join(self.output_dir, CONFIG_BASENAME)
         self.metrics_path = os.path.join(self.output_dir, METRICS_BASENAME)
         self.messages_path = os.path.join(self.output_dir, MESSAGES_BASENAME)
         self.state_path = os.path.join(self.output_dir, STATE_BASENAME)
@@ -77,21 +79,13 @@ class HistoryManager:
         if not os.path.exists(self.model_config_path):
             with open(self.model_config_path, "w") as f:
                 json.dump(model_config, f, ensure_ascii=False, indent=2)
-        if not os.path.exists(self.sample_config_path):
-            sample_cfg = {
-                "room_dict": room_dict,
-                "agent_dict": agent_dict,
-                "image_dir": image_dir,
-                "seed": seed,
-            }
-            with open(self.sample_config_path, "w") as f:
-                json.dump(sample_cfg, f, ensure_ascii=False, indent=2)
-
 
     def has_exploration(self, index):
         return 0 <= index < len(self.exploration_turn_logs)
 
     def _generate_room_key(self, room_dict, agent_dict):
+        agent_dict.pop("pos")
+        agent_dict.pop("ori")
         room_str = json.dumps({**room_dict, **agent_dict}, sort_keys=True)
 
         return hash(room_str)
@@ -171,10 +165,10 @@ class HistoryManager:
             entry["images"] = list(image_paths)
         self.messages.append(entry)
 
-    def save_messages(self) -> None:
+    def save_messages(self, agent_loc = None) -> None:
         with open(self.messages_path, "w") as f:
             json.dump(self.messages, f, ensure_ascii=False, indent=2)
-        self.save_state()
+        self.save_state(agent_loc)
 
 
     
@@ -314,7 +308,7 @@ class HistoryManager:
             # Skip if subdirs is empty (invalid sample)
             if not subdirs:
                 continue
-            with open(os.path.join(subdirs[0], CONFIG_BASENAME), 'r') as f:
+            with open(os.path.join(subdirs[0], STATE_BASENAME), 'r') as f:
                 sample_cfg = json.load(f)
             if sample_cfg.get("image_dir") is None:
                 sample_key = f"sample_{sample_counter}"
@@ -370,7 +364,7 @@ class HistoryManager:
         """Load data from a single sample's combination directory"""
         exploration_file = os.path.join(combo_path, EXPLORATION_LOG_BASENAME)
         evaluation_file = os.path.join(combo_path, EVALUATION_LOG_BASENAME)
-        config_file = os.path.join(combo_path, CONFIG_BASENAME)
+        config_file = os.path.join(combo_path, STATE_BASENAME)
         metrics_file = os.path.join(combo_path, METRICS_BASENAME)
 
         sample_data = {
@@ -429,8 +423,11 @@ class HistoryManager:
         }
 
     # -------- Simple persist/restore for reuse --------
-    def save_state(self) -> None:
+    def save_state(self, agent_loc = None) -> None:
         """Persist minimal state to reload this HistoryManager later without reconstruction."""
+        if  agent_loc is not None:
+            self.agent_dict['pos'] = agent_loc[0]
+            self.agent_dict['ori'] = agent_loc[1]
         state = {
             "observation_config": {
                 "render_mode": self.observation_config['render_mode'],
@@ -439,9 +436,9 @@ class HistoryManager:
                 "proxy_agent": self.observation_config['proxy_agent'] if self.exp_type == 'passive' else None,
             },
             "model_config": json.load(open(self.model_config_path)) if os.path.exists(self.model_config_path) else {},
-            "room_dict": json.load(open(self.sample_config_path)).get("room_dict", {}) if os.path.exists(self.sample_config_path) else {},
-            "agent_dict": json.load(open(self.sample_config_path)).get("agent_dict", {}) if os.path.exists(self.sample_config_path) else {},
-            "image_dir": json.load(open(self.sample_config_path)).get("image_dir") if os.path.exists(self.sample_config_path) else None,
+            "room_dict": self.room_dict,
+            "agent_dict": self.agent_dict,
+            "image_dir": self.image_dir,
             "seed": self.seed,
         }
         with open(self.state_path, "w") as f:
@@ -475,6 +472,6 @@ class HistoryManager:
     def get_enable_think(self) -> bool:
         return bool(self.enable_think)
 
-    def get_observation_config(self) -> Dict:
-        with open(self.state_path, "r") as f:
-            return (json.load(f) or {}).get("observation_config", {})
+    # def get_observation_config(self) -> Dict:
+    #     with open(self.state_path, "r") as f:
+    #         return (json.load(f) or {}).get("observation_config", {})

@@ -534,7 +534,7 @@ def _eval_backward_nav(pred: str, answer: Union[str, Dict]) -> Tuple[bool, Dict[
             'ori_match': final_ori == tuple(answer['final_ori']),
             'visible_match': True,
         })
-        return True, best_info
+        return min(answer['minimal_steps'] / len(pred_actions), 1.0), best_info
     
     # Also check ground truth position as fallback
     expected_pos = tuple(answer['final_pos'])
@@ -594,7 +594,7 @@ def _eval_backward_nav_rev(pred: str, answer: Union[str, Dict]) -> Tuple[bool, D
         'target_pos': target_pos,
     }
 
-    return is_visible, best_info
+    return is_visible * (len(answer['minimal_actions']) / len(pred_actions)), best_info
 
 def _calculate_coord_similarity(pred_coord: tuple[float, float], gt_coord: tuple[float, float]) -> float:
     pred = np.array(pred_coord, dtype=float)
@@ -845,14 +845,17 @@ TASK_EVALUATORS: Dict[str, TaskEvaluator] = {
     'RotDualEvaluationTask': _wrap_eval(_eval_rotation_direction),
     'DirectionEvaluationTask': _wrap_eval(_eval_direction_text),
     'PovEvaluationTask': _wrap_eval(_eval_direction_text),
-    'BackwardPovEvaluationTask': _wrap_eval(_eval_exact_text),
+    'BackwardPovTextEvaluationTask': _wrap_eval(_eval_exact_text),
+    'BackwardPovVisionEvaluationTask': _wrap_eval(_eval_exact_text),
     'DirectionPov': _wrap_eval(_eval_direction_text),
     'E2AEvaluationTask': lambda pred, answer, _choices: e2a_eval_fn(pred, answer),
     'ForwardFOVEvaluationTask': _wrap_eval(_eval_forward_nav),
-    'BackwardNavEvaluationTask': _wrap_eval(_eval_backward_nav, pred_cast=str, answer_cast=None),
+    'BackwardNavTextEvaluationTask': _wrap_eval(_eval_backward_nav, pred_cast=str, answer_cast=None),
+    'BackwardNavVisionEvaluationTask': _wrap_eval(_eval_backward_nav, pred_cast=str, answer_cast=None),
     'BackwardNavRevEvaluationTask': _wrap_eval(_eval_backward_nav_rev, pred_cast=str, answer_cast=None),
     'ForwardLocEvaluationTask': _wrap_eval(_eval_forward_nav),
-    'BackwardLocEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
+    'BackwardLocTextEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
+    'BackwardLocVisionEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
     'FalseBeliefDirectionPov': _wrap_eval(_eval_direction_text),
 }
 

@@ -2,6 +2,7 @@
 
 from typing import List, Tuple
 import numpy as np
+import json
 
 from .tasks import BaseEvaluationTask, retry_generate_question
 from ..core.object import Object
@@ -69,7 +70,7 @@ class BaseLocEvaluationTask(BaseEvaluationTask):
         raise ValueError("No valid pose found")
 
 
-class BackwardLocEvaluationTask(BaseLocEvaluationTask):
+class BackwardLocTextEvaluationTask(BaseLocEvaluationTask):
     """Localize your own coordinate (x, y) and orientation."""
     ACTION_TEMPLATE = (
         "You change to a new location and facing direction\n"
@@ -96,7 +97,7 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
         )
         correct_orientation = _ori_to_name(tuple(self.agent.ori))
 
-        self.eval_data.action = self.ACTION_TEMPLATE.format(observations=observations)
+        self.eval_data.action = self.ACTION_TEMPLATE.format(observations= observations )
         self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(
             origin_name=origin_obj.name,
         )
@@ -105,9 +106,46 @@ class BackwardLocEvaluationTask(BaseLocEvaluationTask):
             'orientation': correct_orientation,
         }
         self.eval_data.choices = []
-        self.eval_data.id = hash(self.eval_data.question)
+        self.eval_data.id = hash(json.dumps(self.eval_data.answer) + self.eval_data.question)
         return self.eval_data.question
+    
+class BackwardLocVisionEvaluationTask(BaseLocEvaluationTask):
+    """Localize your own coordinate (x, y) and orientation."""
+    ACTION_TEMPLATE = (
+        "You change to a new location and facing direction\n"
+        "{observations}\n"
+    )
+    QUESTION_TEMPLATE = (
+        "Treat {origin_name} as the origin (0, 0), and your starting facing direction is north.\n"
+        "What is your current 2D coordinate (x, y) and facing direction?\n\n"
+        "Answer format: (x, y), facing <direction>\n"
+        "Example: (2, -1), facing east\n"
+    )
 
+    @retry_generate_question
+    def generate_question(self) -> dict:
+        pos, ori, rid, _, hidden_objs = self._sample_valid_agent_pose()
+        self.agent.pos, self.agent.ori, self.agent.room_id = np.array(pos), np.array(ori), int(rid)
+        origin_obj = self.np_random.choice(hidden_objs)
+        observations = self._take_observations()
+        origin_pos = tuple(origin_obj.pos)
+        correct_coord = (
+            int(self.agent.pos[0]) - int(origin_pos[0]),
+            int(self.agent.pos[1]) - int(origin_pos[1]),
+        )
+        correct_orientation = _ori_to_name(tuple(self.agent.ori))
+
+        self.eval_data.action = self.ACTION_TEMPLATE.format(observations= "<image>")
+        self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(
+            origin_name=origin_obj.name,
+        )
+        self.eval_data.answer = {
+            'coord': correct_coord,
+            'orientation': correct_orientation,
+        }
+        self.eval_data.choices = []
+        self.eval_data.id = hash(json.dumps(self.eval_data.answer) + self.eval_data.question)
+        return self.eval_data.question
 
 class ForwardLocEvaluationTask(BaseLocEvaluationTask):
     ACTION_TEMPLATE = (
