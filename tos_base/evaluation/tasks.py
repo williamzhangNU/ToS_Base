@@ -148,57 +148,6 @@ class BaseEvaluationTask(ABC):
         task_type = data.get('type', cls.__name__)
         return task_types.get(task_type, cls).from_dict(data)
 
-
-
-    # ---- Shared helper: find a point that changes discrete pairwise relationships ----
-    def _sample_point_with_discrete_change(
-        self,
-        reference_pos: Tuple[int, int],
-        anchor_pos: Tuple[int, int],
-        room_id: int,
-        min_distance: float = 2.0,
-        bin_system=None,
-        distance_bin_system=None,
-        anchor_ori: Tuple[int, int] = (0, 1),
-        must_be_free: bool = True,
-        max_trials: int = 500,
-    ) -> Optional[Tuple[int, int]]:
-        """Pick a new point (same room) so the discrete relation to anchor_pos changes.
-
-        Relation is PairwiseRelationshipDiscrete(reference -> anchor). Distance to reference must be ≥ min_distance.
-        TODO debug
-        """
-        if distance_bin_system is None:
-            distance_bin_system = StandardDistanceBins()
-
-        def rel_pair(a: Tuple[int, int], b: Tuple[int, int]) -> Tuple[int, int]:
-            r = PairwiseRelationshipDiscrete.relationship(a, b, anchor_ori=anchor_ori, bin_system=bin_system, distance_bin_system=distance_bin_system)
-            return int(r.direction.bin_id), int(r.dist.bin_id)
-
-        base = rel_pair(tuple(map(int, reference_pos)), tuple(map(int, anchor_pos)))
-        xmin, xmax, ymin, ymax = self.room.get_boundary(room_id=room_id)
-        candidates = [(x, y) for x in range(xmin, xmax + 1) for y in range(ymin, ymax + 1)]
-        self.np_random.shuffle(candidates)
-        tried = 0
-        for x, y in candidates:
-            if tried >= max_trials:
-                break
-            tried += 1
-            if (x, y) == tuple(reference_pos):
-                continue
-            if must_be_free and self.room.get_cell_info(x, y)['object_name']:
-                continue
-            if float(np.linalg.norm(np.array((x, y)) - np.array(reference_pos))) < float(min_distance) - 1e-6:
-                continue
-            if rel_pair((int(x), int(y)), tuple(map(int, anchor_pos))) != base:
-                return (int(x), int(y))
-        # fallback: any free point ≥ min_distance
-        for x, y in candidates:
-            if must_be_free and self.room.get_cell_info(x, y)['object_name']:
-                continue
-            if float(np.linalg.norm(np.array((x, y)) - np.array(reference_pos))) >= float(min_distance) - 1e-6:
-                return (int(x), int(y))
-        return None
     
     def _take_observations(self, neglect_objects: List[str] = None) -> str:
         obs_result = ObserveAction().execute(self.room, self.agent, neglect_objects=neglect_objects or [], free_position=True)

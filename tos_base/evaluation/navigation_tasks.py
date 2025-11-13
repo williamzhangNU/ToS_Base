@@ -5,17 +5,16 @@ BackwardNavEvaluationTask: infer action sequence from a final observation.
 BackwardNavRevEvaluationTask: navigate back to starting point from termination location.
 """
 
-from typing import Any, List, Tuple, Set, Optional
+from typing import Any, List, Tuple
 import numpy as np
 import json
-from collections import deque
 
 from .tasks import BaseEvaluationTask, retry_generate_question
-from ..core.object import Agent, Gate, Object
+from ..core.object import Agent, Gate
 from ..core.relationship import PairwiseRelationshipDiscrete, EgoFrontBins, StandardDistanceBins
 from ..actions import ObserveAction, RotateAction, MoveAction
 from ..managers.exploration_manager import ExplorationManager
-from ..utils.utils import hash
+from ..utils.utils import hash, compute_shortest_path
 
 # Nav action descriptor: ('rotate', degrees) or ('jumpto', object_name)
 NavAction = Tuple[str, Any]
@@ -159,6 +158,19 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
                 last_was_gate = False
                 other_rooms_after_gate = []
 
+        # Align to a valid viewing orientation with at least one visible object
+        valid_oris = []
+        for ori in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+            tmp = a.copy()
+            tmp.ori = np.array(ori)
+            if ObserveAction().execute(self.room, tmp).data.get('visible_objects', []):
+                valid_oris.append(ori)
+        final_ori = tuple(valid_oris[int(self.np_random.integers(0, len(valid_oris)))] if valid_oris else (0, 1))
+        delta = _rotation_delta(tuple(a.ori), tuple(final_ori))
+        if int(delta) != 0:
+            plan.append(('rotate', int(delta)))
+            a.ori = np.array(_rotate_ori(tuple(a.ori), int(delta)))
+
         return plan
 
     def _execute_plan(self, plan: List[NavAction]) -> Agent:
@@ -265,65 +277,6 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
                 return plan, agent, visible
         raise ValueError("Failed to generate navigation plan with visible objects")
 
-    def _compute_shortest_path(self, start_pos: Tuple[int, int], start_ori: Tuple[int, int],
-                               target_pos: Tuple[int, int]) -> int:
-        """
-        Compute shortest action sequence from start to target using BFS.
-
-        Args:
-            start_pos: Starting position (x, y)
-            start_ori: Starting orientation (dx, dy)
-            target_pos: Target position (x, y)
-
-        Returns:
-            List of NavAction tuples or None if no path exists
-        """
-        # State: (pos, ori, path)
-        # pos: (x, y), ori: (dx, dy), path: List[NavAction]
-        start_state = (tuple(start_pos), tuple(start_ori), [])
-        queue = deque([start_state])
-        visited: Set[Tuple[Tuple[int, int], Tuple[int, int]]] = {(tuple(start_pos), tuple(start_ori))}
-
-        # Create a temporary agent for visibility checks
-        temp_agent = Agent(name='temp', pos=np.array(start_pos), ori=np.array(start_ori))
-        room = self.room.copy()
-        room.add_object(Object(name="initial_pos", pos=np.array(target_pos)))
-        while queue:
-            current_pos, current_ori, path = queue.popleft()
-
-            # Check if we reached the target
-            if np.allclose(current_pos, target_pos):
-                return len(path)
-
-            # Update temp agent state
-            temp_agent.pos = np.array(current_pos)
-            temp_agent.ori = np.array(current_ori)
-            temp_agent.room_id = self.room.get_cell_info(int(current_pos[0]), int(current_pos[1])).get('room_id')
-
-            # Try all rotation actions
-            for degrees in [90, -90, 180]:
-                new_ori = _rotate_ori(current_ori, degrees)
-                state_key = (current_pos, tuple(new_ori))
-                if state_key not in visited:
-                    visited.add(state_key)
-                    new_path = path + [('rotate', degrees)]
-                    queue.append((current_pos, tuple(new_ori), new_path))
-
-            # Try jumping to all visible objects
-            for obj in room.all_objects:
-                if np.allclose(obj.pos, current_pos):
-                    continue  # Skip current position
-
-                if MoveAction._is_visible(temp_agent, obj):
-                    new_pos = tuple(map(int, obj.pos))
-                    state_key = (new_pos, current_ori)
-                    if state_key not in visited:
-                        visited.add(state_key)
-                        new_path = path + [('jumpto', obj.name)]
-                        queue.append((new_pos, current_ori, new_path))
-
-        raise ValueError("No path found")
-
 class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
     """Predict final observation from an action sequence."""
     QUESTION_TEMPLATE = (
@@ -383,7 +336,12 @@ class BackwardNavTextEvaluationTask(BaseNavEvaluationTask):
             'init_pos': tuple(map(int, init_agent.pos)),
             'init_ori': tuple(map(int, init_agent.ori)),
             'object_positions': object_positions,
-            "minimal_steps": self._compute_shortest_path(init_agent.pos,init_agent.ori,end_agent.pos),
+            "minimal_steps": compute_shortest_path(
+                self.room,
+                init_agent.pos,
+                init_agent.ori,
+                end_agent.pos,
+            ),
             'final_observation': [
                 {
                     'name': name,
@@ -432,7 +390,12 @@ class BackwardNavVisionEvaluationTask(BaseNavEvaluationTask):
             'init_pos': tuple(map(int, init_agent.pos)),
             'init_ori': tuple(map(int, init_agent.ori)),
             'object_positions': object_positions,
-            "minimal_steps": self._compute_shortest_path(init_agent.pos,init_agent.ori,end_agent.pos),
+            "minimal_steps": compute_shortest_path(
+                self.room,
+                init_agent.pos,
+                init_agent.ori,
+                end_agent.pos,
+            ),
             'final_observation': [
                 {
                     'name': name,
@@ -471,10 +434,12 @@ class BackwardNavRevEvaluationTask(BaseNavEvaluationTask):
         object_positions = {obj.name: tuple(map(int, obj.pos)) for obj in self.room.all_objects}
 
         # Compute shortest path
-        minimal_steps = self._compute_shortest_path(start_pos, start_ori, target_pos)
-
-        if minimal_steps is None:
-            raise ValueError("No path found from current position to initial position")
+        minimal_steps = compute_shortest_path(
+            self.room,
+            start_pos,
+            start_ori,
+            target_pos,
+        )
 
         answer = {
             'start_pos': start_pos,  # Starting from termination location
@@ -490,5 +455,3 @@ class BackwardNavRevEvaluationTask(BaseNavEvaluationTask):
         self.eval_data.choices = []
         self.eval_data.id = hash(self.eval_data.question)
         return self.eval_data.question
-
-
