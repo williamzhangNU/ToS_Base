@@ -32,6 +32,7 @@ class BaseAction(ABC):
     
     # Shared field of view for all actions
     _field_of_view: int = 90
+    _use_real_relations: bool = False
     
     def __init__(self, parameters=None):
         self.parameters = parameters
@@ -46,6 +47,16 @@ class BaseAction(ABC):
     def get_field_of_view(cls) -> int:
         """Get the current field of view"""
         return cls._field_of_view
+    
+    @classmethod
+    def set_use_real_relations(cls, use_real: bool):
+        """Toggle precise relation reporting for Observe actions."""
+        cls._use_real_relations = bool(use_real)
+    
+    @classmethod
+    def get_use_real_relations(cls) -> bool:
+        """Return whether Observe actions should emit real-value relations."""
+        return cls._use_real_relations
     
     @abstractmethod
     def success_message(self, **kwargs) -> str:

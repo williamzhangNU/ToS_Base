@@ -189,14 +189,16 @@ class ObserveBase(BaseAction):
         super().__init__()
     
     
-    def _collect_obj_observations(self, agent, visible_objects, anchor_name: str, discrete: bool = False):
+    def _collect_obj_observations(self, agent, visible_objects, anchor_name: str):
+        """Collect per-object relations, switching between discrete bins and real values."""
         relationships: List[str] = []
         relation_triples: List[RelationTriple] = []
+        use_real = BaseAction.get_use_real_relations()
         for obj in visible_objects:
-            if discrete:
-                rel = PairwiseRelationshipDiscrete.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
-            else:
+            if use_real:
                 rel = PairwiseRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
+            else:
+                rel = PairwiseRelationshipDiscrete.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
             pairwise_str = rel.to_string()
 
             if hasattr(obj, 'has_orientation') and not obj.has_orientation:
@@ -272,8 +274,12 @@ class ObserveAction(ObserveBase):
             })
 
         anchor_name = self.get_anchor_name(room, agent) if not kwargs.get('free_position', False) else 'free_position'
-        pairwise_answer, relationships, pairwise_relation_triples = self._collect_obj_observations(agent=agent, visible_objects=visible_objects, anchor_name=anchor_name, discrete=True)
-        local_answer, local_relationships, local_relation_triples = self._collect_local_relationships(agent, visible_objects, anchor_name)
+        pairwise_answer, relationships, pairwise_relation_triples = self._collect_obj_observations(agent=agent, visible_objects=visible_objects, anchor_name=anchor_name)
+        if BaseAction.get_use_real_relations():
+            # Precise mode omits proximity summaries to avoid noisy mixed outputs.
+            local_answer, local_relationships, local_relation_triples = "", [], []
+        else:
+            local_answer, local_relationships, local_relation_triples = self._collect_local_relationships(agent, visible_objects, anchor_name)
 
         final_answer = pairwise_answer
         if local_answer:
