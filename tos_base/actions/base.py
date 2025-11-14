@@ -33,6 +33,7 @@ class BaseAction(ABC):
     # Shared field of view for all actions
     _field_of_view: int = 90
     _use_real_relations: bool = False
+    _query_cost: int = 2
     
     def __init__(self, parameters=None):
         self.parameters = parameters
@@ -57,6 +58,21 @@ class BaseAction(ABC):
     def get_use_real_relations(cls) -> bool:
         """Return whether Observe actions should emit real-value relations."""
         return cls._use_real_relations
+    
+    @classmethod
+    def set_query_cost(cls, cost: int):
+        """Set Query() action cost for all derived actions."""
+        cls._query_cost = int(cost)
+        # Update concrete Query classes if available (lazy import to avoid cycles)
+        from .actions import QueryBase, QueryAction, QueryRelAction  # type: ignore
+        QueryBase.cost = cls._query_cost
+        QueryAction.cost = cls._query_cost
+        QueryRelAction.cost = cls._query_cost
+    
+    @classmethod
+    def get_query_cost(cls) -> int:
+        """Return currently configured Query() action cost."""
+        return cls._query_cost
     
     @abstractmethod
     def success_message(self, **kwargs) -> str:
