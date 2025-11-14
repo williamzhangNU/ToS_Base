@@ -1,6 +1,7 @@
 import numpy as np
 from typing import Optional
 from .. import Room, Agent, ActionSequence, EvaluationManager
+from ..actions.base import BaseAction
 from ..utils.room_utils import get_room_description
 from ..core.relationship import (
     PairwiseRelationship, 
@@ -94,14 +95,19 @@ class Prompter:
 
         room_desc = get_room_description(room, agent, with_topdown=topdown)
 
-        observation_instructions = (
-            PairwiseRelationship.prompt()
-            + f"\n{DegreeRel.prompt()}"
-            + f"\n{OrientationRel.prompt()}"
-            + f"\n{PairwiseRelationshipDiscrete.prompt()}"
-        )
-        if not is_vision:
-            observation_instructions += f"\n{ProximityRelationship.prompt()}"
+        if BaseAction.get_use_real_relations():
+            # Precise mode: only describe the real-valued pairwise relation format.
+            observation_instructions = PairwiseRelationship.prompt()
+        else:
+            observation_parts = [
+                PairwiseRelationship.prompt(),
+                DegreeRel.prompt(),
+                OrientationRel.prompt(),
+                PairwiseRelationshipDiscrete.prompt(),
+            ]
+            observation_instructions = "\n".join(observation_parts)
+            if not is_vision:
+                observation_instructions += f"\n{ProximityRelationship.prompt()}"
 
         exp_instructions = ""
         if is_active:

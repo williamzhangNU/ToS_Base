@@ -4,7 +4,7 @@ import numpy as np
 
 from .base import BaseAction, ActionResult
 from ..core.object import Gate
-from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, RelationTriple, OrientationRel, DegreeRel
+from ..core.relationship import PairwiseRelationship, PairwiseRelationshipReal, PairwiseRelationshipDiscrete, ProximityRelationship, RelationTriple, OrientationRel, DegreeRel
 
 """
 Specific action implementations for spatial exploration.
@@ -196,7 +196,7 @@ class ObserveBase(BaseAction):
         use_real = BaseAction.get_use_real_relations()
         for obj in visible_objects:
             if use_real:
-                rel = PairwiseRelationship.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
+                rel = PairwiseRelationshipReal.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
             else:
                 rel = PairwiseRelationshipDiscrete.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
             pairwise_str = rel.to_string()
@@ -374,7 +374,7 @@ class QueryAction(QueryBase):
         ori_pair = OrientationRel.get_relative_orientation(tuple(obj_ori), tuple(agent.init_ori))
         ans_ori = OrientationRel.to_string(ori_pair, 'allo', 'orientation')
         ans = ans_pos + ", " + ans_ori
-        rel = PairwiseRelationship.relationship(tuple(obj_pos), tuple(agent.init_pos), anchor_ori=tuple(agent.init_ori), full=True)
+        rel = PairwiseRelationshipReal.relationship(tuple(obj_pos), tuple(agent.init_pos), anchor_ori=tuple(agent.init_ori), full=True)
         return ActionResult(True, self.get_feedback(True, answer=ans), str(self), 'query', {
             'answer': ans,
             'object': self.obj,
@@ -396,7 +396,7 @@ class QueryRelAction(QueryBase):
         if self.obj != 'initial_pos' and (not room.has_object(self.obj)):
             return ActionResult(False, self.get_feedback(False, "object not found"), str(self), 'query', {})
         obj_pos = room.get_object_by_name(self.obj).pos if self.obj != 'initial_pos' else agent.init_pos
-        rel = PairwiseRelationship.relationship(tuple(obj_pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
+        rel = PairwiseRelationshipReal.relationship(tuple(obj_pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
         ans = rel.to_string()
         return ActionResult(True, self.get_feedback(True, answer=ans), str(self), 'query', {
             'answer': ans,

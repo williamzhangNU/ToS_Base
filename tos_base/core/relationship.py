@@ -414,13 +414,14 @@ class DistanceRelBinned(DistanceRel):
         return self.bin_label
 
 
-@dataclass(frozen=False)
-class PairwiseRelationship:
+@dataclass(eq=False)
+class PairwiseRelationshipBase(ABC):
+    """Shared container for pairwise relationships."""
     direction: Optional[DegreeRel] = None
     dist: Optional[DistanceRel] = None
     
     def __eq__(self, other):
-        if type(other) is not PairwiseRelationship:
+        if type(other) is not type(self):
             return False
         return self.direction == other.direction and self.dist == other.dist
     
@@ -428,10 +429,10 @@ class PairwiseRelationship:
         return hash((self.direction, self.dist))
 
     @property
-    def bearing(self) -> DegreeRel:
-        return self.direction  # type: ignore[return-value]
+    def bearing(self) -> Optional[DegreeRel]:
+        """Expose the stored bearing, if any."""
+        return self.direction
 
-    # --- external API helpers (hide DirectionRel/DistanceRel) ---
     @property
     def degree(self) -> float:
         return 0.0 if self.direction is None else float(self.direction.degree)
@@ -439,7 +440,6 @@ class PairwiseRelationship:
     @property
     def distance_value(self) -> float:
         return 0.0 if self.dist is None else float(self.dist.value)
-
 
     @staticmethod
     def format_degree(v: float) -> str:
@@ -449,24 +449,40 @@ class PairwiseRelationship:
     def distance_to_string(value: float) -> str:
         return DistanceRel(float(value)).to_string()
 
-    
+    @abstractmethod
+    def to_string(self) -> str:
+        """Render relationship to natural language."""
+        raise NotImplementedError
+
+    @classmethod
+    @abstractmethod
+    def prompt(cls) -> str:
+        """Explain how to interpret the relationship."""
+        raise NotImplementedError
+
+
+@dataclass(eq=False)
+class PairwiseRelationshipReal(PairwiseRelationshipBase):
+    """Continuous bearing (degrees) and distance (Euclidean length)."""
 
     def to_string(self) -> str:
         if self.direction is None and self.dist is None:
             return ""
-        if self.direction is None:
-            return self.distance_to_string(self.distance_value)
-        if self.dist is None:
-            return self.direction.to_string('allo', 'relation')
-        return f"{self.direction.to_string('allo', 'relation')}, {self.dist.to_string()}"
+        parts: list[str] = []
+        if self.direction is not None:
+            deg_text = self.format_degree(self.direction.degree)
+            parts.append(f"{deg_text} from front")
+        if self.dist is not None:
+            parts.append(f"{self.dist.value:.2f} away")
+        return ", ".join(parts)
 
     @classmethod
-    def relationship(cls, pos1: tuple, pos2: tuple, anchor_ori: Optional[tuple] = None, full: bool = True) -> 'PairwiseRelationship':
+    def relationship(cls, pos1: tuple, pos2: tuple, anchor_ori: Optional[tuple] = None, full: bool = True) -> 'PairwiseRelationshipReal':
+        """Build a real-valued relationship between two positions."""
         d = DegreeRel.from_positions(pos1, pos2, (anchor_ori if anchor_ori is not None else (0, 1)))
         if not full:
             return cls(direction=d, dist=None)
         return cls(direction=d, dist=DistanceRel.get_distance(pos1, pos2))
-
 
     @classmethod
     def get_bearing_degree(cls, pos1: tuple, pos2: tuple, anchor_ori: tuple = (0, 1)) -> float:
@@ -479,12 +495,19 @@ class PairwiseRelationship:
     @classmethod
     def prompt(cls) -> str:
         return (
-            "Relationship: bearing in degrees; distance is Euclidean. Use binned labels."
+            "Pairwise relationship:\n"
+            "\t- direction: from -180° to +180° (+: clockwise/right, -: counter-clockwise/left).\n"
+            "\t- distance: Euclidean distance between objects.\n"
+            "\t- Format: '+30° from front, 2.55 away'."
         )
 
 
-@dataclass()
-class PairwiseRelationshipDiscrete(PairwiseRelationship):
+# Backward compatible alias retained for existing imports.
+PairwiseRelationship = PairwiseRelationshipReal
+
+
+@dataclass(eq=False)
+class PairwiseRelationshipDiscrete(PairwiseRelationshipBase):
     direction: DegreeRelBinned  # type: ignore[assignment]
     dist: DistanceRelBinned  # type: ignore[assignment]
     
@@ -512,7 +535,7 @@ class PairwiseRelationshipDiscrete(PairwiseRelationship):
                     bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> 'PairwiseRelationshipDiscrete':
         bin_system = bin_system or EgoFrontBins()
         distance_bin_system = distance_bin_system or StandardDistanceBins()
-        rel = PairwiseRelationship.relationship(pos1, pos2, anchor_ori=anchor_ori, full=True)
+        rel = PairwiseRelationshipReal.relationship(pos1, pos2, anchor_ori=anchor_ori, full=True)
         d = DegreeRelBinned.from_relation(rel.direction, bin_system)
         s = DistanceRelBinned.from_value(rel.dist.value if rel.dist else 0.0, distance_bin_system)
         return cls(direction=d, dist=s)
