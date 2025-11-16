@@ -305,7 +305,7 @@ class TermAction(BaseAction):
     format_pattern = r"^Term\(\)$"
     cost = 0
     def success_message(self, **kwargs) -> str:
-        return "Exploration terminated."
+        return "Exploration terminated.\n"
     
     def error_message(self, error_type: str) -> str:
         return "Cannot terminate exploration: execution failed."
