@@ -84,7 +84,8 @@ class Prompter:
             room: Room,
             agent: Agent,
             eval_manager: Optional[EvaluationManager] = None,
-            exp_history = None
+            exp_history = None,
+            gt_cogmap: Optional[str] = None
         ) -> dict:
         """
         Generates the initial observation prompt based on the exploration type.
@@ -151,6 +152,11 @@ class Prompter:
         }
 
         obs_str = template.format(**fmt_kwargs)
+
+        # Add ground-truth cogmap if provided
+        if gt_cogmap:
+            obs_str = gt_cogmap
+
         if not is_active:
             obs_str += f"\n{self.get_evaluation_prompt(eval_manager)}"
         if is_vision:
