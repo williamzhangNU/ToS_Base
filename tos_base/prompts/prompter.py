@@ -10,6 +10,7 @@ from ..core.relationship import (
     DegreeRel, OrientationRel
 )
 from .prompts import *
+from .cogmap_prompts import get_cogmap_prompt
 from ..utils.utils import THINK_LABEL, ANSWER_LABEL
 
 class Prompter:
@@ -147,7 +148,7 @@ class Prompter:
             'multiroom_rules': SHARED_MULTIROOM_RULES,
             'active_rules_extra': ACTIVE_RULES_EXTRA if is_active else '',
             'rules_common': SHARED_RULES_COMMON,
-            'exp_history': exp_history_str if not is_active else '',
+            'exp_history': exp_history_str if not is_active and not gt_cogmap else '',
             'vision_example': (VISION_EXAMPLE.format(image_placeholder=self.config.image_placeholder) if is_vision else ''),
         }
 
@@ -155,7 +156,7 @@ class Prompter:
 
         # Add ground-truth cogmap if provided
         if gt_cogmap:
-            obs_str = gt_cogmap
+            obs_str += gt_cogmap
 
         if not is_active:
             obs_str += f"\n{self.get_evaluation_prompt(eval_manager)}"
@@ -171,4 +172,21 @@ class Prompter:
         """Generate the evaluation prompt."""
         eval_question = eval_manager.get_current_question()
         assert eval_question, "No question found after exploration phase"
-        return EVALUATION_INSTRUCTION.format(eval_question=f"## Evaluation Question\n{eval_question}")
+
+        # Check if we should request cognitive map before evaluation
+        cogmap_before_eval = getattr(self.config, 'cogmap_before_eval', False)
+
+        if cogmap_before_eval:
+            # When cogmap_before_eval is enabled, must use enable_think=True
+            # Add cognitive map request before the evaluation question
+            cogmap_prompt = get_cogmap_prompt('global', enable_think=True)
+            cogmap_instruction = (
+                "\n## Step 1: Output Cognitive Map\n"
+                "Before answering the evaluation question, first output your cognitive map of the environment.\n\n"
+                f"{cogmap_prompt}\n\n"
+                "## Step 2: Answer Evaluation Question\n"
+                "After outputting the cognitive map, answer the following evaluation question.\n\n"
+            )
+            return cogmap_instruction + EVALUATION_INSTRUCTION.format(eval_question=f"## Evaluation Question\n{eval_question}")
+        else:
+            return EVALUATION_INSTRUCTION.format(eval_question=f"## Evaluation Question\n{eval_question}")
