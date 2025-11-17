@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import re
 import numpy as np
 
+from ..core.relationship import RELATION_MODE_BIN_SYSTEM1, RELATION_MODE_REAL
 """
 Base action definitions and common functionality.
 Contains the abstract base class and result types for all actions.
@@ -32,7 +33,7 @@ class BaseAction(ABC):
     
     # Shared field of view for all actions
     _field_of_view: int = 90
-    _use_real_relations: bool = False
+    _relation_mode: str = RELATION_MODE_BIN_SYSTEM1
     _query_cost: int = 2
     
     def __init__(self, parameters=None):
@@ -50,14 +51,19 @@ class BaseAction(ABC):
         return cls._field_of_view
     
     @classmethod
-    def set_use_real_relations(cls, use_real: bool):
-        """Toggle precise relation reporting for Observe actions."""
-        cls._use_real_relations = bool(use_real)
+    def set_relation_mode(cls, mode: str):
+        """Set how Observe actions describe relations."""
+        cls._relation_mode = mode
     
     @classmethod
-    def get_use_real_relations(cls) -> bool:
-        """Return whether Observe actions should emit real-value relations."""
-        return cls._use_real_relations
+    def get_relation_mode(cls) -> str:
+        """Return the current relation mode."""
+        return cls._relation_mode
+    
+    @classmethod
+    def uses_real_relations(cls) -> bool:
+        """Return True when real-valued relations should be emitted."""
+        return cls._relation_mode == RELATION_MODE_REAL
     
     @classmethod
     def set_query_cost(cls, cost: int):

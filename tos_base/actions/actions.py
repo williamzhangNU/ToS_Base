@@ -4,7 +4,16 @@ import numpy as np
 
 from .base import BaseAction, ActionResult
 from ..core.object import Gate
-from ..core.relationship import PairwiseRelationship, PairwiseRelationshipReal, PairwiseRelationshipDiscrete, ProximityRelationship, RelationTriple, OrientationRel, DegreeRel
+from ..core.relationship import (
+    PairwiseRelationship,
+    PairwiseRelationshipReal,
+    PairwiseRelationshipDiscrete,
+    ProximityRelationship,
+    RelationTriple,
+    OrientationRel,
+    DegreeRel,
+    RELATION_MODE_REAL,
+)
 
 """
 Specific action implementations for spatial exploration.
@@ -193,9 +202,9 @@ class ObserveBase(BaseAction):
         """Collect per-object relations, switching between discrete bins and real values."""
         relationships: List[str] = []
         relation_triples: List[RelationTriple] = []
-        use_real = BaseAction.get_use_real_relations()
+        relation_mode = BaseAction.get_relation_mode()
         for obj in visible_objects:
-            if use_real:
+            if relation_mode == RELATION_MODE_REAL:
                 rel = PairwiseRelationshipReal.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
             else:
                 rel = PairwiseRelationshipDiscrete.relationship(tuple(obj.pos), tuple(agent.pos), anchor_ori=tuple(agent.ori))
@@ -275,7 +284,7 @@ class ObserveAction(ObserveBase):
 
         anchor_name = self.get_anchor_name(room, agent) if not kwargs.get('free_position', False) else 'free_position'
         pairwise_answer, relationships, pairwise_relation_triples = self._collect_obj_observations(agent=agent, visible_objects=visible_objects, anchor_name=anchor_name)
-        if BaseAction.get_use_real_relations():
+        if BaseAction.uses_real_relations():
             # Precise mode omits proximity summaries to avoid noisy mixed outputs.
             local_answer, local_relationships, local_relation_triples = "", [], []
         else:

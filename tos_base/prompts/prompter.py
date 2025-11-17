@@ -4,10 +4,12 @@ from .. import Room, Agent, ActionSequence, EvaluationManager
 from ..actions.base import BaseAction
 from ..utils.room_utils import get_room_description
 from ..core.relationship import (
-    PairwiseRelationship, 
-    PairwiseRelationshipDiscrete, 
-    ProximityRelationship, 
-    DegreeRel, OrientationRel
+    PairwiseRelationship,
+    PairwiseRelationshipDiscrete,
+    ProximityRelationship,
+    DegreeRel,
+    OrientationRel,
+    RELATION_MODE_REAL,
 )
 from .prompts import *
 from ..utils.utils import THINK_LABEL, ANSWER_LABEL
@@ -96,17 +98,11 @@ class Prompter:
 
         room_desc = get_room_description(room, agent, with_topdown=topdown)
 
-        if BaseAction.get_use_real_relations():
-            # Precise mode: only describe the real-valued pairwise relation format.
+        relation_mode = BaseAction.get_relation_mode()
+        if relation_mode == RELATION_MODE_REAL:
             observation_instructions = PairwiseRelationship.prompt()
         else:
-            observation_parts = [
-                PairwiseRelationship.prompt(),
-                DegreeRel.prompt(),
-                OrientationRel.prompt(),
-                PairwiseRelationshipDiscrete.prompt(),
-            ]
-            observation_instructions = "\n".join(observation_parts)
+            observation_instructions = PairwiseRelationshipDiscrete.observation_prompt()
             if not is_vision:
                 observation_instructions += f"\n{ProximityRelationship.prompt()}"
 

@@ -7,6 +7,16 @@ from abc import ABC, abstractmethod
 
 """Relationship primitives for spatial reasoning."""
 
+RELATION_MODE_REAL = "real"
+RELATION_MODE_BIN_SYSTEM1 = "bin_system1"
+RELATION_MODE_BIN_SYSTEM2 = "bin_system2"
+RELATION_MODE_CHOICES = (
+    RELATION_MODE_REAL,
+    RELATION_MODE_BIN_SYSTEM1,
+    RELATION_MODE_BIN_SYSTEM2,
+)
+RELATION_MODE_DISCRETE_DEFAULT = RELATION_MODE_BIN_SYSTEM1
+
 
 # ---- Bin System Protocol ----
 class BinSystem(Protocol):
@@ -79,19 +89,78 @@ class DistanceBinSystem(Protocol):
 #         return "Bearing bins (egocentric): " + ", ".join(parts) + "."
 
 class EgoFrontBins:
-    """Ego-centric front-focused bins (front is (-1e-3, 1e-3); nodes at ±22.5°, ±45°)."""
+    """Egocentric bins switchable between coarse (system1) and 15° (system2)."""
     EPS: ClassVar[float] = 1e-3
-    # open intervals; preserve ±1e-3 slack at the interior edges
-    BINS = [
-        (-180.0, -45.0 - 1e-3),
-        (-45.0 - 1e-3, -22.5 - 1e-3),
-        (-22.5 - 1e-3, -1e-3),
-        (-1e-3, 1e-3),
-        (1e-3, 22.5 + 1e-3),
-        (22.5 + 1e-3, 45.0 + 1e-3),
-        (45.0 + 1e-3, 180.0 + 1e-3),
-    ]
-    LABELS = ['beyond-fov', 'front-left', 'front-slight-left', 'front', 'front-slight-right', 'front-right', 'beyond-fov']
+    _PRESETS: ClassVar[dict[str, dict[str, list]]] = {
+        RELATION_MODE_BIN_SYSTEM1: {
+            "bins": [
+                (-180.0, -45.0 - EPS),
+                (-45.0 - EPS, -22.5 - EPS),
+                (-22.5 - EPS, 22.5 + EPS),
+                (22.5 + EPS, 45.0 + EPS),
+                (45.0 + EPS, 180.0 + EPS),
+            ],
+            "labels": [
+                'beyond-fov',
+                'front-left',
+                'front',
+                'front-right',
+                'beyond-fov',
+            ],
+            "lines": [
+                "(-180°,-45°)→beyond-fov",
+                "[-45°,-22.5°)→front-left",
+                "[-22.5°,22.5°)→front",
+                "[22.5°,45°)→front-right",
+                "[45°,180°)→beyond-fov",
+            ],
+        },
+        RELATION_MODE_BIN_SYSTEM2: {
+            "bins": [
+                (-180.0, -45.0 - EPS),
+                (-45.0 - EPS, -30.0 - EPS),
+                (-30.0 - EPS, -15.0 - EPS),
+                (-15.0 - EPS, -1e-3),
+                (-1e-3, 1e-3),
+                (1e-3, 15.0 + EPS),
+                (15.0 + EPS, 30.0 + EPS),
+                (30.0 + EPS, 45.0 + EPS),
+                (45.0 + EPS, 180.0 + EPS),
+            ],
+            "labels": [
+                'beyond-fov',
+                'front-wide-left',
+                'front-left',
+                'front-slight-left',
+                'front',
+                'front-slight-right',
+                'front-right',
+                'front-wide-right',
+                'beyond-fov',
+            ],
+            "lines": [
+                "(-180°,-45°)→beyond-fov",
+                "[-45°,-30°)→front-wide-left",
+                "[-30°,-15°)→front-left",
+                "[-15°,0°)→front-slight-left",
+                "[0°,15°)→front",
+                "[15°,30°)→front-slight-right",
+                "[30°,45°)→front-right",
+                "[45°,180°)→beyond-fov",
+            ],
+        },
+    }
+    BINS: ClassVar[list] = []
+    LABELS: ClassVar[list] = []
+    _prompt_lines: ClassVar[list[str]] = []
+
+    @classmethod
+    def configure(cls, mode: str):
+        """Apply bin preset for current relation mode."""
+        data = cls._PRESETS.get(mode, cls._PRESETS[RELATION_MODE_BIN_SYSTEM1])
+        cls.BINS = [tuple(pair) for pair in data["bins"]]
+        cls.LABELS = list(data["labels"])
+        cls._prompt_lines = list(data.get("lines", []))
 
     def bin(self, degree: float):
         v = float(degree)
@@ -102,43 +171,151 @@ class EgoFrontBins:
 
     @classmethod
     def prompt(cls) -> str:
-        lines = [
-            "Egocentric angle bins (0° is front):",
-            "\t-[-45°,-22.5°)→front-left",
-            "\t-[-22.5°,0°)→front-slight-left",
-            "\t-0°→front",
-            "\t-(0°,22.5°]→front-slight-right",
-            "\t-(22.5°,45°]→front-right",
-            "\t-otherwise→beyond-fov",
-        ]
-        return "\n".join(lines)
+        if cls._prompt_lines:
+            return "Egocentric angle bins:\n\t-" + "\n\t-".join(cls._prompt_lines)
+        return "Egocentric angle bins."
+
+
+EgoFrontBins.configure(RELATION_MODE_BIN_SYSTEM1)
 
 
 class _CardinalBinsBase:
-    """Cardinal direction bins (8 directions) without perspective args."""
+    """Cardinal direction bins (shared helpers)."""
     LABELS: ClassVar[list] = []
-    # Boundaries: [-22.5, +22.5], [22.5, 67.5], ..., [292.5, 337.5]
-    BINS: ClassVar[list] = [
-        (-22.5, 22.5), (22.5, 67.5), (67.5, 112.5), (112.5, 157.5),
-        (157.5, 202.5), (202.5, 247.5), (247.5, 292.5), (292.5, 337.5),
-    ]
+    BINS: ClassVar[list] = []
+    _width: ClassVar[float] = 45.0
+    _offset: ClassVar[float] = 22.5
 
     def bin(self, degree: float) -> Tuple[int, str]:
-        v = float(degree)
-        w = (v + 360.0) % 360.0
-        idx = int(((w + 22.5) // 45.0) % 8)
+        if not self.LABELS:
+            return 0, ""
+        w = (float(degree) + 360.0) % 360.0
+        width = getattr(self, "_width", 45.0)
+        offset = getattr(self, "_offset", 22.5)
+        idx = int(((w + offset) // width) % len(self.LABELS))
         return idx, self.LABELS[idx]
 
     @classmethod
     def prompt(cls) -> str:
-        lines = ["Cardinal angle bins (45° each):"]
-        for i, (lo, hi) in enumerate(cls.BINS):
-            lines.append(f"\t-({lo}°,{hi}°]→{cls.LABELS[i]}")
-        return "\n".join(lines)
+        return "Cardinal angle bins."
 
 
 class CardinalBinsAllo(_CardinalBinsBase):
-    LABELS = ['north', 'north east', 'east', 'south east', 'south', 'south west', 'west', 'north west']
+    """Allocentric bins switchable between 45° and 30° ranges."""
+    _PRESETS: ClassVar[dict[str, dict[str, list]]] = {}
+    _prompt_lines: ClassVar[list[str]] = []
+
+    @classmethod
+    def _build_presets(cls):
+        if cls._PRESETS:
+            return
+        system1 = {
+            "bins": [
+                (-22.5, 22.5),
+                (22.5, 67.5),
+                (67.5, 112.5),
+                (112.5, 157.5),
+                (157.5, 202.5),
+                (202.5, 247.5),
+                (247.5, 292.5),
+                (292.5, 337.5),
+            ],
+            "labels": [
+                'north',
+                'north east',
+                'east',
+                'south east',
+                'south',
+                'south west',
+                'west',
+                'north west',
+            ],
+            "lines": [
+                "[-22.5°,22.5°)→north",
+                "[22.5°,67.5°)→north east",
+                "[67.5°,112.5°)→east",
+                "[112.5°,157.5°)→south east",
+                "[157.5°,202.5°)→south",
+                "[202.5°,247.5°)→south west",
+                "[247.5°,292.5°)→west",
+                "[292.5°,337.5°)→north west",
+            ],
+            "width": 45.0,
+            "offset": 22.5,
+        }
+        system2 = {
+            "bins": [
+                (-15.0, 15.0),
+                (15.0, 45.0),
+                (45.0, 75.0),
+                (75.0, 105.0),
+                (105.0, 135.0),
+                (135.0, 165.0),
+                (165.0, -165.0),
+                (-165.0, -135.0),
+                (-135.0, -105.0),
+                (-105.0, -75.0),
+                (-75.0, -45.0),
+                (-45.0, -15.0),
+            ],
+            "labels": [
+                'north',
+                'north-northeast',
+                'east-northeast',
+                'east',
+                'east-southeast',
+                'south-southeast',
+                'south',
+                'south-southwest',
+                'west-southwest',
+                'west',
+                'west-northwest',
+                'north-northwest',
+            ],
+            "lines": [
+                "[-15°,15°)→north",
+                "[15°,45°)→north-northeast",
+                "[45°,75°)→east-northeast",
+                "[75°,105°)→east",
+                "[105°,135°)→east-southeast",
+                "[135°,165°)→south-southeast",
+                "[165°,180°)∪[-180°,-165°)→south",
+                "[-165°,-135°)→south-southwest",
+                "[-135°,-105°)→west-southwest",
+                "[-105°,-75°)→west",
+                "[-75°,-45°)→west-northwest",
+                "[-45°,-15°)→north-northwest",
+            ],
+            "width": 30.0,
+            "offset": 15.0,
+        }
+        cls._PRESETS = {
+            RELATION_MODE_BIN_SYSTEM1: system1,
+            RELATION_MODE_BIN_SYSTEM2: system2,
+        }
+
+    @classmethod
+    def configure(cls, mode: str):
+        cls._build_presets()
+        data = cls._PRESETS.get(mode, cls._PRESETS[RELATION_MODE_BIN_SYSTEM1])
+        cls.BINS = [tuple(pair) for pair in data["bins"]]
+        cls.LABELS = list(data["labels"])
+        cls._prompt_lines = list(data.get("lines", []))
+        cls._width = float(data.get("width", 45.0))
+        cls._offset = float(data.get("offset", cls._width / 2.0))
+
+    @classmethod
+    def prompt(cls) -> str:
+        if cls._prompt_lines:
+            lines = "\n".join(f"\t-{entry}" for entry in cls._prompt_lines)
+            return f"Cardinal angle bins:\n{lines}"
+        return super().prompt()
+
+
+CardinalBinsAllo.configure(RELATION_MODE_BIN_SYSTEM1)
+
+
+CardinalBinsAllo.configure(RELATION_MODE_BIN_SYSTEM1)
 
 
 class CardinalBinsEgo(_CardinalBinsBase):
@@ -155,19 +332,81 @@ class CardinalBinsEgo(_CardinalBinsBase):
 
 
 class StandardDistanceBins:
-    """Standard distance bins (open intervals with eps; includes same-distance bin)."""
+    """Distance bins with switchable presets."""
     EPS: ClassVar[float] = 1e-6
-    # open intervals; include same-distance bin (-EPS, +EPS)
-    BINS = [
-        (-1e-6, 1e-6),
-        (1e-6, 2.0 + 1e-6),
-        (2.0 + 1e-6, 4.0 + 1e-6),
-        (4.0 + 1e-6, 8.0 + 1e-6),
-        (8.0 + 1e-6, 16.0 + 1e-6),
-        (16.0 + 1e-6, 32.0 + 1e-6),
-        (32.0 + 1e-6, 64.0 + 1e-6),
-    ]
-    LABELS = ['same distance', 'near', 'mid distance', 'slightly far', 'far', 'very far', 'extremely far']
+    _PRESETS: ClassVar[dict[str, dict[str, list]]] = {
+        RELATION_MODE_BIN_SYSTEM1: {
+            "bins": [
+                (-EPS, EPS),
+                (EPS, 2.0 + EPS),
+                (2.0 + EPS, 4.0 + EPS),
+                (4.0 + EPS, 8.0 + EPS),
+                (8.0 + EPS, 16.0 + EPS),
+                (16.0 + EPS, 32.0 + EPS),
+                (32.0 + EPS, 64.0 + EPS),
+            ],
+            "labels": [
+                'same distance',
+                'near',
+                'mid distance',
+                'slightly far',
+                'far',
+                'very far',
+                'extremely far',
+            ],
+            "lines": [
+                "=0→same distance",
+                "(0,2]→near",
+                "(2,4]→mid distance",
+                "(4,8]→slightly far",
+                "(8,16]→far",
+                "(16,32]→very far",
+                "(32,64]→extremely far",
+            ],
+        },
+        RELATION_MODE_BIN_SYSTEM2: {
+            "bins": [
+                (-EPS, EPS),
+                (EPS, 1.5 + EPS),
+                (1.5 + EPS, 3.0 + EPS),
+                (3.0 + EPS, 6.0 + EPS),
+                (6.0 + EPS, 12.0 + EPS),
+                (12.0 + EPS, 24.0 + EPS),
+                (24.0 + EPS, 40.0 + EPS),
+                (40.0 + EPS, 80.0 + EPS),
+            ],
+            "labels": [
+                'same spot',
+                'very near',
+                'near',
+                'mid-range',
+                'far',
+                'very far',
+                'distant',
+                'extreme',
+            ],
+            "lines": [
+                "=0→same spot",
+                "(0,1.5]→very near",
+                "(1.5,3]→near",
+                "(3,6]→mid-range",
+                "(6,12]→far",
+                "(12,24]→very far",
+                "(24,40]→distant",
+                "(40,80]→extreme",
+            ],
+        },
+    }
+    BINS: ClassVar[list] = []
+    LABELS: ClassVar[list] = []
+    _prompt_lines: ClassVar[list[str]] = []
+    
+    @classmethod
+    def configure(cls, mode: str):
+        data = cls._PRESETS.get(mode, cls._PRESETS[RELATION_MODE_BIN_SYSTEM1])
+        cls.BINS = [tuple(pair) for pair in data["bins"]]
+        cls.LABELS = list(data["labels"])
+        cls._prompt_lines = list(data.get("lines", []))
     
     def bin(self, value: float) -> Tuple[int, str]:
         d = float(value)
@@ -178,17 +417,12 @@ class StandardDistanceBins:
     
     @classmethod
     def prompt(cls) -> str:
-        lines = [
-            "Distance bins:",
-            "\t-=0→same distance",
-            "\t-(0,2]→near",
-            "\t-(2,4]→mid distance",
-            "\t-(4,8]→slightly far",
-            "\t-(8,16]→far",
-            "\t-(16,32]→very far",
-            "\t-(32,64]→extremely far",
-        ]
-        return "\n".join(lines)
+        if cls._prompt_lines:
+            return "Distance bins:\n\t-" + "\n\t-".join(cls._prompt_lines)
+        return "Distance bins."
+
+
+StandardDistanceBins.configure(RELATION_MODE_BIN_SYSTEM1)
 
 
 class Dir(Enum):
@@ -510,6 +744,8 @@ PairwiseRelationship = PairwiseRelationshipReal
 class PairwiseRelationshipDiscrete(PairwiseRelationshipBase):
     direction: DegreeRelBinned  # type: ignore[assignment]
     dist: DistanceRelBinned  # type: ignore[assignment]
+    _dir_bin_system: ClassVar[BinSystem] = EgoFrontBins()
+    _dist_bin_system: ClassVar[DistanceBinSystem] = StandardDistanceBins()
     
     def __eq__(self, other):
         if type(other) is not PairwiseRelationshipDiscrete:
@@ -521,20 +757,42 @@ class PairwiseRelationshipDiscrete(PairwiseRelationshipBase):
         return hash((self.direction.bin_id, self.dist.bin_id))
 
     @classmethod
-    def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> str:
+    def configure_bins(cls, bin_system: BinSystem, distance_bin_system: DistanceBinSystem) -> None:
+        """Bind a direction/distance bin pair to discrete relationships."""
+        cls._dir_bin_system = bin_system
+        cls._dist_bin_system = distance_bin_system
+
+    @classmethod
+    def get_bins(cls) -> Tuple[BinSystem, DistanceBinSystem]:
+        return cls._dir_bin_system, cls._dist_bin_system
+
+    @classmethod
+    def prompt(cls) -> str:
+        bin_system, distance_bin_system = cls.get_bins()
         return (
             "Binned relationship reporting:\n"
-            f"EgoFront (egocentric, object-to-agent); Cardinal (object-to-object).\n"
-            f"{EgoFrontBins.prompt()}\n"
-            f"{CardinalBinsAllo.prompt()}\n"
-            f"{StandardDistanceBins.prompt()}"
+            f"{bin_system.prompt()}\n"
+            f"{distance_bin_system.prompt()}\n"
+            f"{CardinalBinsAllo.prompt()}"
         )
+    
+    @classmethod
+    def observation_prompt(cls) -> str:
+        """Full instruction block for discrete observation mode."""
+        parts = [
+            PairwiseRelationship.prompt(),
+            DegreeRel.prompt(),
+            OrientationRel.prompt(),
+            cls.prompt(),
+        ]
+        return "\n".join(parts)
     
     @classmethod
     def relationship(cls, pos1: tuple, pos2: tuple, anchor_ori: Optional[tuple] = None, 
                     bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> 'PairwiseRelationshipDiscrete':
-        bin_system = bin_system or EgoFrontBins()
-        distance_bin_system = distance_bin_system or StandardDistanceBins()
+        base_dir, base_dist = cls.get_bins()
+        bin_system = bin_system or base_dir
+        distance_bin_system = distance_bin_system or base_dist
         rel = PairwiseRelationshipReal.relationship(pos1, pos2, anchor_ori=anchor_ori, full=True)
         d = DegreeRelBinned.from_relation(rel.direction, bin_system)
         s = DistanceRelBinned.from_value(rel.dist.value if rel.dist else 0.0, distance_bin_system)
@@ -544,7 +802,7 @@ class PairwiseRelationshipDiscrete(PairwiseRelationshipBase):
         return f"{self.direction.to_string()}, {self.dist.to_string()}"
     
     
-
+PairwiseRelationshipDiscrete.configure_bins(EgoFrontBins(), StandardDistanceBins())
 
 @dataclass()
 class ProximityRelationship:
@@ -600,6 +858,19 @@ class RelationTriple:
     anchor: str
     relation: Union[PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship]
     orientation: Optional[tuple] = None  # anchor object's orientation
+
+
+def is_discrete_relation_mode(mode: str) -> bool:
+    return mode in (RELATION_MODE_BIN_SYSTEM1, RELATION_MODE_BIN_SYSTEM2)
+
+
+def configure_pairwise_relation_bins(mode: str) -> None:
+    """Configure all shared bin systems for the requested relation mode."""
+    preset = mode if is_discrete_relation_mode(mode) else RELATION_MODE_DISCRETE_DEFAULT
+    EgoFrontBins.configure(preset)
+    StandardDistanceBins.configure(preset)
+    CardinalBinsAllo.configure(preset)
+    PairwiseRelationshipDiscrete.configure_bins(EgoFrontBins(), StandardDistanceBins())
 
 
 
