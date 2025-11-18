@@ -4,7 +4,7 @@ from .. import Room, Agent, ActionSequence, EvaluationManager
 from ..actions.base import BaseAction
 from ..utils.room_utils import get_room_description
 from ..core.relationship import (
-    PairwiseRelationship, 
+    PairwiseRelationshipReal, 
     PairwiseRelationshipDiscrete, 
     ProximityRelationship, 
     DegreeRel, OrientationRel
@@ -99,10 +99,10 @@ class Prompter:
 
         if BaseAction.get_use_real_relations():
             # Precise mode: only describe the real-valued pairwise relation format.
-            observation_instructions = PairwiseRelationship.prompt()
+            observation_instructions = PairwiseRelationshipReal.prompt()
         else:
             observation_parts = [
-                PairwiseRelationship.prompt(),
+                "Relationship: bearing in degrees; distance is Euclidean. Use binned labels.",
                 DegreeRel.prompt(),
                 OrientationRel.prompt(),
                 PairwiseRelationshipDiscrete.prompt(),
