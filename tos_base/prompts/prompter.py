@@ -100,7 +100,7 @@ class Prompter:
 
         relation_mode = BaseAction.get_relation_mode()
         if relation_mode == RELATION_MODE_REAL:
-            observation_instructions = PairwiseRelationship.prompt()
+            observation_instructions = PairwiseRelationship.observation_prompt()
         else:
             observation_instructions = PairwiseRelationshipDiscrete.observation_prompt()
             if not is_vision:

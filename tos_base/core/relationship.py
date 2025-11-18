@@ -728,12 +728,19 @@ class PairwiseRelationshipReal(PairwiseRelationshipBase):
 
     @classmethod
     def prompt(cls) -> str:
-        return (
+        base_prompt = (
             "Pairwise relationship:\n"
             "\t- direction: from -180° to +180° (+: clockwise/right, -: counter-clockwise/left).\n"
             "\t- distance: Euclidean distance between objects.\n"
             "\t- Format: '+30° from front, 2.55 away'."
         )
+        # Append discrete bin definitions so evaluation prompts stay informative when exploration is real-valued.
+        discrete_prompt = PairwiseRelationshipDiscrete.prompt()
+        return f"{base_prompt}\n\n{discrete_prompt}"
+
+    @classmethod
+    def observation_prompt(cls) -> str:
+        return f"{cls.prompt()}\n{OrientationRel.prompt()}"
 
 
 # Backward compatible alias retained for existing imports.
@@ -780,10 +787,10 @@ class PairwiseRelationshipDiscrete(PairwiseRelationshipBase):
     def observation_prompt(cls) -> str:
         """Full instruction block for discrete observation mode."""
         parts = [
-            PairwiseRelationship.prompt(),
+            "Relationship: bearing in degrees; distance is Euclidean. Use binned labels.",
+            cls.prompt(),
             DegreeRel.prompt(),
             OrientationRel.prompt(),
-            cls.prompt(),
         ]
         return "\n".join(parts)
     
