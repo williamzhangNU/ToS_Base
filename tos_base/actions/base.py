@@ -33,7 +33,7 @@ class BaseAction(ABC):
     # Shared field of view for all actions
     _field_of_view: int = 90
     _use_real_relations: bool = False
-    _query_cost: int = 2
+    _query_cost: float = 2
     
     def __init__(self, parameters=None):
         self.parameters = parameters
@@ -60,9 +60,9 @@ class BaseAction(ABC):
         return cls._use_real_relations
     
     @classmethod
-    def set_query_cost(cls, cost: int):
+    def set_query_cost(cls, cost: float):
         """Set Query() action cost for all derived actions."""
-        cls._query_cost = int(cost)
+        cls._query_cost = float(cost)
         # Update concrete Query classes if available (lazy import to avoid cycles)
         from .actions import QueryBase, QueryAction, QueryRelAction  # type: ignore
         QueryBase.cost = cls._query_cost
@@ -70,7 +70,7 @@ class BaseAction(ABC):
         QueryRelAction.cost = cls._query_cost
     
     @classmethod
-    def get_query_cost(cls) -> int:
+    def get_query_cost(cls) -> float:
         """Return currently configured Query() action cost."""
         return cls._query_cost
     
