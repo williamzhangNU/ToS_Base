@@ -148,7 +148,7 @@ class Prompter:
             'multiroom_rules': SHARED_MULTIROOM_RULES,
             'active_rules_extra': ACTIVE_RULES_EXTRA if is_active else '',
             'rules_common': SHARED_RULES_COMMON,
-            'exp_history': exp_history_str if not is_active and not gt_cogmap else '',
+            'exp_history': exp_history_str if not is_active else '',
             'vision_example': (VISION_EXAMPLE.format(image_placeholder=self.config.image_placeholder) if is_vision else ''),
         }
 
