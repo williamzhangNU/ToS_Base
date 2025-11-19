@@ -52,44 +52,37 @@ class EvaluationManager:
     }
     
     def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent, history_manager=None, seed: int | None = None):
+        # In current implementation, only one evaluation task is allowed
+        assert len(eval_tasks) == 1, "Only one evaluation task is supported"
         self.history_manager = history_manager
+        self.eval_tasks = []
+        spec = eval_tasks[0]
+        ttype = spec['task_type']
+        num = int(spec.pop('num', 1))
+        counts = self.history_manager.get_eval_counts() if self.history_manager else {}
+        done_count = 0
+        if counts:
+            class_name = EvalTaskType.from_short_name(ttype).class_name
+            done_count = counts.get(class_name, 0)
+
+        if num > done_count:
+            self.eval_tasks = [spec]
         self.np_random = np_random
         self.results = []
         self.turn_logs: List[EvaluationTurnLog] = []
         self.seed = seed
-
-        # Process all task types and create task instances
+        
+        # Initialize tasks
         self.tasks = []
-        counts = self.history_manager.get_eval_counts() if self.history_manager else {}
-
-        for spec in eval_tasks:
-            ttype = spec['task_type']
-            num = int(spec.get('num', 1))
-
-            # Check how many of this task type have been completed
-            done_count = 0
-            if counts:
-                class_name = EvalTaskType.from_short_name(ttype).class_name
-                done_count = counts.get(class_name, 0)
-
-            # Create the remaining tasks
-            remaining = num - done_count
-            for i in range(remaining):
-                task = EvalTaskType.create_task(
-                    ttype,
-                    np.random.default_rng(int(self.seed) + len(self.tasks)),
-                    room.copy(),
-                    agent.copy(),
-                    {},
-                    history_manager
-                )
-                self.tasks.append(task)
-                self.results.append({
-                    "task_type": task.__class__.__name__,
-                    "correct": False,
-                    "info": {}
-                })
-
+        for idx, task_spec in enumerate(self.eval_tasks):
+            task_type = task_spec['task_type']
+            task = EvalTaskType.create_task(task_type, np.random.default_rng(int(self.seed)), room.copy(), agent.copy(), {}, history_manager)
+            self.tasks.append(task)
+            self.results.append({
+                "task_type": task.__class__.__name__,
+                "correct": False,
+                "info": {}
+            })
         self.current_index = 0
     
     def _get_current_eval_task(self) -> Optional[BaseEvaluationTask]:
@@ -104,7 +97,7 @@ class EvaluationManager:
     
     def evaluate_answer(self, answer: str) -> Tuple[bool, Dict[str, Any]]:
         """Evaluate answer for current task."""
-        assert self.current_index < len(self.tasks), f"No more tasks, current_index: {self.current_index}, len(self.tasks): {len(self.tasks)}"
+        assert self.current_index < len(self.tasks), "No more tasks"
         
         task = self.tasks[self.current_index]
         correct, info = task.evaluate(answer)
