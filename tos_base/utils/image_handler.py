@@ -23,7 +23,11 @@ class ImageHandler:
             preload_images: Whether to load all images into memory
         """
         self.base_dir = base_dir
-        self.image_size = image_size
+        if isinstance(image_size, (list, tuple)):
+             self.image_size = tuple(image_size)
+        else:
+             self.image_size = (image_size, image_size)
+             
         self.preload_images = preload_images
         self.image_dir, self.json_data = self._load_data(base_dir, seed)
         self.objects = {obj['object_id']: obj for obj in self.json_data.get('objects', [])}
