@@ -5,8 +5,7 @@ Action system for spatial exploration.
 from .base import BaseAction, ActionResult
 from .actions import (
     MoveAction,
-    RotateAction, 
-    ReturnAction,
+    RotateAction,
     ObserveAction,
     ObserveBase,
     TermAction,
@@ -17,5 +16,5 @@ from .actions import (
 
 __all__ = [
     'BaseAction', 'ActionResult', 'ActionSequence', 'ACTION_CLASSES',
-    'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'ObserveBase', 'TermAction', 'QueryAction'
+    'MoveAction', 'RotateAction', 'ObserveAction', 'ObserveBase', 'TermAction', 'QueryAction'
 ] 
