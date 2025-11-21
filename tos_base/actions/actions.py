@@ -289,24 +289,30 @@ class ObserveAction(ObserveBase):
         })
 
 class TermAction(BaseAction):
-    """Terminate exploration"""
+    """Terminate exploration with an answer"""
     
-    format_desc = "Term()"
-    description = ("Terminate the exploration phase. "
-                   "Term() must be alone with no movement actions except for Return(). "
-                   "You MUST ONLY use it in the last turn and no other turns. Otherwise your action sequence will be invalid.")
-    example = "Term()"
-    format_pattern = r"^Term\(\)$"
+    format_desc = "Term(ANSWER)"
+    description = ("Terminate the exploration phase and provide the answer to the evaluation task. "
+                   "Term(ANSWER) must be alone with no movement actions except for Return(). "
+                   "You MUST ONLY use it in the last turn and no other turns. Otherwise your action sequence will be invalid. "
+                   "ANSWER must be one of A, B, C, D.")
+    example = "Term(A)"
+    format_pattern = r"^Term\(([A-D])\)$"
     cost = 0
+    
+    def __init__(self, answer: str):
+        super().__init__(answer)
+        self.answer = answer
+
     def success_message(self, **kwargs) -> str:
-        return "Exploration terminated."
+        return f"Exploration terminated with answer {self.answer}."
     
     def error_message(self, error_type: str) -> str:
         return "Cannot terminate exploration: execution failed."
     
     def execute(self, room, agent, **kwargs) -> ActionResult:
         """Execute term action on room state."""
-        return ActionResult(True, self.get_feedback(True), str(self), 'term', {'terminated': True})
+        return ActionResult(True, self.get_feedback(True), str(self), 'term', {'terminated': True, 'answer': self.answer})
     
     @staticmethod
     def is_final() -> bool:
@@ -317,7 +323,7 @@ class TermAction(BaseAction):
         return True
     
     def __repr__(self):
-        return "Term()"
+        return f"Term({self.answer})"
 
 
 # Internal-only forced terminate (not exposed to parser/registry)
@@ -327,6 +333,8 @@ class ForcedTermAction(TermAction):
     example = ""
     format_pattern = r"^ForcedTerm\(\)$"
     cost = 0
+    def __init__(self):
+        super().__init__("A") # Default dummy answer
     def success_message(self, **kwargs) -> str:
         return "Exploration ended. No further exploration actions are allowed."
     def execute(self, room, agent, **kwargs) -> ActionResult:
