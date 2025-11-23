@@ -166,14 +166,6 @@ class ExplorationManager:
         self._log_exploration(action_results, is_action_fail)
         return action_results
     
-    def finish_exploration(self, return_to_origin: bool = True) -> Room:
-        """Complete exploration and return final room state."""
-        if return_to_origin:
-            result = self.execute_action(ReturnAction())
-            if not result.success:
-                raise ValueError(f"Failed to return to origin: {result.message}")
-        return self.exploration_room
-    
     def get_exp_summary(self) -> Dict[str, Any]:
         """Get exploration summary."""
         node_cov = len(self.observed_nodes) / len(self.node_names)

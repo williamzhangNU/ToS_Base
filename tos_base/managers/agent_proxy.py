@@ -7,7 +7,7 @@ import numpy as np
 
 from ..core.room import Room
 from ..actions.base import BaseAction
-from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, QueryAction, ReturnAction
+from ..actions.actions import MoveAction, RotateAction, ObserveAction, TermAction, QueryAction
 from .spatial_solver import SpatialSolver
 from ..core.relationship import CardinalBinsAllo
 from .exploration_manager import ExplorationManager
@@ -833,10 +833,6 @@ class AnalystAgentProxy(AgentProxy):
 
         # Ingest all observed relation triples into solver
         self._ingest_observations()
-
-        # Ensure return to initial state before queries
-        ret = self.mgr.execute_success_action(ReturnAction())
-        self._add_turn([ret])
 
         # Global greedy queries
         self._global_query_loop()

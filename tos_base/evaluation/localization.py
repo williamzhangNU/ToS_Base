@@ -184,7 +184,7 @@ class ForwardLocEvaluationTask(BaseLocEvaluationTask):
         self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(
             target=target_name,
         )
-        self.eval_data.answer = f"{target_name} is at {direction}, {distance}"
+        self.eval_data.answer = f"{target_name} is among {direction}, {distance} objects"
         self.eval_data.choices = []
         self.eval_data.id = hash(self.eval_data.question)
         return self.eval_data.question

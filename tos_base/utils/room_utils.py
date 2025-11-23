@@ -243,15 +243,21 @@ class RoomGenerator:
             np_random: Random number generator
             room_name: Base name for the room
             candidate_objects: List of candidate objects to place
-            room_num: Total number of rooms to generate
+            room_num: Total number of rooms to generate (MUST be 4)
             topology: Connection topology for main room (room_id=1)
                 - 0: Main room at bottom edge, connects to only 1 room
                 - 1: Main room connects to 2 rooms (only if room_num > 2)
+                - 2: Main room connects to 3 rooms (only if room_num > 3)
+                - 3: Ring/circular structure (e.g., 4 rooms: 1-2, 2-3, 3-4, 4-1)
             **kwargs: Additional arguments (max_retries, eval_tasks, etc.)
 
         Returns:
             Tuple of (Room, Agent) where Room contains all rooms and Agent is in main room
         """
+        # Enforce room_num = 4 constraint
+        if room_num != 4:
+            raise ValueError(f"room_num must be 4, got {room_num}")
+
         if room_num == 1:
             # Single room case - use default mask
             mask = RoomGenerator._default_mask(room_size)
@@ -335,7 +341,8 @@ class RoomGenerator:
         Args:
             room_size: Size of each room (width, height)
             room_num: Number of rooms
-            topology: 0 = main room connects to 1 room, 1 = main room connects to 2 rooms
+            topology: 0 = main room connects to 1 room, 1 = main room connects to 2 rooms,
+                     2 = main room connects to 3 rooms, 3 = ring/circular structure
             np_random: Random generator
 
         Returns:
@@ -352,6 +359,9 @@ class RoomGenerator:
 
         # Generate room positions (coordinates are for room interior, walls will be added around)
         rooms = []
+
+        # Track custom connections for topology 2 (random connections)
+        topology_2_connections = None
 
         if topology == 0:
             # Main room connects to only 1 room
@@ -502,9 +512,161 @@ class RoomGenerator:
                 # If we couldn't place the room, return None to retry
                 if not placed:
                     return None
+
+        elif topology == 2 and room_num >= 4:
+            # Main room connects to 3 rooms
+            # Track connections for topology 2: list of (parent_room_idx, child_room_idx)
+            topology_2_connections = []
+
+            # Randomly choose main room position (center with random offset)
+            center_x = (grid_size - width) // 2
+            center_y = (grid_size - height) // 2
+
+            # Add random offset to main room position
+            main_offset_x = int(np_random.integers(-grid_size // 8, grid_size // 8 + 1))
+            main_offset_y = int(np_random.integers(-grid_size // 8, grid_size // 8 + 1))
+            main_x = max(2, min(grid_size - width - 2, center_x + main_offset_x))
+            main_y = max(2, min(grid_size - height - 2, center_y + main_offset_y))
+            rooms.append((main_x, main_y, main_x + width - 1, main_y + height - 1))
+
+            # Randomly choose three different directions for the three connected rooms
+            # Directions: 0=right, 1=left, 2=up, 3=down
+            available_directions = list(range(4))
+            np_random.shuffle(available_directions)
+            dir1, dir2, dir3 = available_directions[:3]
+
+            max_offset = min(1, min(width, height) // 4) if room_num > 4 else min(2, min(width, height) // 3)
+
+            # Place room 2 in direction dir1
+            room2_x, room2_y = RoomGenerator._calculate_adjacent_room_position(
+                main_x, main_y, main_x + width - 1, main_y + height - 1,
+                dir1, width, height, max_offset, np_random, grid_size
+            )
+            rooms.append((room2_x, room2_y, room2_x + width - 1, room2_y + height - 1))
+            topology_2_connections.append((0, 1))  # Main room (0) connects to room 2 (index 1)
+
+            # Place room 3 in direction dir2
+            room3_x, room3_y = RoomGenerator._calculate_adjacent_room_position(
+                main_x, main_y, main_x + width - 1, main_y + height - 1,
+                dir2, width, height, max_offset, np_random, grid_size
+            )
+            rooms.append((room3_x, room3_y, room3_x + width - 1, room3_y + height - 1))
+            topology_2_connections.append((0, 2))  # Main room (0) connects to room 3 (index 2)
+
+            # Place room 4 in direction dir3
+            room4_x, room4_y = RoomGenerator._calculate_adjacent_room_position(
+                main_x, main_y, main_x + width - 1, main_y + height - 1,
+                dir3, width, height, max_offset, np_random, grid_size
+            )
+            rooms.append((room4_x, room4_y, room4_x + width - 1, room4_y + height - 1))
+            topology_2_connections.append((0, 3))  # Main room (0) connects to room 4 (index 3)
+
+            # Place remaining rooms randomly connecting to any existing room
+            for i in range(4, room_num):
+                # Randomly choose an existing room to connect to
+                # Create a shuffled list of existing room indices to try
+                existing_room_indices = list(range(len(rooms)))
+                np_random.shuffle(existing_room_indices)
+
+                placed = False
+                connected_to_idx = -1
+                # Try to place the new room adjacent to each existing room
+                for base_idx in existing_room_indices:
+                    base_room = rooms[base_idx]
+                    x1, y1, x2, y2 = base_room
+
+                    # Try different random directions to find a valid placement
+                    directions = list(range(4))
+                    np_random.shuffle(directions)
+
+                    for direction in directions:
+                        max_offset_val = min(1, min(width, height) // 4) if room_num > 4 else min(2, min(width, height) // 3)
+
+                        new_x, new_y = RoomGenerator._calculate_adjacent_room_position(
+                            x1, y1, x2, y2, direction, width, height, max_offset_val, np_random, grid_size
+                        )
+
+                        # Check if new room is within bounds
+                        if new_x < 2 or new_y < 2 or new_x + width > grid_size - 2 or new_y + height > grid_size - 2:
+                            continue
+
+                        # Check if new room overlaps with any existing room
+                        new_room = (new_x, new_y, new_x + width - 1, new_y + height - 1)
+                        if not RoomGenerator._rooms_overlap_with_margin(new_room, rooms):
+                            rooms.append(new_room)
+                            connected_to_idx = base_idx
+                            placed = True
+                            break
+
+                    if placed:
+                        break
+
+                # If we couldn't place the room, return None to retry
+                if not placed:
+                    return None
+
+                # Record the connection
+                topology_2_connections.append((connected_to_idx, i))
+
+        elif topology == 3:
+            # Ring/circular structure: rooms arranged in a ring
+            # For 4 rooms: 1-2, 2-3, 3-4, 4-1
+            # Strategy: Use a 2x2 grid layout to ensure all connections are possible
+            # Layout:
+            #   [Room 4] [Room 1]
+            #   [Room 3] [Room 2]
+            # Connections: 1-2 (vertical), 2-3 (horizontal), 3-4 (vertical), 4-1 (horizontal)
+
+            if room_num != 4:
+                raise ValueError(f"Ring topology (topology=3) only supports room_num=4, got {room_num}")
+
+            # Calculate center position for the 2x2 grid
+            center_x = (grid_size - 2 * width - 1) // 2  # -1 for wall between rooms
+            center_y = (grid_size - 2 * height - 1) // 2
+
+            # Add small random offset to avoid always centering
+            offset_x = int(np_random.integers(-2, 3))
+            offset_y = int(np_random.integers(-2, 3))
+            center_x = max(2, min(grid_size - 2 * width - 3, center_x + offset_x))
+            center_y = max(2, min(grid_size - 2 * height - 3, center_y + offset_y))
+
+            # Place rooms in 2x2 grid pattern
+            # Room 1 (main room): top-right
+            room1_x = center_x + width + 1
+            room1_y = center_y + height + 1
+            rooms.append((room1_x, room1_y, room1_x + width - 1, room1_y + height - 1))
+
+            # Room 2: bottom-right
+            room2_x = center_x + width + 1
+            room2_y = center_y
+            rooms.append((room2_x, room2_y, room2_x + width - 1, room2_y + height - 1))
+
+            # Room 3: bottom-left
+            room3_x = center_x
+            room3_y = center_y
+            rooms.append((room3_x, room3_y, room3_x + width - 1, room3_y + height - 1))
+
+            # Room 4: top-left
+            room4_x = center_x
+            room4_y = center_y + height + 1
+            rooms.append((room4_x, room4_y, room4_x + width - 1, room4_y + height - 1))
+
+            # Validate all rooms are within bounds
+            for room in rooms:
+                x1, y1, x2, y2 = room
+                if x1 < 2 or y1 < 2 or x2 >= grid_size - 2 or y2 >= grid_size - 2:
+                    return None
+
         else:
+            # Fallback: topology 2 with room_num < 4, treat as topology 1
             # Fallback: topology 1 with room_num <= 2, treat as topology 0
-            return RoomGenerator._generate_multi_room_layout(room_size, room_num, 0, np_random)
+            if topology == 2 and room_num < 4:
+                return RoomGenerator._generate_multi_room_layout(room_size, room_num, 1, np_random)
+            elif topology == 3 and room_num < 3:
+                # Ring topology needs at least 3 rooms to make sense
+                return RoomGenerator._generate_multi_room_layout(room_size, room_num, 0, np_random)
+            else:
+                return RoomGenerator._generate_multi_room_layout(room_size, room_num, 0, np_random)
 
         # Validate all rooms are within bounds
         for room in rooms:
@@ -530,7 +692,7 @@ class RoomGenerator:
             return None
 
         # Generate connections based on topology
-        connections = RoomGenerator._generate_topology_connections(rooms, topology)
+        connections = RoomGenerator._generate_topology_connections(rooms, topology, topology_2_connections)
 
         # Add doors
         doors_added = RoomGenerator._add_doors_to_multi_room(grid, rooms, connections, np_random)
@@ -652,13 +814,15 @@ class RoomGenerator:
     @staticmethod
     def _generate_topology_connections(
         rooms: List[Tuple[int, int, int, int]],
-        topology: int
+        topology: int,
+        custom_connections: Optional[List[Tuple[int, int]]] = None
     ) -> List[Tuple[int, int]]:
         """Generate room connections based on topology.
 
         Args:
             rooms: List of room coordinates
             topology: Connection pattern
+            custom_connections: For topology 2, pre-computed random connections
 
         Returns:
             List of (room_idx1, room_idx2) connections
@@ -686,6 +850,29 @@ class RoomGenerator:
                     connections.append((1, i))  # Connect to room 2's branch
                 else:
                     connections.append((2, i))  # Connect to room 3's branch
+
+        elif topology == 2 and num_rooms >= 4:
+            # Use custom connections if provided (random connections)
+            if custom_connections is not None:
+                connections = custom_connections
+            else:
+                # Fallback: Main room (0) connects to rooms 1, 2, and 3
+                connections.append((0, 1))
+                connections.append((0, 2))
+                connections.append((0, 3))
+                # Chain remaining rooms cycling between branches
+                for i in range(4, num_rooms):
+                    branch_idx = ((i - 4) % 3) + 1  # Cycles through 1, 2, 3 (rooms 2, 3, 4)
+                    connections.append((branch_idx, i))
+
+        elif topology == 3:
+            # Ring/circular structure: 1-2, 2-3, 3-4, ..., n-1
+            # For example, with 4 rooms: 0-1, 1-2, 2-3, 3-0
+            for i in range(num_rooms - 1):
+                connections.append((i, i + 1))
+            # Close the ring by connecting the last room back to the first
+            if num_rooms > 2:
+                connections.append((num_rooms - 1, 0))
 
         return connections
 
@@ -1305,7 +1492,7 @@ def initialize_room_from_json(json_data: Dict[str, Any]) ->  Tuple[Room, Agent]:
 
 
 if __name__ == '__main__':
-    np_random = np.random.default_rng(1)
+    np_random = np.random.default_rng(2)
     
     # # Test 3 object placement strategies
     # room1, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, np_random=np_random)
@@ -1318,5 +1505,5 @@ if __name__ == '__main__':
 
     # Test room layout generation
     # room1, _ = RoomGenerator.generate_room(room_size=[20, 20], level=2, n_objects=9, np_random=np_random, same_room_size=True)
-    room1, _ = RoomGenerator.generate_multi_room(room_size=[6, 6], room_num=3, n_objects=4, np_random=np_random, topology=1)
+    room1, _ = RoomGenerator.generate_multi_room(room_size=[6, 6], room_num=4, n_objects=4, np_random=np_random, topology=3)
     RoomPlotter.plot(room1, None, mode='img', save_path='room1.png')

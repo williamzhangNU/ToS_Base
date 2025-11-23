@@ -25,8 +25,7 @@ from .core.constant import (
 from .actions.base import BaseAction, ActionResult
 from .actions.actions import (
     MoveAction,
-    RotateAction, 
-    ReturnAction,
+    RotateAction,
     ObserveAction,
     TermAction,
     ActionSequence
@@ -55,7 +54,7 @@ __all__ = [
     
     # Actions
     'BaseAction', 'ActionResult', 'ActionSequence',
-    'MoveAction', 'RotateAction', 'ReturnAction', 'ObserveAction', 'TermAction',
+    'MoveAction', 'RotateAction', 'ObserveAction', 'TermAction',
     
     # Managers
     'ExplorationManager', 'ExplorationTurnLog', 'EvaluationManager', 'EvaluationTurnLog', 'CognitiveMapManager', 'CognitiveMapTurnLog', 'AgentProxy', 'HistoryManager',

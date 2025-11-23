@@ -25,13 +25,13 @@ Available Actions:
 Action Grammar (HARD CONSTRAINT):
 Your {answer_label} must match this grammar (label followed by newline):
 {answer_label}\nActions: [ <M>* <F> ]
-<M> = "JumpTo(OBJ)" | "Rotate(DEG)" | "Return()"
+<M> = "JumpTo(OBJ)" | "Rotate(DEG)"
 <F> = "Observe()" | "Query(OBJ)" | "Term()"
 Constraints:
 - Zero, one or more <M>. No JumpTo at first step.
 - Exactly one <F>, and it must be the final action.
 - No more than one Observe().
-- Term() may appear only alone or after Return().
+- Term() may appear only alone.
 - Any violation is invalid.
 
 Examples:
@@ -53,9 +53,9 @@ class MoveAction(BaseAction):
     
     format_desc = "JumpTo(OBJ)"
     description = (
-        "Jump to the same position as the object. "
+        "Jump to the same position as the object or door. "
         "Your orientation does NOT change. "
-        "The object you jump to MUST be in your field of view and previously observed. Use object names only. NO numbers or directions or others. "
+        "The object you jump to MUST be in your field of view and previously observed. Use object or door names only. NO numbers or directions or others. "
         "Invalid: JumpTo(left), JumpTo(1)."
     )
     example = "JumpTo(table)"
@@ -130,38 +130,6 @@ class RotateAction(BaseAction):
     
     def __repr__(self):
         return f"Rotate({self.degrees})"
-
-
-class ReturnAction(BaseAction):
-    """Return to anchor position"""
-    
-    format_desc = "Return()"
-    description = "Return to the starting position and orientation."
-    example = "Return()"
-    format_pattern = r"^Return\(\)$"
-    cost = 0
-    
-    def success_message(self, **kwargs) -> str:
-        return "You returned to starting position and orientation."
-    
-    def error_message(self, error_type: str) -> str:
-        return "Cannot return to anchor: execution failed."
-    
-    def execute(self, room, agent, **kwargs) -> ActionResult:
-        """Execute return action on room state."""
-        # move to initial position
-        agent.pos = agent.init_pos.copy()
-        # rotate to initial orientation (compute delta)
-        # report clockwise degrees from north; ensure consistency with _ori_to_deg in agent_proxy
-        deg = {(0, 1): 0, (1, 0): 90, (0, -1): 180, (-1, 0): 270}[tuple(agent.ori)]
-        agent.ori = agent.init_ori.copy()
-        # restore room id if tracked
-        if agent.init_room_id is not None:
-            agent.room_id = agent.init_room_id
-        return ActionResult(True, self.get_feedback(True), str(self), 'return', {'target_name': 'initial_pos', 'degrees': deg})
-    
-    def __repr__(self):
-        return "Return()"
 
 
 class ObserveBase(BaseAction):
@@ -286,7 +254,7 @@ class TermAction(BaseAction):
     
     format_desc = "Term()"
     description = ("Terminate the exploration phase. "
-                   "Term() must be alone with no movement actions except for Return(). "
+                   "Term() must be alone with no movement actions. "
                    "You MUST ONLY use it in the last turn and no other turns. Otherwise your action sequence will be invalid.")
     example = "Term()"
     format_pattern = r"^Term\(\)$"
@@ -345,6 +313,7 @@ class QueryAction(QueryBase):
     """Query object coordinates in the initial frame and emit relation triple to initial_pos."""
     description = (
         "Return object's coordinates with agent's initial position as origin, north as y+ axis. "
+        "You can only query objects that you have previously observed. "
         "High cost, only use when necessary to eliminate ambiguities."
     )
     def success_message(self, **kwargs) -> str:
@@ -353,6 +322,9 @@ class QueryAction(QueryBase):
     def execute(self, room, agent, **kwargs) -> ActionResult:
         if self.obj != 'initial_pos' and (not room.has_object(self.obj)):
             return ActionResult(False, self.get_feedback(False, "object not found"), str(self), 'query', {})
+        observed_items = set(kwargs.get('observed_items', []))
+        if observed_items is not None and self.obj != 'initial_pos' and self.obj not in observed_items:
+            return ActionResult(False, self.get_feedback(False, "object not observed yet"), str(self), 'query', {})
         obj_pos = room.get_object_by_name(self.obj).pos if self.obj != 'initial_pos' else agent.init_pos
         obj_ori = room.get_object_by_name(self.obj).ori if self.obj != 'initial_pos' else agent.init_ori
         v = (obj_pos - agent.init_pos)
@@ -373,7 +345,7 @@ class QueryAction(QueryBase):
 class QueryRelAction(QueryBase):
     """Legacy: query accurate relationship from current agent pose."""
     format_desc = "QueryRel(obj)"
-    description = "Return accurate spatial relationship from current agent pose."
+    description = "Return accurate spatial relationship from current agent pose. You can only query objects that you have previously observed."
     example = "QueryRel(table)"
     format_pattern = r"^QueryRel\(([A-Za-z0-9_ -]+)\)$"
     def success_message(self, **kwargs) -> str:
@@ -382,6 +354,9 @@ class QueryRelAction(QueryBase):
     def execute(self, room, agent, **kwargs) -> ActionResult:
         if self.obj != 'initial_pos' and (not room.has_object(self.obj)):
             return ActionResult(False, self.get_feedback(False, "object not found"), str(self), 'query', {})
+        observed_items = set(kwargs.get('observed_items', []))
+        if observed_items is not None and self.obj != 'initial_pos' and self.obj not in observed_items:
+            return ActionResult(False, self.get_feedback(False, "object not observed yet"), str(self), 'query', {})
         obj_pos = room.get_object_by_name(self.obj).pos if self.obj != 'initial_pos' else agent.init_pos
         rel = PairwiseRelationship.relationship(tuple(obj_pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
         ans = rel.to_string()
@@ -399,7 +374,7 @@ class QueryRelAction(QueryBase):
 # Action registry for easy lookup
 # Expose all observe variants; default flows may still prefer ObserveApprox
 ACTION_CLASSES = [
-    MoveAction, RotateAction, ReturnAction,
+    MoveAction, RotateAction,
     ObserveAction, QueryAction, TermAction
 ]
 
@@ -445,7 +420,7 @@ class ActionSequence:
                     return None
                 motions.append(act)
         if isinstance(final_action, TermAction):
-            if any(not isinstance(a, ReturnAction) for a in motions):
+            if motions:
                 return None
         return cls(motions, final_action)
     
@@ -480,7 +455,7 @@ class ActionSequence:
             "\n".join(f"- {cls.format_desc}: {_desc(cls)}" for cls in final_actions)
         )
         examples = (
-            f"Valid: Actions: [JumpTo(table), Rotate(90), Observe()]\n" +
+            f"Valid: Actions: [JumpTo(red door), Rotate(90), JumpTo(table), Observe()]\n" +
             f"Valid: Actions: [Observe()]\n" +
             f"Valid: Actions: [Query(table)]\n" +
             f"Invalid (no final action): Actions: [JumpTo(table)]\n" +
