@@ -527,7 +527,7 @@ def get_room_description(room: Room, agent: Agent, with_topdown: bool = False) -
     # Separate objects and gates for clearer description
     # objects = [o.label + ": " + o.name + "(has facing direction)" if o.has_orientation else "" for o in room.all_objects if not isinstance(o, Gate)]
     # TODO, currently only for cognitive map
-    objects = [o.label + ": " + o.name  for o in room.all_objects if not isinstance(o, Gate)]
+    objects = [((o.label + ": ") if o.label else "") + o.name  for o in room.all_objects if not isinstance(o, Gate)]
     # objects = [o.name for o in sorted([o for o in room.all_objects if not isinstance(o, Gate)], key=lambda x: x.label) ]
     gates = [o.name for o in room.all_objects if isinstance(o, Gate)]
 
