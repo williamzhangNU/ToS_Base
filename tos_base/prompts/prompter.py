@@ -14,7 +14,7 @@ from ..utils.utils import THINK_LABEL, ANSWER_LABEL
 class PromptManager:
     @staticmethod
     def system_prompt() -> str:
-        return "You are an AI assistant that answers visual questions based on images."
+        return  f"You answer should strictly follow this format:\n{THINK_LABEL} Your thoughts\n{ANSWER_LABEL} Your final answer"
 
     # Simple env message helpers
     def invalid_action_message(self) -> str:

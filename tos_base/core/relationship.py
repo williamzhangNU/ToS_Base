@@ -548,7 +548,8 @@ class ProximityRelationship:
             return None
             
         # Create pairwise relationship between the two objects using agent's perspective
-        cardinal_bins = CardinalBinsAllo() # CardinalBinsEgo()
+        # cardinal_bins = CardinalBinsAllo() # CardinalBinsEgo()
+        cardinal_bins = EgoFrontBins()
         distance_bins = StandardDistanceBins()
         pairwise_rel = PairwiseRelationshipDiscrete.relationship(a_pos, b_pos, perspective_ori, cardinal_bins, distance_bins)
         
