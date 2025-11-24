@@ -84,8 +84,8 @@ class HistoryManager:
         return 0 <= index < len(self.exploration_turn_logs)
 
     def _generate_room_key(self, room_dict, agent_dict):
-        agent_dict.pop("pos")
-        agent_dict.pop("ori")
+        agent_dict.pop("pos",None)
+        agent_dict.pop("ori",None)
         room_str = json.dumps({**room_dict, **agent_dict}, sort_keys=True)
 
         return hash(room_str)
