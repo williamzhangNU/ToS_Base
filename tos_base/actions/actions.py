@@ -239,7 +239,7 @@ class ObserveAction(ObserveBase):
         final_answer = pairwise_answer
         if local_answer:
             final_answer += (
-                f"\nAssume your current facing direction is called \"north\", mutually close object relations in your FOV:\n{local_answer}"
+                f"\n{local_answer}"
             )
         return ActionResult(True, self.get_feedback(True, answer=final_answer), str(self), 'observe', {
             'answer': final_answer,
