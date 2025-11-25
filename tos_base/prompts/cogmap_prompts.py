@@ -45,7 +45,7 @@ COGMAP_INSTRUCTION_GLOBAL_ONLY = """\
 - Frame: origin [0,0] is your initial position; your initial facing direction is north.
 - Content: include all observed objects and gates; include the agent
 - Facing: use "north|south|east|west".
-- Confidence: use "high|low" confidence levels for object presence.
+- Confidence: use "high" if you are certain about the position prediction, "low" if uncertain.
 
 Example:
 ```json

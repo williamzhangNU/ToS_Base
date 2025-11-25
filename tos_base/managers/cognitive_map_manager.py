@@ -41,6 +41,7 @@ from ..utils.cogmap.analysis import (
     get_false_belief_metrics,
     avg_nested_dicts,
 )
+from ..utils.cogmap.confidence import calculate_confidence_metrics
 
 
 @dataclass
@@ -573,6 +574,7 @@ class CognitiveMapManager:
 
         # Per-turn global metrics (concise helper)
         per_turn_update, per_turn_full, per_turn_self_tracking = CognitiveMapManager.compute_per_turn_global_metrics(cog_logs)
+        conf_match, conf_ratio = calculate_confidence_metrics(env_data)
         false_belief_acc = BaseCogMetrics.average([BaseCogMetrics.from_dict(m) for m in false_belief_metrics]).to_dict() if false_belief_metrics else None
         if exp_type == 'passive':
             return {
@@ -595,6 +597,8 @@ class CognitiveMapManager:
             'cogmap_update_per_turn': per_turn_update,
             'cogmap_full_per_turn': per_turn_full,
             'self_tracking_per_turn': per_turn_self_tracking,
+            'confidence_match_per_turn': conf_match,
+            'confidence_ratio_per_turn': conf_ratio,
         }
 
     @staticmethod
