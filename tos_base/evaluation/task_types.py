@@ -18,14 +18,14 @@ class EvalTaskType(Enum):
     POV = ("pov", "PovEvaluationTask")
     BWD_POV_TEXT = ("bwd_pov_text", "BackwardPovTextEvaluationTask")
     BWD_POV_VISION = ("bwd_pov_vision", "BackwardPovVisionEvaluationTask")
-    E2A = ("e2a", "E2AEvaluationTask")
-    FWD_LOC = ("fwd_loc", "ForwardLocEvaluationTask")
-    BWD_LOC_TEXT = ("bwd_loc_text", "BackwardLocTextEvaluationTask")
-    BWD_LOC_VISION = ("bwd_loc_vision", "BackwardLocVisionEvaluationTask")
-    FWD_FOV = ("fwd_fov", "ForwardFOVEvaluationTask")
-    BWD_NAV_TEXT = ("bwd_nav_text", "BackwardNavTextEvaluationTask")
-    BWD_NAV_VISION = ("bwd_nav_vision", "BackwardNavVisionEvaluationTask")
-    BWD_NAV_REV = ("bwd_nav_rev", "BackwardNavRevEvaluationTask")
+    E2A = ("e2a", "AlloMappingEvaluationTask")
+    FWD_LOC = ("fwd_loc", "Action2LocationEvaluationTask")
+    BWD_LOC_TEXT = ("bwd_loc_text", "Location2ActionTextEvaluationTask")
+    BWD_LOC_VISION = ("bwd_loc_vision", "Location2ActionVisionEvaluationTask")
+    FWD_FOV = ("fwd_fov", "Action2ViewEvaluationTask")
+    BWD_NAV_TEXT = ("bwd_nav_text", "View2ActionTextEvaluationTask")
+    BWD_NAV_VISION = ("bwd_nav_vision", "View2ActionVisionEvaluationTask")
+    BWD_NAV_REV = ("bwd_nav_rev", "View2ActionRevEvaluationTask")
     FALSE_BELIEF = ("false_belief", "FalseBeliefDirectionPov")
     DIR_ANCHOR = ("dir_anchor", "DirectionPov")
     
@@ -49,10 +49,10 @@ class EvalTaskType(Enum):
         # Import here to avoid circular imports
         from .direction import DirectionEvaluationTask, PovEvaluationTask, BackwardPovTextEvaluationTask, BackwardPovVisionEvaluationTask, DirectionPov
         from .rotation import RotEvaluationTask, RotDualEvaluationTask
-        from .e2a import E2AEvaluationTask
-        from .localization import ForwardLocEvaluationTask, BackwardLocTextEvaluationTask, BackwardLocVisionEvaluationTask
+        from .e2a import AlloMappingEvaluationTask
+        from .localization import Action2LocationEvaluationTask, Location2ActionTextEvaluationTask, Location2ActionVisionEvaluationTask
         from .false_belief import FalseBeliefDirectionPov
-        from .navigation_tasks import ForwardFOVEvaluationTask, BackwardNavTextEvaluationTask, BackwardNavVisionEvaluationTask, BackwardNavRevEvaluationTask
+        from .navigation_tasks import Action2ViewEvaluationTask, View2ActionTextEvaluationTask, View2ActionVisionEvaluationTask, View2ActionRevEvaluationTask
         
         task_map = {
             cls.DIR.short_name: DirectionEvaluationTask,
@@ -60,15 +60,15 @@ class EvalTaskType(Enum):
             cls.ROT_DUAL.short_name: RotDualEvaluationTask,
             cls.POV.short_name: PovEvaluationTask,
             cls.DIR_ANCHOR.short_name: DirectionPov,
-            cls.E2A.short_name: E2AEvaluationTask,
-            cls.FWD_LOC.short_name: ForwardLocEvaluationTask,
-            cls.BWD_LOC_TEXT.short_name: BackwardLocTextEvaluationTask,
-            cls.BWD_LOC_VISION.short_name: BackwardLocVisionEvaluationTask,
+            cls.E2A.short_name: AlloMappingEvaluationTask,
+            cls.FWD_LOC.short_name: Action2LocationEvaluationTask,
+            cls.BWD_LOC_TEXT.short_name: Location2ActionTextEvaluationTask,
+            cls.BWD_LOC_VISION.short_name: Location2ActionVisionEvaluationTask,
             cls.FALSE_BELIEF.short_name: FalseBeliefDirectionPov,
-            cls.FWD_FOV.short_name: ForwardFOVEvaluationTask,
-            cls.BWD_NAV_TEXT.short_name: BackwardNavTextEvaluationTask,
-            cls.BWD_NAV_VISION.short_name: BackwardNavVisionEvaluationTask,
-            cls.BWD_NAV_REV.short_name: BackwardNavRevEvaluationTask,
+            cls.FWD_FOV.short_name: Action2ViewEvaluationTask,
+            cls.BWD_NAV_TEXT.short_name: View2ActionTextEvaluationTask,
+            cls.BWD_NAV_VISION.short_name: View2ActionVisionEvaluationTask,
+            cls.BWD_NAV_REV.short_name: View2ActionRevEvaluationTask,
             cls.BWD_POV_TEXT.short_name: BackwardPovTextEvaluationTask,
             cls.BWD_POV_VISION.short_name: BackwardPovVisionEvaluationTask,
         }
@@ -134,22 +134,22 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
 
-    task_name = 'bwd_loc'
+    task_name = 'bwd_loc_text'
     for seed in tqdm(range(0, 1)):
         np_random = np.random.default_rng(seed)
         room, agent = RoomGenerator.generate_room(
-            room_size=(15, 15),
+            room_size=(30, 30),
             n_objects=10,
             np_random=np_random,
             room_name='room',
-            level=0,
-            main=12,
+            level=2,
+            main=6,
         )
         # print(f'room: {room}')
         # print(f'agent: {agent}')
-        # RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
+        RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
         task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
         print(task.generate_question(), task.answer)
-        user_pred = task.answer
+        user_pred = "(1, -5)" # task.answer
         score, info = EvalTaskType.evaluate_prediction(task_name, user_pred, task.answer, task.choices)
         print(f"Evaluation result: {score}, details: {info}")

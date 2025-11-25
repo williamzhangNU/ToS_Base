@@ -42,13 +42,25 @@ class EvaluationManager:
     Handles task initialization, question generation, answer evaluation,
     and tracking of evaluation results across multiple tasks.
     """
-    def __init__(self, eval_tasks: List[Dict[str, Any]], np_random: np.random.Generator, room: Room, agent: Agent, history_manager=None, seed: int | None = None):
+    def __init__(
+        self,
+        eval_tasks: List[Dict[str, Any]],
+        np_random: np.random.Generator,
+        room: Room,
+        agent: Agent,
+        history_manager=None,
+        seed: int | None = None,
+        render_mode: str = 'text'
+    ):
         # In current implementation, only one evaluation task is allowed
         assert len(eval_tasks) == 1, "Only one evaluation task is supported"
         self.history_manager = history_manager
         self.eval_tasks = []
         spec = eval_tasks[0]
         ttype = spec['task_type']
+
+        if render_mode == 'text':
+            assert 'vision' not in ttype, f"Cannot run vision task {ttype} in text mode"
         num = int(spec.pop('num', 1))
         counts = self.history_manager.get_eval_counts() if self.history_manager else {}
         done_count = 0
@@ -67,7 +79,8 @@ class EvaluationManager:
         self.tasks = []
         for idx, task_spec in enumerate(self.eval_tasks):
             task_type = task_spec['task_type']
-            task = EvalTaskType.create_task(task_type, np.random.default_rng(int(self.seed)), room.copy(), agent.copy(), {}, history_manager)
+            rng_seed = int(self.seed) if self.seed is not None else None
+            task = EvalTaskType.create_task(task_type, np.random.default_rng(rng_seed), room.copy(), agent.copy(), {}, history_manager)
             self.tasks.append(task)
             self.results.append({
                 "task_type": task.__class__.__name__,

@@ -456,30 +456,9 @@ def _eval_exact_text(pred: str, answer: Union[str, Sequence[str]]) -> Tuple[bool
 
 def _eval_forward_nav(pred: str, answer: str) -> Tuple[bool, Dict[str, Any]]:
     """Evaluate forward navigation/localization task."""
-    pred_rels = _parse_object_relations(pred)
-    ans_rels = _parse_object_relations(answer)
-    
-    if not pred_rels or not ans_rels:
-        return False, {}
-    
-    pred_dict = {obj: (_canonicalize_label(dir_), _canonicalize_label(dist)) 
-                 for obj, dir_, dist in pred_rels}
-    ans_dict = {obj: (_canonicalize_label(dir_), _canonicalize_label(dist)) 
-                for obj, dir_, dist in ans_rels}
-    
-    score = 0
-    assert len(ans_dict) == 1, "Ground truth must have exactly one object"
-    for obj in ans_dict:
-        if obj in pred_dict:
-            pred_dir, pred_dist = pred_dict[obj]
-            ans_dir, ans_dist = ans_dict[obj]
-            dir_match = _labels_match(pred_dir, ans_dir)
-            dist_match = _labels_match(pred_dist, ans_dist)
-            score = (dir_match + dist_match) / 2
-    
-    return score, {}
+    return _eval_direction_text(pred, answer)
 
-def _eval_backward_nav(pred: str, answer: Union[str, Dict]) -> Tuple[bool, Dict[str, Any]]:
+def _eval_backward_nav(pred: str, answer: Union[str, Dict], weight_by_steps: bool = False) -> Tuple[bool, Dict[str, Any]]:
     """Evaluate backward navigation task."""
     if not isinstance(answer, dict):
         return False, {}
@@ -534,7 +513,10 @@ def _eval_backward_nav(pred: str, answer: Union[str, Dict]) -> Tuple[bool, Dict[
             'ori_match': final_ori == tuple(answer['final_ori']),
             'visible_match': True,
         })
-        return min(answer['minimal_steps'] / len(pred_actions), 1.0), best_info
+        score = 1.0
+        if weight_by_steps:
+            score = min(answer['minimal_steps'] / len(pred_actions), 1.0)
+        return score, best_info
     
     # Also check ground truth position as fallback
     expected_pos = tuple(answer['final_pos'])
@@ -626,29 +608,38 @@ def _score_similarity_mra_style(similarity: float) -> float:
     
     return final_score
 
-def _eval_backward_loc(pred: str, answer: Any) -> Tuple[float, Dict[str, Any]]:
+def _eval_backward_loc(pred: str, answer: Any, use_mra: bool = False) -> Tuple[float, Dict[str, Any]]:
     """Evaluate backward localization task."""
     if not isinstance(answer, dict):
         return False, {}
     
-    parsed = _parse_coord_orientation(pred)
-    if not parsed:
+    # Try parsing just coordinate first
+    coord_pred = None
+    coords = _parse_coordinate_list(pred)
+    if coords and len(coords) > 0:
+        coord_pred = coords[0]
+    else:
+        # Fallback to full parser
+        parsed = _parse_coord_orientation(pred)
+        if parsed:
+            coord_pred, _ = parsed
+            
+    if coord_pred is None:
         return False, {}
-    
-    coord_pred, ori_pred = parsed
     
     try:
         coord_ans = _coerce_point(answer.get('coord', ()))
     except ValueError:
         return False, {}
     
-    ori_ans = str(answer.get('orientation', '')).strip().lower()
     similarity = _calculate_coord_similarity(coord_pred, coord_ans)
-    score = _score_similarity_mra_style(similarity)
-    ori_ok = ori_pred == ori_ans
-
-    return (score + ori_ok) / 2, {
-        'orientation_match': ori_ok,
+    
+    if use_mra:
+        score = _score_similarity_mra_style(similarity)
+    else:
+        score = similarity
+        
+    return score, {
         'similarity': similarity,
     }
 
@@ -712,7 +703,7 @@ def e2a_eval_fn(pred: Any, answer: Any) -> Tuple[float, Dict[str, Any]]:
     pos_sim = compute_pos_sim(pred_room, gt_room, allow_scale=False, pos_norm_L=pos_norm_L)
     dir_sim = compute_dir_sim(pred_room, gt_room)
     similarity = (pos_sim + dir_sim) / 2
-    return _score_similarity_mra_style(similarity), {'similarity': similarity, 'threshold': threshold}
+    return similarity, {'similarity': similarity, 'threshold': threshold}
 
 
 # ========== Public Helper Functions ==========
@@ -848,14 +839,14 @@ TASK_EVALUATORS: Dict[str, TaskEvaluator] = {
     'BackwardPovTextEvaluationTask': _wrap_eval(_eval_exact_text),
     'BackwardPovVisionEvaluationTask': _wrap_eval(_eval_exact_text),
     'DirectionPov': _wrap_eval(_eval_direction_text),
-    'E2AEvaluationTask': lambda pred, answer, _choices: e2a_eval_fn(pred, answer),
-    'ForwardFOVEvaluationTask': _wrap_eval(_eval_forward_nav),
-    'BackwardNavTextEvaluationTask': _wrap_eval(_eval_backward_nav, pred_cast=str, answer_cast=None),
-    'BackwardNavVisionEvaluationTask': _wrap_eval(_eval_backward_nav, pred_cast=str, answer_cast=None),
-    'BackwardNavRevEvaluationTask': _wrap_eval(_eval_backward_nav_rev, pred_cast=str, answer_cast=None),
-    'ForwardLocEvaluationTask': _wrap_eval(_eval_forward_nav),
-    'BackwardLocTextEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
-    'BackwardLocVisionEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
+    'AlloMappingEvaluationTask': lambda pred, answer, _choices: e2a_eval_fn(pred, answer),
+    'Action2ViewEvaluationTask': _wrap_eval(_eval_forward_nav),
+    'View2ActionTextEvaluationTask': _wrap_eval(_eval_backward_nav, pred_cast=str, answer_cast=None),
+    'View2ActionVisionEvaluationTask': _wrap_eval(_eval_backward_nav, pred_cast=str, answer_cast=None),
+    'View2ActionRevEvaluationTask': _wrap_eval(_eval_backward_nav_rev, pred_cast=str, answer_cast=None),
+    'Action2LocationEvaluationTask': _wrap_eval(_eval_forward_nav),
+    'Location2ActionTextEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
+    'Location2ActionVisionEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
     'FalseBeliefDirectionPov': _wrap_eval(_eval_direction_text),
 }
 

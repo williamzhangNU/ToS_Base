@@ -277,15 +277,15 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
                 return plan, agent, visible
         raise ValueError("Failed to generate navigation plan with visible objects")
 
-class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
+class Action2ViewEvaluationTask(BaseNavEvaluationTask):
     """Predict final observation from an action sequence."""
     QUESTION_TEMPLATE = (
         "You return to your starting position and face north.\n"
         "You will execute the following action sequence:\n"
         "{actions}\n\n"
         "After executing the actions, what is the egocentric relation of {target}?\n\n"
-        "Answer format: {target} is at <direction>, <distance>\n"
-        "Example: {target} is at front, near\n"
+        "Answer format: <direction>, <distance>\n"
+        "Example: front, near\n"
     )
 
     @retry_generate_question
@@ -296,7 +296,7 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
 
         self.np_random.shuffle(visible)
         target_name, direction, distance = visible[0]
-        answer = f"{target_name} is at {direction}, {distance}"
+        answer = f"{direction}, {distance}"
 
         self.eval_data.question = self.QUESTION_TEMPLATE.format(actions=actions_str, target=target_name)
         self.eval_data.answer = answer
@@ -304,8 +304,8 @@ class ForwardFOVEvaluationTask(BaseNavEvaluationTask):
         self.eval_data.id = hash(self.eval_data.question)
         return self.eval_data.question
 
-class BackwardNavTextEvaluationTask(BaseNavEvaluationTask):
-    """Infer action sequence from final observation."""
+class BaseView2ActionEvaluationTask(BaseNavEvaluationTask):
+    """Base class for View2Action (Backward Navigation) tasks."""
     QUESTION_TEMPLATE = (
         "You return to your starting position and face north.\n"
         "Then you have executed an action sequence and changed to a new location and facing direction.\n"
@@ -316,15 +316,17 @@ class BackwardNavTextEvaluationTask(BaseNavEvaluationTask):
         "Example: Rotate(90), JumpTo(lamp), JumpTo(chair), Rotate(90)\n"
     )
 
+    def _get_final_obs(self, visible: List[Tuple[str, str, str]]) -> str:
+        raise NotImplementedError
+
     @retry_generate_question
     def generate_question(self) -> str:
         steps = int(self.config.get('steps', 3))
         plan, end_agent, visible = self._sample_plan_with_visible(steps)
         self.np_random.shuffle(visible)
         visible = visible[:3]
-        obs_parts = [f"{name} is at {direction}, {distance}"
-                    for name, direction, distance in visible]
-        final_obs = "; ".join(obs_parts)
+        
+        final_obs = self._get_final_obs(visible)
 
         # Store expected final state and object positions for evaluation
         init_agent = self._agent_from_init()
@@ -357,62 +359,22 @@ class BackwardNavTextEvaluationTask(BaseNavEvaluationTask):
         self.eval_data.choices = []
         self.eval_data.id = hash(self.eval_data.question + json.dumps(answer, sort_keys=True))
         return self.eval_data.question
-    
-class BackwardNavVisionEvaluationTask(BaseNavEvaluationTask):
-    """Infer action sequence from final observation."""
-    QUESTION_TEMPLATE = (
-        "You return to your starting position and face north.\n"
-        "Then you have executed an action sequence and changed to a new location and facing direction.\n"
-        "You observe the following:\n"
-        "{final_obs}\n\n"
-        "What action sequence led to this final view?\n\n"
-        "Answer format: use a valid action sequence\n"
-        "Example: Rotate(90), JumpTo(lamp), JumpTo(chair), Rotate(90)\n"
-    )
 
-    @retry_generate_question
-    def generate_question(self) -> str:
-        steps = int(self.config.get('steps', 3))
-        plan, end_agent, visible = self._sample_plan_with_visible(steps)
-        self.np_random.shuffle(visible)
-        visible = visible[:3]
+
+class View2ActionTextEvaluationTask(BaseView2ActionEvaluationTask):
+    """Infer action sequence from final observation (text)."""
+    def _get_final_obs(self, visible: List[Tuple[str, str, str]]) -> str:
         obs_parts = [f"{name} is at {direction}, {distance}"
                     for name, direction, distance in visible]
-        final_obs = "; ".join(obs_parts)
+        return "; ".join(obs_parts)
 
-        # Store expected final state and object positions for evaluation
-        init_agent = self._agent_from_init()
-        object_positions = {obj.name: tuple(map(int, obj.pos)) for obj in self.room.all_objects}
 
-        answer = {
-            'final_pos': tuple(map(int, end_agent.pos)),
-            'final_ori': tuple(map(int, end_agent.ori)),
-            'init_pos': tuple(map(int, init_agent.pos)),
-            'init_ori': tuple(map(int, init_agent.ori)),
-            'object_positions': object_positions,
-            "minimal_steps": compute_shortest_path(
-                self.room,
-                init_agent.pos,
-                init_agent.ori,
-                end_agent.pos,
-            ),
-            'final_observation': [
-                {
-                    'name': name,
-                    'direction': direction,
-                    'distance': distance,
-                }
-                for name, direction, distance in visible
-            ],
-        }
+class View2ActionVisionEvaluationTask(BaseView2ActionEvaluationTask):
+    """Infer action sequence from final observation (vision)."""
+    def _get_final_obs(self, visible: List[Tuple[str, str, str]]) -> str:
+        return "You observe: <image>"
 
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(final_obs="<image>")
-        self.eval_data.answer = answer
-        self.eval_data.choices = []
-        self.eval_data.id = hash(self.eval_data.question + json.dumps(answer, sort_keys=True))
-        return self.eval_data.question
-
-class BackwardNavRevEvaluationTask(BaseNavEvaluationTask):
+class View2ActionRevEvaluationTask(BaseNavEvaluationTask):
     """Navigate back to starting point from termination location."""
     QUESTION_TEMPLATE = (
         "You are currently at the termination location.\n"

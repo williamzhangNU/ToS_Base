@@ -7,7 +7,7 @@ from .tasks import BaseEvaluationTask, retry_generate_question
 from ..core.object import Object
 from ..utils.utils import hash
 
-class E2AEvaluationTask(BaseEvaluationTask):
+class AlloMappingEvaluationTask(BaseEvaluationTask):
     """Report allocentric coordinates for selected objects."""
 
     QUESTION_TEMPLATE = (
