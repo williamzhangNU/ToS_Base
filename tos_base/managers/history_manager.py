@@ -16,6 +16,7 @@ from .. import (
 
 # -------- Filenames (constants) --------
 EXPLORATION_LOG_BASENAME = "exploration_turn_logs.json"
+FALSE_BELIEF_LOG_BASENAME = "false_belief_turn_logs.json"
 EVALUATION_LOG_BASENAME = "evaluation_turn_logs.json"
 CONFIG_BASENAME = "config.json"
 METRICS_BASENAME = "metrics.json"
@@ -34,6 +35,7 @@ class HistoryManager:
                  image_dir:str = None, eval_override: bool = False, all_override: bool = False, all_tasks: List = None):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
+        self.false_belief_turn_logs: List[Dict] = []
         self.evaluation_turn_logs: Dict[str, Dict[str, Dict]] = {}
         self.messages: List[Dict] = []
         self.seed: int  = seed
@@ -53,7 +55,9 @@ class HistoryManager:
         if observation_config['exp_type'] == 'passive':
             self.output_dir = os.path.join(self.output_dir, observation_config["proxy_agent"])
         self.model_config_path = os.path.join(self.model_path, CONFIG_BASENAME)
+        self.model_config_path = os.path.join(self.model_path, CONFIG_BASENAME)
         self.exploration_path = os.path.join(self.output_dir, EXPLORATION_LOG_BASENAME)
+        self.false_belief_path = os.path.join(self.output_dir, FALSE_BELIEF_LOG_BASENAME)
         self.evaluation_path = os.path.join(self.output_dir, EVALUATION_LOG_BASENAME)
         self.metrics_path = os.path.join(self.output_dir, METRICS_BASENAME)
         self.messages_path = os.path.join(self.output_dir, MESSAGES_BASENAME)
@@ -95,6 +99,9 @@ class HistoryManager:
         if os.path.exists(self.exploration_path):
             with open(self.exploration_path, "r") as f:
                 self.exploration_turn_logs = json.load(f)
+        if os.path.exists(self.false_belief_path):
+            with open(self.false_belief_path, "r") as f:
+                self.false_belief_turn_logs = json.load(f)
         if os.path.exists(self.evaluation_path):
             with open(self.evaluation_path, "r") as f:
                 self.evaluation_turn_logs = json.load(f)
@@ -107,13 +114,21 @@ class HistoryManager:
         if self.exploration_turn_logs:
             with open(self.exploration_path, "w") as f:
                 json.dump(self.exploration_turn_logs, f, ensure_ascii=False, indent=2)
+    def save_false_belief(self) -> None:
+        """Save false belief turn logs to JSON file"""
+        if self.false_belief_turn_logs:
+            with open(self.false_belief_path, "w") as f:
+                json.dump(self.false_belief_turn_logs, f, ensure_ascii=False, indent=2)
     def save_evaluation(self) -> None:
         """Save evaluation turn logs to JSON file"""
         with open(self.evaluation_path, "w") as f:
             json.dump(self.evaluation_turn_logs, f, ensure_ascii=False, indent=2)
     def save(self) -> None:
         """Save env turn logs to JSON file"""
+    def save(self) -> None:
+        """Save env turn logs to JSON file"""
         self.save_exploration()
+        self.save_false_belief()
         self.save_evaluation()
         # Also compute and save metrics for this sample
         metrics = self._compute_sample_metrics()
@@ -192,6 +207,12 @@ class HistoryManager:
         self._attach_room_image(turn_log, f"room_turn_{turn_log['turn_number']}.png")
         self.exploration_turn_logs.append(turn_log)
 
+    def update_false_belief_turn_log(self, turn_log: Dict) -> None:
+        assert not turn_log['is_exploration_phase']
+        assert turn_log.get('false_belief_log')
+        self._attach_room_image(turn_log, f"room_false_belief_{turn_log['turn_number']}.png")
+        self.false_belief_turn_logs.append(turn_log)
+
     def update_eval_turn_log(self, turn_log: Dict) -> None:
         assert not turn_log['is_exploration_phase']
         assert turn_log['evaluation_log']
@@ -208,7 +229,9 @@ class HistoryManager:
 
     def update_turn_log(self, turn_log: Dict) -> None:
         """Dispatch to specific update functions (kept for compatibility)."""
-        if turn_log['is_exploration_phase']:
+        if turn_log.get('false_belief_log'):
+            self.update_false_belief_turn_log(turn_log)
+        elif turn_log['is_exploration_phase']:
             self.update_exp_turn_log(turn_log)
         else:
             self.update_eval_turn_log(turn_log)
@@ -302,7 +325,7 @@ class HistoryManager:
             # Collect subdirectories containing log files
             subdirs: List[str] = []
             for root, _, files in os.walk(sample_path):
-                if EXPLORATION_LOG_BASENAME in files or EVALUATION_LOG_BASENAME in files:
+                if EXPLORATION_LOG_BASENAME in files or EVALUATION_LOG_BASENAME in files or FALSE_BELIEF_LOG_BASENAME in files:
                     subdirs.append(root)
 
             # Skip if subdirs is empty (invalid sample)
@@ -363,13 +386,16 @@ class HistoryManager:
     def _load_sample_data(combo_path: str, sample_key: str, save_images: bool, model_dir: str) -> Optional[Dict]:
         """Load data from a single sample's combination directory"""
         exploration_file = os.path.join(combo_path, EXPLORATION_LOG_BASENAME)
+        false_belief_file = os.path.join(combo_path, FALSE_BELIEF_LOG_BASENAME)
         evaluation_file = os.path.join(combo_path, EVALUATION_LOG_BASENAME)
         config_file = os.path.join(combo_path, STATE_BASENAME)
         metrics_file = os.path.join(combo_path, METRICS_BASENAME)
 
         sample_data = {
             "sample_id": sample_key,
+            "sample_id": sample_key,
             "env_turn_logs": [],  # Only exploration turn logs
+            "false_belief_turn_logs": [],
             "evaluation_tasks": {},  # Separate storage for evaluation tasks
             "config": {},
             "metrics": {},
@@ -380,6 +406,12 @@ class HistoryManager:
             with open(exploration_file, 'r') as f:
                 exploration_logs = json.load(f)
             sample_data["env_turn_logs"] = exploration_logs if exploration_logs else [] # Only exploration logs
+
+        # Load false belief turn logs
+        if os.path.exists(false_belief_file):
+            with open(false_belief_file, 'r') as f:
+                false_belief_logs = json.load(f)
+            sample_data["false_belief_turn_logs"] = false_belief_logs if false_belief_logs else []
 
         # Load evaluation turn logs - store each task separately
         if os.path.exists(evaluation_file):
@@ -403,13 +435,17 @@ class HistoryManager:
                 if turn_log.get('message_images'):
                     turn_log['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in turn_log['message_images']]
 
+            # Process false belief turn logs
+            for turn_log in sample_data["false_belief_turn_logs"]:
+                if turn_log.get('message_images'):
+                    turn_log['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in turn_log['message_images']]
+
             # Process evaluation tasks
             for task in sample_data["evaluation_tasks"].values():
                 for question_data in task.values():
-                    if question_data.get('message_images'):
                         question_data['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in question_data['message_images']]
 
-        return sample_data if sample_data["env_turn_logs"] or sample_data["evaluation_tasks"] else None        
+        return sample_data if sample_data["env_turn_logs"] or sample_data["evaluation_tasks"] or sample_data["false_belief_turn_logs"] else None        
 
     def _compute_sample_metrics(self) -> Dict:
         env_data = {

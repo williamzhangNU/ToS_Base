@@ -18,6 +18,30 @@ from .visualization.visualization import HTMLGenerator
 
 
 @dataclass
+class FalseBeliefTurnLog:
+    """Log data for a single false belief exploration turn."""
+    step: int
+    room_state: Optional['Room'] = None
+    agent_state: Optional['Agent'] = None
+    visible_objects: List[str] = field(default_factory=list)
+    target_in_fov: bool = False
+    
+    # Final step info
+    success: Optional[bool] = None
+    observed_at_steps: Optional[List[int]] = None
+    
+    def to_dict(self):
+        return {
+            "step": self.step,
+            "room_state": self.room_state.to_dict() if self.room_state else {},
+            "agent_state": self.agent_state.to_dict() if self.agent_state else {},
+            "visible_objects": self.visible_objects,
+            "target_in_fov": self.target_in_fov,
+            "success": self.success,
+            "observed_at_steps": self.observed_at_steps
+        }
+
+@dataclass
 class EnvTurnLog:
     """Log data for a single environment turn."""
     turn_number: int
@@ -28,6 +52,7 @@ class EnvTurnLog:
     is_exploration_phase: bool = False
     is_last_exp: bool = False
     exploration_log: Optional["ExplorationTurnLog"] = None
+    false_belief_log: Optional["FalseBeliefTurnLog"] = None
     evaluation_log: Optional["EvaluationTurnLog"] = None
     cogmap_log: Optional["CognitiveMapTurnLog"] = None
     room_state: Optional["Room"] = None
@@ -47,6 +72,7 @@ class EnvTurnLog:
             "is_exploration_phase": self.is_exploration_phase,
             "is_last_exp": self.is_last_exp,
             "exploration_log": self.exploration_log.to_dict() if self.exploration_log else {},
+            "false_belief_log": self.false_belief_log.to_dict() if self.false_belief_log else {},
             "evaluation_log": self.evaluation_log.to_dict() if self.evaluation_log else {},
             "cogmap_log": self.cogmap_log.to_dict() if self.cogmap_log else {},
             "room_state": self.room_state.to_dict() if self.room_state else {},
