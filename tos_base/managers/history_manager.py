@@ -123,8 +123,7 @@ class HistoryManager:
         """Save evaluation turn logs to JSON file"""
         with open(self.evaluation_path, "w") as f:
             json.dump(self.evaluation_turn_logs, f, ensure_ascii=False, indent=2)
-    def save(self) -> None:
-        """Save env turn logs to JSON file"""
+
     def save(self) -> None:
         """Save env turn logs to JSON file"""
         self.save_exploration()
@@ -196,6 +195,8 @@ class HistoryManager:
                 mode='img', save_path=img_path,
             )
             turn_log['room_image'] = os.path.relpath(img_path, self.model_path)
+        # turn_log.pop('room_state', None)
+        # turn_log.pop('agent_state', None)
 
     def _save_json(self, path: str, data: Dict) -> None:
         with open(path, "w") as f:
