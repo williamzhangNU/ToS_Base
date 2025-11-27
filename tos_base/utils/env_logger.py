@@ -18,27 +18,25 @@ from .visualization.visualization import HTMLGenerator
 
 
 @dataclass
-class FalseBeliefTurnLog:
+class FBLog:
     """Log data for a single false belief exploration turn."""
     step: int
     room_state: Optional['Room'] = None
     agent_state: Optional['Agent'] = None
-    visible_objects: List[str] = field(default_factory=list)
-    target_in_fov: bool = False
     
     # Final step info
-    success: Optional[bool] = None
-    observed_at_steps: Optional[List[int]] = None
+    correctly_identified_changes: Optional[float] = None
+    ground_truth_changes: Optional[List[Any]] = None # List[ChangedObject]
+    reported_changes: Optional[List[Dict]] = None
     
     def to_dict(self):
         return {
             "step": self.step,
             "room_state": self.room_state.to_dict() if self.room_state else {},
             "agent_state": self.agent_state.to_dict() if self.agent_state else {},
-            "visible_objects": self.visible_objects,
-            "target_in_fov": self.target_in_fov,
-            "success": self.success,
-            "observed_at_steps": self.observed_at_steps
+            "correctly_identified_changes": self.correctly_identified_changes,
+            "ground_truth_changes": [c.to_dict() for c in self.ground_truth_changes] if self.ground_truth_changes else [],
+            "reported_changes": [c.to_dict() for c in self.reported_changes] if self.reported_changes else []
         }
 
 @dataclass
@@ -52,7 +50,7 @@ class EnvTurnLog:
     is_exploration_phase: bool = False
     is_last_exp: bool = False
     exploration_log: Optional["ExplorationTurnLog"] = None
-    false_belief_log: Optional["FalseBeliefTurnLog"] = None
+    false_belief_log: Optional["FBLog"] = None
     evaluation_log: Optional["EvaluationTurnLog"] = None
     cogmap_log: Optional["CognitiveMapTurnLog"] = None
     room_state: Optional["Room"] = None

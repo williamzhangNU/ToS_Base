@@ -1,10 +1,11 @@
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import re
 import numpy as np
 
 from .base import BaseAction, ActionResult
 from ..core.object import Gate
 from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, RelationTriple, OrientationRel, DegreeRel
+from vagen.env.spatial.room_modifier import ChangedObject
 
 """
 Specific action implementations for spatial exploration.
@@ -371,12 +372,80 @@ class QueryRelAction(QueryBase):
 
 
 
+
+class FalseBeliefTermAction(TermAction):
+    """Terminate false belief exploration with answer."""
+    
+    format_desc = 'Term(changes="...")'
+    description = ("Terminate the exploration phase and submit findings. "
+                   "Format: Term(changes=\"obj1: type1, obj2: type2\")")
+    example = 'Term(changes="apple: position, chair: orientation")'
+    format_pattern = r'^Term\(changes="([^"]+)"\)$'
+    cost = 0
+    
+    def __init__(self, changes_str: str):
+        # BaseAction might store args, but TermAction doesn't expect any.
+        super(TermAction, self).__init__(changes_str) 
+        self.changes = self._parse_changes(changes_str)
+        self.raw_changes_str = changes_str
+
+    def _parse_changes(self, changes_str: str) -> List[Any]:
+        # "apple: position, chair: orientation"
+        changes_map = {}
+        parts = changes_str.split(',')
+        for part in parts:
+            if ':' in part:
+                try:
+                    obj = ChangedObject.parse(part)
+                    if obj.name in changes_map:
+                        changes_map[obj.name].merge(obj)
+                    else:
+                        changes_map[obj.name] = obj
+                except ValueError:
+                    continue
+                    
+        return list(changes_map.values())
+
+    def success_message(self, **kwargs) -> str:
+        return f"Exploration terminated. Reported changes: {self.raw_changes_str}"
+    
+    def execute(self, room, agent, **kwargs) -> ActionResult:
+        # Always terminate. If parsing failed, changes might be empty, which is handled by evaluation logic (low score).
+        return ActionResult(True, self.get_feedback(True), str(self), 'term', {'terminated': True, 'reported_changes': self.changes})
+
+    def error_message(self, error_type: str) -> str:
+        if error_type == "invalid_format":
+            return f"Invalid format for changes. Expected format: 'obj1: type1, obj2: type2'. Got: '{self.raw_changes_str}'"
+        return "Cannot terminate exploration: execution failed."
+        
+    def __repr__(self):
+        return f'Term(changes="{self.raw_changes_str}")'
+
+
 # Action registry for easy lookup
 # Expose all observe variants; default flows may still prefer ObserveApprox
 ACTION_CLASSES = [
     MoveAction, RotateAction,
     ObserveAction, QueryAction, TermAction
 ]
+
+def configure_actions(mode: str = 'exploration'):
+    """Configure available actions based on mode."""
+    global ACTION_CLASSES
+    if mode == 'exploration':
+        if FalseBeliefTermAction in ACTION_CLASSES:
+            idx = ACTION_CLASSES.index(FalseBeliefTermAction)
+            ACTION_CLASSES[idx] = TermAction
+        elif TermAction not in ACTION_CLASSES:
+            ACTION_CLASSES.append(TermAction)
+    elif mode == 'false_belief':
+        if TermAction in ACTION_CLASSES:
+            idx = ACTION_CLASSES.index(TermAction)
+            ACTION_CLASSES[idx] = FalseBeliefTermAction
+        elif FalseBeliefTermAction not in ACTION_CLASSES:
+            ACTION_CLASSES.append(FalseBeliefTermAction)
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
 
 
 class ActionSequence:

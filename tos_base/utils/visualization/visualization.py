@@ -739,6 +739,8 @@ class HTMLGenerator:
                 # Display false belief metrics if present
                 if env_log.get('false_belief_log'):
                     fb_log = env_log['false_belief_log']
+                    # print(f'fb_log: {fb_log}')
+                    fb_log.pop('room_state', None); fb_log.pop('agent_state', None)
                     f.write("<div class='metrics'><strong>🧭 False Belief Metrics</strong>")
                     f.write(VisualizationHelper.dict_to_html(fb_log))
                     f.write("</div>\n")
