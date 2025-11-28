@@ -15,35 +15,23 @@ Contains all concrete action classes and the ActionSequence parser.
 from ..utils.utils import ANSWER_LABEL
 
 ACTION_INSTRUCTION = """\
-You can jump to objects within and across rooms, turn, and observe.
-When you are at a door, you can see objects from both connected rooms (within FOV).
-
 Available Actions:
 {actions}
 
-
-Action Grammar (HARD CONSTRAINT):
-Your {answer_label} must match this grammar (label followed by newline):
-{answer_label}\nActions: [ <M>* <F> ]
+Grammar:
+{answer_label}
+Actions: [ <M>* <F> ]
 <M> = "JumpTo(OBJ)" | "Rotate(DEG)" | "Return()"
-<F> = "Observe()" | "Query(OBJ)" | "Term()"
-Constraints:
-- Zero, one or more <M>. No JumpTo at first step.
+- Start with zero or more <M>
 - Exactly one <F>, and it must be the final action.
-- No more than one Observe().
-- Term() may appear only alone or after Return().
-- Any violation is invalid.
+- At most one Observe().
+- Term(ANSWER) only alone.
+<F> = "Observe()" | "Term(ANSWER)"
 
 Examples:
 {examples}
 
-
-Rules:
-- Observe action only reports from your current position and facing direction. If you jump multiple times, the final Observe() action gives the view only from your last position.
-- Actions execute in order. Field of view: {field_of_view}°.
-
-Observe and Query action have costs:
-{costs}
+FOV: {field_of_view}°.
 """
 
 
@@ -52,12 +40,7 @@ class MoveAction(BaseAction):
     """Jump to a target object"""
     
     format_desc = "JumpTo(OBJ)"
-    description = (
-        "Jump to the same position as the object. "
-        "Your orientation does NOT change. "
-        "The object you jump to MUST be in your field of view and previously observed. Use object names only. NO numbers or directions or others. "
-        "Invalid: JumpTo(left), JumpTo(1)."
-    )
+    description = "Jump to a visible object. No orientation change."
     example = "JumpTo(table)"
     format_pattern = r"^JumpTo\(([A-Za-z0-9_ -]+)\)$"
     cost = 0
@@ -105,10 +88,7 @@ class RotateAction(BaseAction):
     """Rotate by specified degrees"""
     
     format_desc = "Rotate(DEG)"
-    description = ("Rotate relative to your current orientation. "
-                   "Positive = clockwise, negative = counterclockwise. "
-                   "Valid: -270, -180, -90, 0, 90, 180, 270. "
-                   "You must rotate by these specified degrees; otherwise your action will be invalid.")
+    description = "Rotate relative to current orientation. Valid: -270, -180, -90, 0, 90, 180, 270."
     example = "Rotate(-90)"
     format_pattern = r"^Rotate\(([0-9-]+)\)$"
     VALID_DEGREES = [0, 90, 180, 270, -90, -180, -270]
@@ -143,7 +123,7 @@ class ReturnAction(BaseAction):
     """Return to anchor position"""
     
     format_desc = "Return()"
-    description = "Return to the starting position and orientation."
+    description = "Return to start pose."
     example = "Return()"
     format_pattern = r"^Return\(\)$"
     cost = 0
@@ -175,10 +155,7 @@ class ObserveBase(BaseAction):
     """Base observe implementation (internal)."""
     
     format_desc = "Observe()"
-    description = (
-        "Observe spatial relationships of all objects in the field of view relative to your current position. "
-        "You can only observe objects that are within your field of view."
-    )
+    description = "Observe objects in FOV."
     example = "Observe()"
     format_pattern = r"^Observe\(\)$"
     cost = 1
@@ -231,10 +208,7 @@ class ObserveBase(BaseAction):
 class ObserveAction(ObserveBase):
     """Observe with approximate relations and local (near) pair descriptions"""
     format_desc = "Observe()"
-    description = ("Report objects (including doors) and their spatial relationships from your current position in your FOV. "
-                   "Also reports relations between mutually close objects in your FOV, using your current facing direction as north (a relative reference frame, not true north)."
-                   "Use exactly one Observe() per step and make it the last action. "
-                   "Never call Term() after Observe().")
+    description = "Report objects and relations in FOV. Must be the last action."
     example = "Observe()"
     format_pattern = r"^Observe\(\)$"
     cost = 1
@@ -292,10 +266,7 @@ class TermAction(BaseAction):
     """Terminate exploration with an answer"""
     
     format_desc = "Term(ANSWER)"
-    description = ("Terminate the exploration phase and provide the answer to the evaluation task. "
-                   "Term(ANSWER) must be alone with no movement actions except for Return(). "
-                   "You MUST ONLY use it in the last turn and no other turns. Otherwise your action sequence will be invalid. "
-                   "ANSWER must be one of A, B, C, D.")
+    description = "Terminate with answer A, B, C, or D."
     example = "Term(A)"
     format_pattern = r"^Term\(([A-D])\)$"
     cost = 0
@@ -414,8 +385,7 @@ class QueryRelAction(QueryBase):
 # Action registry for easy lookup
 # Expose all observe variants; default flows may still prefer ObserveApprox
 ACTION_CLASSES = [
-    MoveAction, RotateAction, ReturnAction,
-    ObserveAction, QueryAction, TermAction
+    MoveAction, RotateAction, ObserveAction, TermAction
 ]
 
 
@@ -477,36 +447,26 @@ class ActionSequence:
         """Get usage instructions for action sequences"""
         def _desc(cls):
             if vision and cls is ObserveAction:
-                return (
-                    "Return an RGB image of your current field of view from your current position and facing. "
-                    "Use exactly one Observe() per step and make it the last action. "
-                    "Never call Term() after Observe()."
-                )
+                return "Return RGB image of FOV. Must be last."
             return cls.description
 
         motion_actions = [cls for cls in ACTION_CLASSES if not cls.is_final()]
         final_actions = [cls for cls in ACTION_CLASSES if cls.is_final()]
 
         action_desc = (
-            "Movement Actions:\n" +
+            "Movement:\n" +
             "\n".join(f"- {cls.format_desc}: {_desc(cls)}" for cls in motion_actions) +
-            "\n\n" +
-            "Final Actions:\n" +
+            "\nFinal:\n" +
             "\n".join(f"- {cls.format_desc}: {_desc(cls)}" for cls in final_actions)
         )
         examples = (
-            f"Valid: Actions: [JumpTo(table), Rotate(90), Observe()]\n" +
-            f"Valid: Actions: [Observe()]\n" +
-            f"Valid: Actions: [Query(table)]\n" +
-            f"Invalid (no final action): Actions: [JumpTo(table)]\n" +
-            f"Invalid (more than one final action): Actions: [Observe(), Rotate(90), Observe()]\n" +
-            f"Invalid (termination with other actions): Actions: [JumpTo(table), Term()]\n\n"
+            "Valid: [JumpTo(table), Rotate(90), Observe()]\n"
+            "Valid: [Term(A)]"
         )
         
         return ACTION_INSTRUCTION.format(
             actions=action_desc,
             examples=examples,
             field_of_view=BaseAction.get_field_of_view(),
-            costs="\n".join(f"- {cls.format_desc}: {cls.cost}" for cls in [ObserveAction, QueryAction]),
             answer_label=ANSWER_LABEL
         )
