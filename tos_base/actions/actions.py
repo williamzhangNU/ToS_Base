@@ -14,24 +14,24 @@ Contains all concrete action classes and the ActionSequence parser.
 
 from ..utils.utils import ANSWER_LABEL
 
+ACTION_REMINDER = 'To answer the question, you must output "<answer >Actions: [ <M>* <F> ] </answer>" to explore the room to gather info.'
+
 ACTION_INSTRUCTION = """\
+Use "Actions: [ <M>* <F> ]" to explore the room.
+<M>: JumpTo(OBJ) | Rotate(DEG)
+<F>: Observe() | Term(ANSWER)
+
+Rules:
+- Start with zero or more <M>.
+- End with exactly one <F>.
+- At most one Observe().
+- Term(ANSWER) must be alone.
+
 Available Actions:
 {actions}
 
-Grammar:
-{answer_label}
-Actions: [ <M>* <F> ]
-<M> = "JumpTo(OBJ)" | "Rotate(DEG)" | "Return()"
-- Start with zero or more <M>
-- Exactly one <F>, and it must be the final action.
-- At most one Observe().
-- Term(ANSWER) only alone.
-<F> = "Observe()" | "Term(ANSWER)"
-
 Examples:
 {examples}
-
-FOV: {field_of_view}°.
 """
 
 
@@ -40,7 +40,7 @@ class MoveAction(BaseAction):
     """Jump to a target object"""
     
     format_desc = "JumpTo(OBJ)"
-    description = "Jump to a visible object. No orientation change."
+    description = "Jump to a visible object in Field of View. No orientation change."
     example = "JumpTo(table)"
     format_pattern = r"^JumpTo\(([A-Za-z0-9_ -]+)\)$"
     cost = 0
