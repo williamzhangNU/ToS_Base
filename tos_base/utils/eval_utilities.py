@@ -434,7 +434,13 @@ def _eval_direction_text(pred: str, answer: Union[str, Sequence[str]]) -> Tuple[
     # Canonicalize parsed prediction
     normalized_pred = (_canonicalize_label(parsed[0]), _canonicalize_label(parsed[1]))
     
-    return (_labels_match(normalized_pred[0], normalized_answer[0]) + _labels_match(normalized_pred[1], normalized_answer[1])) / 2, {}
+    # Check normal order
+    score_normal = (_labels_match(normalized_pred[0], normalized_answer[0]) + _labels_match(normalized_pred[1], normalized_answer[1])) / 2
+    
+    # Check swapped order
+    score_swapped = (_labels_match(normalized_pred[1], normalized_answer[0]) + _labels_match(normalized_pred[0], normalized_answer[1])) / 2
+    
+    return max(score_normal, score_swapped), {}
 
 def _eval_coordinate_list(pred: str, answer: Sequence[Tuple[int, int]]) -> Tuple[bool, Dict[str, Any]]:
     """Evaluate list of coordinates."""

@@ -126,30 +126,4 @@ class EvalTaskType(Enum):
             task_class = task_map[task_name]
             return task_class(np_random, room, agent, config or {}, history_manager)
         else:
-            raise ValueError(f"Unknown evaluation task: {task_name}") 
-        
-
-if __name__ == "__main__":
-    from ..utils.room_utils import RoomPlotter, RoomGenerator
-    from tqdm import tqdm
-
-
-    task_name = 'bwd_loc_text'
-    for seed in tqdm(range(0, 1)):
-        np_random = np.random.default_rng(seed)
-        room, agent = RoomGenerator.generate_room(
-            room_size=(30, 30),
-            n_objects=10,
-            np_random=np_random,
-            room_name='room',
-            level=2,
-            main=6,
-        )
-        # print(f'room: {room}')
-        # print(f'agent: {agent}')
-        RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
-        task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
-        print(task.generate_question(), task.answer)
-        user_pred = "(1, -5)" # task.answer
-        score, info = EvalTaskType.evaluate_prediction(task_name, user_pred, task.answer, task.choices)
-        print(f"Evaluation result: {score}, details: {info}")
+            raise ValueError(f"Unknown evaluation task: {task_name}")
