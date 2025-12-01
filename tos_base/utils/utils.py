@@ -97,13 +97,21 @@ def compute_shortest_path(
     start_pos: Tuple[int, int],
     start_ori: Tuple[int, int],
     target_pos: Tuple[int, int],
-) -> int:
-    """Return shortest action count using rotate and jumpto actions."""
+    target_ori: Tuple[int, int] = None,
+) -> list:
+    """Return shortest action list using rotate and jumpto actions.
+    
+    Returns a list of actions like [('rotate', 90), ('jumpto', 'lamp'), ...].
+    If target_ori is provided, the path will include final rotation to match the orientation.
+    """
     start_pos = tuple(map(int, start_pos))
     start_ori = tuple(map(int, start_ori))
     target_pos = tuple(map(int, target_pos))
+    if target_ori is not None:
+        target_ori = tuple(map(int, target_ori))
 
-    queue = deque([(start_pos, start_ori, 0)])
+    # State: (pos, ori), value: (steps, parent_state, action_to_reach_here)
+    queue = deque([(start_pos, start_ori, [])])  # (pos, ori, action_list)
     visited = {(start_pos, start_ori)}
 
     temp_agent = Agent(name="temp", pos=np.array(start_pos), ori=np.array(start_ori))
@@ -114,9 +122,18 @@ def compute_shortest_path(
     tmp_room.add_object(initial_stub)
 
     while queue:
-        pos, ori, steps = queue.popleft()
+        pos, ori, actions = queue.popleft()
+        
+        # Check if we've reached the target
         if np.allclose(pos, target_pos):
-            return steps
+            if target_ori is None:
+                # No target orientation specified, we're done
+                return actions
+            elif tuple(int(x) for x in ori) == target_ori:
+                # Position and orientation both match
+                return actions
+            # Position matches but orientation doesn't - continue searching
+            # (rotations will be explored from this state)
 
         temp_agent.pos = np.array(pos)
         temp_agent.ori = np.array(ori)
@@ -130,7 +147,8 @@ def compute_shortest_path(
             key = (pos, new_ori)
             if key not in visited:
                 visited.add(key)
-                queue.append((pos, new_ori, steps + 1))
+                new_actions = actions + [('rotate', int(delta))]
+                queue.append((pos, new_ori, new_actions))
 
         for obj in tmp_room.all_objects:
             if np.allclose(obj.pos, pos):
@@ -140,7 +158,8 @@ def compute_shortest_path(
                 key = (new_pos, ori)
                 if key not in visited:
                     visited.add(key)
-                    queue.append((new_pos, ori, steps + 1))
+                    new_actions = actions + [('jumpto', obj.name)]
+                    queue.append((new_pos, ori, new_actions))
 
     raise ValueError("No path found")
 
@@ -162,7 +181,8 @@ if __name__ == "__main__":
     start_pos = tuple(map(int, agent.init_pos))
     start_ori = tuple(map(int, agent.init_ori))
 
-    print('steps (start->start):', compute_shortest_path(room, start_pos, start_ori, start_pos))
+    path = compute_shortest_path(room, start_pos, start_ori, start_pos)
+    print(f'path (start->start): {path}, steps: {len(path)}')
 
     candidates = [
         obj for obj in room.all_objects
@@ -172,8 +192,10 @@ if __name__ == "__main__":
     if candidates:
         target = candidates[-4]
         target_pos = tuple(map(int, target.pos))
-        print(f'steps (start->{target.name}):', compute_shortest_path(room, start_pos, start_ori, target_pos))
+        path = compute_shortest_path(room, start_pos, start_ori, target_pos)
+        print(f'path (start->{target.name}): {path}, steps: {len(path)}')
         try:
-            print(f'steps ({target.name}->start):', compute_shortest_path(room, target_pos, start_ori, start_pos))
+            path = compute_shortest_path(room, target_pos, start_ori, start_pos)
+            print(f'path ({target.name}->start): {path}, steps: {len(path)}')
         except ValueError as err:
             print('return path failed:', err)

@@ -521,7 +521,9 @@ def _eval_backward_nav(pred: str, answer: Union[str, Dict], weight_by_steps: boo
         })
         score = 1.0
         if weight_by_steps:
-            score = min(answer['minimal_steps'] / len(pred_actions), 1.0)
+            minimal_plan = answer.get('minimal_plan', [])
+            minimal_steps = len(minimal_plan) if isinstance(minimal_plan, list) else minimal_plan
+            score = min(minimal_steps / len(pred_actions), 1.0)
         return score, best_info
     
     # Also check ground truth position as fallback
@@ -582,7 +584,9 @@ def _eval_backward_nav_rev(pred: str, answer: Union[str, Dict]) -> Tuple[bool, D
         'target_pos': target_pos,
     }
 
-    return is_visible * (len(answer['minimal_actions']) / len(pred_actions)), best_info
+    minimal_plan = answer.get('minimal_plan', [])
+    minimal_steps = len(minimal_plan) if isinstance(minimal_plan, list) else minimal_plan
+    return is_visible * (minimal_steps / len(pred_actions)), best_info
 
 def _calculate_coord_similarity(pred_coord: tuple[float, float], gt_coord: tuple[float, float]) -> float:
     pred = np.array(pred_coord, dtype=float)

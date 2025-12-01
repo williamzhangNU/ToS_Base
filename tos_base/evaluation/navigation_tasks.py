@@ -338,11 +338,12 @@ class BaseView2ActionEvaluationTask(BaseNavEvaluationTask):
             'init_pos': tuple(map(int, init_agent.pos)),
             'init_ori': tuple(map(int, init_agent.ori)),
             'object_positions': object_positions,
-            "minimal_steps": compute_shortest_path(
+            "minimal_plan": compute_shortest_path(
                 self.room,
                 init_agent.pos,
                 init_agent.ori,
                 end_agent.pos,
+                end_agent.ori,
             ),
             'final_observation': [
                 {
@@ -396,7 +397,7 @@ class View2ActionRevEvaluationTask(BaseNavEvaluationTask):
         object_positions = {obj.name: tuple(map(int, obj.pos)) for obj in self.room.all_objects}
 
         # Compute shortest path
-        minimal_steps = compute_shortest_path(
+        minimal_plan = compute_shortest_path(
             self.room,
             start_pos,
             start_ori,
@@ -409,7 +410,7 @@ class View2ActionRevEvaluationTask(BaseNavEvaluationTask):
             'target_pos': target_pos,  # Target is the initial position
             'target_ori': target_ori,
             'object_positions': object_positions,
-            'minimal_steps': minimal_steps,  # Number of actions in shortest path
+            'minimal_plan': minimal_plan,  # Action list for shortest path
         }
 
         self.eval_data.question = self.QUESTION_TEMPLATE.format()
@@ -417,3 +418,67 @@ class View2ActionRevEvaluationTask(BaseNavEvaluationTask):
         self.eval_data.choices = []
         self.eval_data.id = hash(self.eval_data.question)
         return self.eval_data.question
+
+
+def _plan_to_action_str(plan: List[NavAction]) -> str:
+    """Convert a plan list to action string format.
+    
+    Example: [('rotate', -180), ('jumpto', 'television')] -> "Rotate(-180), JumpTo(television)"
+    """
+    parts = []
+    for action_type, value in plan:
+        if action_type == 'rotate':
+            parts.append(f"Rotate({value})")
+        elif action_type == 'jumpto':
+            parts.append(f"JumpTo({value})")
+    return ", ".join(parts)
+
+
+if __name__ == "__main__":
+    from ..utils.room_utils import RoomPlotter, RoomGenerator
+    from .task_types import EvalTaskType
+    from tqdm import tqdm
+    import numpy as np
+
+    def test_task(task_name: str):
+        print(f"\nTesting task: {task_name}")
+        for seed in tqdm(range(0, 1)):
+            np_random = np.random.default_rng(seed)
+            room, agent = RoomGenerator.generate_room(
+                room_size=(30, 30),
+                n_objects=10,
+                np_random=np_random,
+                room_name='room',
+                level=2,
+                main=6,
+            )
+            try:
+                task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
+                print(f"Question: {task.generate_question()}")
+                print(f"Answer: {task.answer}")
+                
+                # Determine the prediction based on task type
+                if isinstance(task.answer, dict) and 'minimal_plan' in task.answer:
+                    # For navigation tasks, convert minimal_plan to action string
+                    pred = _plan_to_action_str(task.answer['minimal_plan'])
+                    print(f"Prediction (from minimal_plan): {pred}")
+                else:
+                    pred = task.answer
+                
+                # Test correct answer
+                score, info = EvalTaskType.evaluate_prediction(task_name, pred, task.answer, task.choices)
+                print(f"Correct Answer Evaluation: {score}, details: {info}")
+                assert score == 1.0, f"Failed correct answer test for {task_name}"
+
+                # Test incorrect answer
+                incorrect_answer = "wrong answer"
+                score, info = EvalTaskType.evaluate_prediction(task_name, incorrect_answer, task.answer, task.choices)
+                print(f"Incorrect Answer Evaluation: {score}, details: {info}")
+                assert score < 1.0, f"Failed incorrect answer test for {task_name}"
+
+            except ValueError as e:
+                print(f"Skipping seed {seed} for {task_name}: {e}")
+
+    task_names = ['fwd_fov', 'bwd_nav_text', 'bwd_nav_vision']
+    for task_name in task_names:
+        test_task(task_name)
