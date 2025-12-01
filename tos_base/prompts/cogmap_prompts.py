@@ -123,8 +123,44 @@ def get_cogmap_prompt(map_type: str, enable_think: bool = True) -> str:
         return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_ROOMS_ONLY}\n\n{fmt}"
     if t == "relations":
         return f"{RELATIONS_PROMPT}\n\n{fmt}"
+    if t == "unexplored":
+        return get_unexplored_prompt(enable_think)
     # default to global
     return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
+
+# --- Unexplored Areas Prompt ---
+UNEXPLORED_INSTRUCTION = """\
+## Unexplored Areas (JSON)
+
+Based on your exploration history in the current room, identify up to 3 grid coordinates that represent areas you have NOT yet observed.
+Each coordinate should represent a distinct connected unexplored region.
+
+### Rules
+- Output at most 3 coordinates as [x, y] integers
+- Each coordinate must be within the room boundaries
+- Each coordinate should represent a different unexplored connected area
+- If you have fully explored the current room, output an empty list
+- Coordinates are in the same global frame as the cognitive map (origin [0,0] is your initial position)
+
+### Output Format
+```json
+{
+    "unexplored_points": [[x1, y1], [x2, y2], [x3, y3]]
+}
+```
+If fewer than 3 unexplored areas exist, output fewer points. If fully explored, output:
+```json
+{
+    "unexplored_points": []
+}
+```
+"""
+
+def get_unexplored_prompt(enable_think: bool = True) -> str:
+    """Return the unexplored areas prompt with format rules."""
+    fmt = _cogmap_format_rules(enable_think)
+    return f"{UNEXPLORED_INSTRUCTION}\n\n{fmt}"
+
 
 # --- Pairwise relations ---
 from ..utils.relation_codes import _DIR_LABEL_TO_CODE as _DLC, _DIST_LABEL_TO_CODE as _SLC
