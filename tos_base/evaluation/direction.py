@@ -6,6 +6,8 @@ from .tasks import BaseEvaluationTask, retry_generate_question
 from ..actions.base import BaseAction
 from ..core.relationship import (
     PairwiseRelationshipDiscrete,
+    PairwiseRelationshipReal,
+    RELATION_MODE_REAL,
     CardinalBinsAllo,
     EgoFrontBins,
 )
@@ -19,6 +21,14 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         "Your starting facing direction is north.\n"
         "From a top-down view, which spatial relationship is correct?\n"
         "Each choice shows \"<object> is <direction-bin>, <distance-bin> relative to <anchor>\" (allocentric).\n\n"
+        "Choose the correct answer:\n{choices_text}\n\n"
+        "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
+    )
+
+    QUESTION_TEMPLATE_DIR_REAL = (
+        "Your starting facing direction is north.\n"
+        "From a top-down view, which spatial relationship is correct?\n"
+        "Each choice shows \"<object> is <degree> from front, <distance> away relative to <anchor>\" (allocentric).\n\n"
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
@@ -37,12 +47,21 @@ class DirectionEvaluationTask(BaseEvaluationTask):
     def _wrap(self, k: int, n: int) -> int: return (k + n) % n
     def _clamp(self, k: int, n: int) -> int: return max(0, min(k, n - 1))
 
-    def _compute_discrete_rel(self, pos1, pos2, bin_system, anchor_ori=None):
+    def _compute_rel(self, pos1, pos2, bin_system, anchor_ori=None):
+        if self.config.get("relation_mode") == RELATION_MODE_REAL:
+            return PairwiseRelationshipReal.relationship(
+                tuple(pos1), tuple(pos2),
+                anchor_ori=tuple(anchor_ori) if anchor_ori is not None else None
+            )
         return PairwiseRelationshipDiscrete.relationship(
             tuple(pos1), tuple(pos2),
             anchor_ori=tuple(anchor_ori) if anchor_ori is not None else None,
             bin_system=bin_system
         )
+
+    def _compute_discrete_rel(self, pos1, pos2, bin_system, anchor_ori=None):
+        # Backward compatibility alias
+        return self._compute_rel(pos1, pos2, bin_system, anchor_ori)
 
     def _build_anchor_visible_dict(self):
         """Build dict mapping each oriented object to its visible objects."""
@@ -60,6 +79,33 @@ class DirectionEvaluationTask(BaseEvaluationTask):
     # ---------- wrong-option generators ----------
     def _gen_wrong_options(self, rel) -> List[str]:
         """Generate wrong options: single-axis mistakes and coupled errors."""
+        if self.config.get("relation_mode") == RELATION_MODE_REAL:
+            # Real-value mode: add random offset
+            out = []
+            deg = rel.degree
+            dist = rel.distance_value
+            
+            # Generate 3 wrong options
+            for _ in range(3):
+                # Random offset for degree: +/- [15, 180]
+                deg_offset = self.np_random.uniform(30, 180) * self.np_random.choice([-1, 1])
+                new_deg = (deg + deg_offset + 180) % 360 - 180
+                
+                # Random offset for distance: +/- [1.0, 5.0]
+                dist_offset = self.np_random.uniform(2.0, 5.0) * self.np_random.choice([-1, 1])
+                new_dist = max(0.1, dist + dist_offset)
+                
+                # Create a dummy relationship object to format string
+                # We can reuse PairwiseRelationshipReal but we need to construct it manually or just format string
+                # PairwiseRelationshipReal expects DegreeRel and DistanceRel
+                from ..core.relationship import DegreeRel, DistanceRel, PairwiseRelationshipReal
+                wrong_rel = PairwiseRelationshipReal(
+                    direction=DegreeRel(new_deg),
+                    dist=DistanceRel(new_dist)
+                )
+                out.append(wrong_rel.to_string())
+            return out
+
         dir_labels, dist_labels, d_idx, s_idx = self._labels(rel)
         out = []
         
@@ -87,6 +133,29 @@ class DirectionEvaluationTask(BaseEvaluationTask):
     # ---------- shared choice builder ----------
     def generate_choices(self, rel) -> Tuple[List[str], int]:
         """Legacy method for other task types."""
+        if self.config.get("relation_mode") == RELATION_MODE_REAL:
+            correct = rel.to_string()
+            choices, seen = [correct], {correct}
+            wrong_options = self._gen_wrong_options(rel)
+            self.np_random.shuffle(wrong_options)
+            for s in wrong_options:
+                if len(choices) == 4: break
+                if s not in seen:
+                    choices.append(s); seen.add(s)
+            
+            # Pad with random valid pairs if needed
+            while len(choices) < 4:
+                # Generate random dummy relationship
+                deg = self.np_random.uniform(-180, 180)
+                dist = self.np_random.uniform(0.1, 10.0)
+                from ..core.relationship import DegreeRel, DistanceRel, PairwiseRelationshipReal
+                s = PairwiseRelationshipReal(DegreeRel(deg), DistanceRel(dist)).to_string()
+                if s not in seen:
+                    choices.append(s); seen.add(s)
+
+            self.np_random.shuffle(choices)
+            return choices, choices.index(correct)
+
         dir_labels, dist_labels, d_idx, s_idx = self._labels(rel)
         assert s_idx >= 0, "Distance bin must be positive"
 
@@ -122,8 +191,13 @@ class DirectionEvaluationTask(BaseEvaluationTask):
         # Generate one correct choice
         i, j = self.np_random.choice(n, size=2, replace=False)
         obj1, obj2 = self.room.objects[i], self.room.objects[j]
-        rel = self._compute_discrete_rel(obj1.pos, obj2.pos, CardinalBinsAllo())
-        correct_choice = f"{obj1.name} is {rel.direction.bin_label}, {rel.dist.bin_label} relative to {obj2.name}"
+        rel = self._compute_rel(obj1.pos, obj2.pos, CardinalBinsAllo())
+        
+        if self.config.get("relation_mode") == RELATION_MODE_REAL:
+            correct_choice = f"{obj1.name} is {rel.to_string()} relative to {obj2.name}"
+        else:
+            correct_choice = f"{obj1.name} is {rel.direction.bin_label}, {rel.dist.bin_label} relative to {obj2.name}"
+            
         choices.append(correct_choice)
         used_pairs.add((i, j))
         used_pairs.add((j, i))  # Also block reverse pair
@@ -142,7 +216,7 @@ class DirectionEvaluationTask(BaseEvaluationTask):
                 i, j = self.np_random.choice(n, size=2, replace=False)
                 
             obj1, obj2 = self.room.objects[i], self.room.objects[j]
-            rel = self._compute_discrete_rel(obj1.pos, obj2.pos, CardinalBinsAllo())
+            rel = self._compute_rel(obj1.pos, obj2.pos, CardinalBinsAllo())
             
             # Apply wrong option generation to this relationship
             wrong_options = self._gen_wrong_options(rel)
@@ -151,11 +225,15 @@ class DirectionEvaluationTask(BaseEvaluationTask):
                 choice = f"{obj1.name} is {wrong_rel} relative to {obj2.name}"
             else:
                 # Fallback to random wrong relationship
-                dir_labels = CardinalBinsAllo().LABELS
-                dist_labels = rel.dist.bin_system.LABELS
-                wrong_dir = self.np_random.choice(dir_labels)
-                wrong_dist = self.np_random.choice(dist_labels)
-                choice = f"{obj1.name} is {wrong_dir}, {wrong_dist} relative to {obj2.name}"
+                if self.config.get("relation_mode") == RELATION_MODE_REAL:
+                     # Should not happen if _gen_wrong_options works
+                     choice = f"{obj1.name} is 0 deg from front, 1.0 away relative to {obj2.name}"
+                else:
+                    dir_labels = CardinalBinsAllo().LABELS
+                    dist_labels = rel.dist.bin_system.LABELS
+                    wrong_dir = self.np_random.choice(dir_labels)
+                    wrong_dist = self.np_random.choice(dist_labels)
+                    choice = f"{obj1.name} is {wrong_dir}, {wrong_dist} relative to {obj2.name}"
                 
             choices.append(choice)
             used_pairs.add((i, j))
@@ -198,6 +276,8 @@ class DirectionEvaluationTask(BaseEvaluationTask):
     # ---------- allocentric ----------
     def generate_question_data(self):
         """Generate question setup data."""
+        if self.config.get("relation_mode") == RELATION_MODE_REAL:
+            return self.QUESTION_TEMPLATE_DIR_REAL
         return self.QUESTION_TEMPLATE_DIR
 
     @retry_generate_question
@@ -219,6 +299,14 @@ class PovEvaluationTask(DirectionEvaluationTask):
         "Choose the correct answer:\n{choices_text}\n\n"
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
+
+    QUESTION_TEMPLATE_POV_REAL = (
+        "Imagine you are at the same position and orientation as the {anchor_obj_name}.\n"
+        "From this perspective, what is the spatial relationship of the {obj_name}?\n\n"
+        "Each choice is \"<degree> from front, <distance> away\" (egocentric).\n\n"
+        "Choose the correct answer:\n{choices_text}\n\n"
+        "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
+    )
     def generate_question_data(self):
         """Generate POV question setup data."""
         anchor_visible = self._build_anchor_visible_dict()
@@ -228,17 +316,27 @@ class PovEvaluationTask(DirectionEvaluationTask):
             anchor_idx = int(self.np_random.choice(list(anchor_visible.keys())))
             anchor = self.room.objects[anchor_idx]
             target_idx, target_obj = self.np_random.choice(anchor_visible[anchor_idx])
-            rel = self._compute_discrete_rel(target_obj.pos, anchor.pos, EgoFrontBins(), anchor_ori=anchor.ori)
-            return target_obj, anchor, rel, self.QUESTION_TEMPLATE_POV, False
+            template = self.QUESTION_TEMPLATE_POV_REAL if self.config.get("relation_mode") == RELATION_MODE_REAL else self.QUESTION_TEMPLATE_POV
+            return target_obj, anchor, rel, template, False
         else:
             # Fallback: no objects have visible targets, use beyond-fov
             n = len(self.room.objects)
             anchor_idx, target_idx = self.np_random.choice(n, size=2, replace=False)
             anchor, target_obj = self.room.objects[anchor_idx], self.room.objects[target_idx]
-            return target_obj, anchor, None, self.QUESTION_TEMPLATE_POV, True
+            template = self.QUESTION_TEMPLATE_POV_REAL if self.config.get("relation_mode") == RELATION_MODE_REAL else self.QUESTION_TEMPLATE_POV
+            
+            if self.config.get("relation_mode") == RELATION_MODE_REAL:
+                # In real mode, we report the actual relationship even if not visible
+                rel = self._compute_rel(target_obj.pos, anchor.pos, EgoFrontBins(), anchor_ori=anchor.ori)
+                return target_obj, anchor, rel, template, False
+            
+            return target_obj, anchor, None, template, True
 
     def generate_choices_pov_fallback(self):
         """Generate choices for POV fallback case (beyond-fov)."""
+        if self.config.get("relation_mode") == RELATION_MODE_REAL:
+            raise NotImplementedError
+
         dir_labels = EgoFrontBins().LABELS
         beyond_fov_label = 'beyond-fov'
         dist_labels = ['near']  # Use any distance label
@@ -282,6 +380,14 @@ class BackwardPovEvaluationTask(DirectionEvaluationTask):
         "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
     )
 
+    QUESTION_TEMPLATE_BWD_POV_REAL = (
+        "You are at an object's position facing its direction.\n"
+        "From this view, {obj_name} is {spatial_relationship}.\n"
+        "Which object are you positioned at?\n\n"
+        "Choose the correct answer:\n{choices_text}\n\n"
+        "IMPORTANT: Answer with ONLY the letter (A, B, C, ...).\n\n"
+    )
+
     def generate_question_data(self):
         """Generate backward POV question setup data."""
         anchor_visible = self._build_anchor_visible_dict()
@@ -293,8 +399,11 @@ class BackwardPovEvaluationTask(DirectionEvaluationTask):
             target_idx, target_obj = self.np_random.choice(anchor_visible[anchor_idx])
             
             # Compute spatial relationship from correct anchor's perspective
-            rel = self._compute_discrete_rel(target_obj.pos, correct_anchor.pos, EgoFrontBins(), anchor_ori=correct_anchor.ori)
-            spatial_relationship = self._fmt(rel.direction.bin_label, rel.dist.bin_label)
+            rel = self._compute_rel(target_obj.pos, correct_anchor.pos, EgoFrontBins(), anchor_ori=correct_anchor.ori)
+            if self.config.get("relation_mode") == RELATION_MODE_REAL:
+                spatial_relationship = rel.to_string()
+            else:
+                spatial_relationship = self._fmt(rel.direction.bin_label, rel.dist.bin_label)
             
             return target_obj, correct_anchor, spatial_relationship, anchor_idx, False
         else:
@@ -347,7 +456,8 @@ class BackwardPovEvaluationTask(DirectionEvaluationTask):
         target_obj, correct_anchor, spatial_relationship, anchor_idx, is_fallback = self.generate_question_data()
         choices, correct_idx = self.generate_choices(target_obj, correct_anchor, anchor_idx, is_fallback)
         choices_text, correct_label = self.format_choices(choices, correct_idx)
-        self.eval_data.question = self.QUESTION_TEMPLATE_BWD_POV.format(
+        template = self.QUESTION_TEMPLATE_BWD_POV_REAL if self.config.get("relation_mode") == RELATION_MODE_REAL else self.QUESTION_TEMPLATE_BWD_POV
+        self.eval_data.question = template.format(
             obj_name=target_obj.name,
             spatial_relationship=spatial_relationship,
             choices_text=choices_text
@@ -376,7 +486,9 @@ class DirectionPov(DirectionEvaluationTask):
             n = len(self.room.objects)
             target_idx = int(self.np_random.choice([k for k in range(n) if k != anchor_idx]))
             target_obj = self.room.objects[target_idx]
-            rel = self._compute_discrete_rel(target_obj.pos, anchor.pos, CardinalBinsAllo(), anchor_ori=anchor.ori)
+            target_idx = int(self.np_random.choice([k for k in range(n) if k != anchor_idx]))
+            target_obj = self.room.objects[target_idx]
+            rel = self._compute_rel(target_obj.pos, anchor.pos, CardinalBinsAllo(), anchor_ori=anchor.ori)
             return target_obj, anchor, rel, self.QUESTION_TEMPLATE_ANCHOR_NORTH
         raise ValueError("No oriented objects in the room")
 

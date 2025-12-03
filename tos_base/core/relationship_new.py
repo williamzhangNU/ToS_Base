@@ -742,7 +742,8 @@ class PairwiseRelationshipReal(PairwiseRelationshipBase):
             "\t- Format: '+30° from front, 2.55 away'."
         )
         # Append discrete bin definitions so evaluation prompts stay informative when exploration is real-valued.
-        return base_prompt
+        discrete_prompt = PairwiseRelationshipDiscrete.prompt()
+        return f"{base_prompt}\n\n{discrete_prompt}"
 
     @classmethod
     def observation_prompt(cls) -> str:
@@ -884,3 +885,15 @@ def configure_pairwise_relation_bins(mode: str) -> None:
     StandardDistanceBins.configure(preset)
     CardinalBinsAllo.configure(preset)
     PairwiseRelationshipDiscrete.configure_bins(EgoFrontBins(), StandardDistanceBins())
+
+
+
+
+
+
+
+
+
+
+if __name__ == "__main__":
+    pass

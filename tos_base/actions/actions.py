@@ -18,14 +18,15 @@ ACTION_REMINDER = 'To answer the question, you must output "<answer >Actions: [ 
 
 ACTION_INSTRUCTION = """\
 Use "Actions: [ <M>* <F> ]" to explore the room.
-<M>: JumpTo(OBJ) | Rotate(DEG)
-<F>: Observe() | Term(ANSWER)
+<M>: JumpTo(<OBJ>) | Rotate(<DEG>)
+<F>: Observe() | Term(<ANSWER>)
 
 Rules:
 - Start with zero or more <M>.
 - End with exactly one <F>.
-- At most one Observe().
-- Term(ANSWER) must be alone.
+- MUST first Observe at start.
+- At most ONE Observe().
+- Term(<ANSWER>) must be alone.
 
 Available Actions:
 {actions}
@@ -40,7 +41,7 @@ class MoveAction(BaseAction):
     """Jump to a target object"""
     
     format_desc = "JumpTo(OBJ)"
-    description = "Jump to a visible object in Field of View. No orientation change."
+    description = "Jump to an object. No orientation change. Can ONLY jump to a object in Field of View"
     example = "JumpTo(table)"
     format_pattern = r"^JumpTo\(([A-Za-z0-9_ -]+)\)$"
     cost = 0
@@ -460,8 +461,11 @@ class ActionSequence:
             "\n".join(f"- {cls.format_desc}: {_desc(cls)}" for cls in final_actions)
         )
         examples = (
+            "Valid: [Observe()]\n"
             "Valid: [JumpTo(table), Rotate(90), Observe()]\n"
             "Valid: [Term(A)]"
+            "Invalid (multiple Observes): [Observe(), Rotate(90), Observe()]\n"
+            "Invalid (lamp not in FoV): [JumpTo(lamp), Observe()]\n"
         )
         
         return ACTION_INSTRUCTION.format(
