@@ -22,6 +22,7 @@ from ..core.room import Room, BaseRoom
 from ..core.object import Object, Agent, Gate
 from ..utils.relationship_utils import room_to_ordered_relations        
 from ..utils.relation_codes import decode_relation_codes,invert_pair_key, invert_dir_code
+from ..utils.room_utils import get_observed_room_id
 # Utils
 from ..utils.cogmap.transforms import (
     transform_baseroom,
@@ -253,24 +254,31 @@ class CognitiveMapManager:
 
     def evaluate_unexplored(
         self, 
-        assistant_response: str, 
+        assistant_response: str,
         possible_positions: Dict[str, List[List[int]]], 
-        grid_size: int,
-        room_bounds: Optional[Tuple[int, int, int, int]] = None,
+        gt_room: Room,
+        gt_agent: Agent,
     ) -> UnexploredCogMapTurnLog:
-        """Evaluate unexplored area predictions.
+        """Evaluate unexplored area predictions in global coordinates.
+        
+        The predicted points are in local coordinates (same as local cogmap), 
+        but we transform them to global coordinates for evaluation since:
+        - possible_positions is already in global coordinates
+        - room_bounds are naturally in global coordinates
+        - avoids precision loss from transforming bounds to local
         
         Args:
             assistant_response: LLM response text containing unexplored predictions
-            possible_positions: Dict mapping object names to lists of [x, y] possible positions
-            grid_size: Size of the grid
-            room_bounds: Optional (min_x, max_x, min_y, max_y) to restrict search area
+            possible_positions: Dict mapping object names to lists of [x, y] possible positions (global coords)
+            gt_room: Ground truth room (used to get mask and bounds)
+            gt_agent: Ground truth agent for coordinate transformation
             
         Returns:
             UnexploredCogMapTurnLog with evaluation metrics
         """
-        json_dict = self._extract_json_from_text(assistant_response)
+        from ..utils.cogmap.transforms import inv_transform_point
         
+        json_dict = self._extract_json_from_text(assistant_response)
         if json_dict is None:
             return UnexploredCogMapTurnLog(
                 type="unexplored",
@@ -279,28 +287,36 @@ class CognitiveMapManager:
                 metrics=UnexploredMetrics.invalid(),
             )
         
-        # Parse predicted points
-        pred_points = parse_unexplored_response(json_dict)
+        # Parse predicted points (in local coordinates)
+        pred_points_local = parse_unexplored_response(json_dict)
         
-        # Compute observed positions from solver constraints
-        observed_positions: Set[Tuple[int, int]] = set()
+        # Transform predicted points from local to global coordinates
+        pred_points_global: List[Tuple[int, int]] = []
+        for lx, ly in pred_points_local:
+            global_pos = inv_transform_point(np.array([lx, ly]), gt_agent.pos, gt_agent.ori)
+            pred_points_global.append((int(round(global_pos[0])), int(round(global_pos[1]))))
+        
+        # Compute observed positions from solver constraints (already in global coordinates)
+        observed_positions_global: Set[Tuple[int, int]] = set()
         for name, positions in possible_positions.items():
             for pos in positions:
                 if isinstance(pos, (list, tuple)) and len(pos) >= 2:
                     try:
-                        observed_positions.add((int(pos[0]), int(pos[1])))
+                        observed_positions_global.add((int(pos[0]), int(pos[1])))
                     except (ValueError, TypeError):
                         continue
         
-        # Compute unexplored regions
+        # Get room bounds directly in global coordinates
+        room_bounds = gt_room.get_boundary(get_observed_room_id(gt_room, gt_agent.to_dict()))
+        
+        # Compute unexplored regions in global coordinates
         unexplored_regions = compute_unexplored_regions(
-            grid_size=grid_size,
-            observed_positions=observed_positions,
+            observed_positions=observed_positions_global,
             room_bounds=room_bounds,
         )
         
-        # Evaluate predictions
-        metrics = evaluate_unexplored_predictions(pred_points, unexplored_regions)
+        # Evaluate predictions (both in global coordinates now)
+        metrics = evaluate_unexplored_predictions(pred_points_global, unexplored_regions)
         
         # Convert regions to serializable format (list of lists)
         gt_regions_serialized = [list(region) for region in unexplored_regions]
@@ -310,7 +326,7 @@ class CognitiveMapManager:
             extraction_success=True,
             original_response=assistant_response,
             pred_json=json_dict,
-            pred_points=pred_points,
+            pred_points=pred_points_global,  # Store in global coordinates
             gt_unexplored_regions=gt_regions_serialized,
             num_gt_regions=len(unexplored_regions),
             metrics=metrics,
@@ -510,7 +526,7 @@ class CognitiveMapManager:
                             out[key] = f"({d1}, {r1})"
         return out
 
-    def evaluate_cogmaps(self, responses_by_type: Dict[str, str], gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]], possible_positions: Optional[Dict[str, List[List[int]]]] = None, grid_size: int = 10) -> CognitiveMapTurnLog:
+    def evaluate_cogmaps(self, responses_by_type: Dict[str, str], gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]], possible_positions: Optional[Dict[str, List[List[int]]]] = None) -> CognitiveMapTurnLog:
         """Evaluate multiple types and record one aggregate log for the turn.
         
         Args:
@@ -519,7 +535,6 @@ class CognitiveMapManager:
             gt_agent: Ground truth agent
             observed_items: List of observed item names
             possible_positions: For unexplored evaluation - dict of possible positions per object
-            grid_size: For unexplored evaluation - grid size
         """
         out = CognitiveMapTurnLog()
         for map_type_key, resp in (responses_by_type or {}).items():
@@ -528,7 +543,7 @@ class CognitiveMapManager:
             # Handle unexplored separately as it needs different parameters
             if map_type_key == "unexplored":
                 if possible_positions is not None:
-                    unexplored_log = self.evaluate_unexplored(resp, possible_positions, grid_size)
+                    unexplored_log = self.evaluate_unexplored(resp, possible_positions, gt_room, gt_agent)
                     out.unexplored_log = unexplored_log
                 continue
             single = self.evaluate_cogmap_type(resp, gt_room, gt_agent, observed_items, map_type_key)

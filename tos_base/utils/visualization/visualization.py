@@ -499,6 +499,7 @@ class HTMLGenerator:
             ('local', '🗺️ Local Cognitive Map Response'),
             ('relations', '🗺️ Relations Cognitive Map Response'),
             ('rooms', '🗺️ Rooms Cognitive Map Response'),
+            ('unexplored', '🔍 Unexplored Areas Response'),
             ('false_belief', '🧭 False Belief Cognitive Map Response')
         ]
 
@@ -623,6 +624,45 @@ class HTMLGenerator:
                         f.write("</div>\n")  # End json-content
                         f.write("</div>\n")  # End json-container
 
+                elif map_type == 'unexplored':
+                    # For unexplored, display pred_json and gt_json in two columns
+                    pred_json = data.get('pred_json', {})
+                    gt_json = data.get('gt_json', {})
+
+                    if pred_json or gt_json:
+                        f.write("<div class='json-container unexplored'>\n")
+                        f.write("<div class='json-header'>")
+                        f.write("<strong>🔍 Unexplored Areas JSONs</strong>")
+                        f.write("</div>\n")
+                        f.write("<div class='json-content'>\n")
+                        f.write("<div class='json-compare unexplored'>\n")
+
+                        # Left - pred_json
+                        f.write("<div class='json-box left predicted'>\n")
+                        f.write("<strong>🤖 Predicted</strong>\n")
+                        if pred_json:
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(pred_json, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        else:
+                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        # Right - gt_json
+                        f.write("<div class='json-box right gt'>\n")
+                        f.write("<strong>🎯 Ground Truth</strong>\n")
+                        if gt_json:
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(gt_json, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        else:
+                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("</div>\n")
+
+                        f.write("</div>\n")  # End json-compare
+                        f.write("</div>\n")  # End json-content
+                        f.write("</div>\n")  # End json-container
+
     def _render_cogmap_metrics(self, f, cogmap_log: Dict) -> None:
         """Helper to render cognitive map metrics"""
         if not cogmap_log:
@@ -633,13 +673,15 @@ class HTMLGenerator:
         local_log = cogmap_log.get("local", {})
         rooms_log = cogmap_log.get("rooms", {})
         relations_log = cogmap_log.get("relations", {})
+        unexplored_log = cogmap_log.get("unexplored", {})
 
         metrics_block = {
             "Global": global_log.get("metrics", {}) if global_log else {},
             "Global (Full)": global_log.get("metrics_full", {}) if global_log else {},
             "Local": local_log.get("metrics", {}) if local_log else {},
             "Rooms": rooms_log.get("metrics", {}) if rooms_log else {},
-            "Relations": relations_log.get("metrics", {}) if relations_log else {}
+            "Relations": relations_log.get("metrics", {}) if relations_log else {},
+            "Unexplored": unexplored_log.get("metrics", {}) if unexplored_log else {}
         }
 
         if any(metrics_block.values()):

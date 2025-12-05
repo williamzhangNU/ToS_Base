@@ -1298,6 +1298,20 @@ a:hover {
     gap: 0;
 }
 
+/* Unexplored layout - two columns */
+.json-compare.unexplored {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+}
+
+/* False belief layout - single column */
+.json-compare.false-belief {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+}
+
 .json-box {
     background: white;
     border: none;
@@ -1404,6 +1418,10 @@ a:hover {
     }
 
     .json-compare.local {
+        grid-template-columns: 1fr;
+    }
+
+    .json-compare.unexplored {
         grid-template-columns: 1fr;
     }
 

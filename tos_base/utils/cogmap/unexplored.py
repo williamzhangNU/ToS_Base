@@ -13,25 +13,19 @@ from .types import UnexploredMetrics
 
 
 def compute_unexplored_regions(
-    grid_size: int,
     observed_positions: Set[Tuple[int, int]],
-    room_bounds: Optional[Tuple[int, int, int, int]] = None,
+    room_bounds: Tuple[int, int, int, int],
 ) -> List[Set[Tuple[int, int]]]:
     """Compute connected unexplored regions in the grid.
     
     Args:
-        grid_size: Size of the grid (grid spans from -grid_size to +grid_size)
         observed_positions: Set of (x, y) coordinates that have been observed
-        room_bounds: Optional (min_x, max_x, min_y, max_y) to restrict search area
+        room_bounds: (min_x, max_x, min_y, max_y) to define the search area
         
     Returns:
         List of sets, each set containing (x, y) coordinates of a connected unexplored region
     """
-    if room_bounds:
-        min_x, max_x, min_y, max_y = room_bounds
-    else:
-        min_x, max_x = -grid_size, grid_size
-        min_y, max_y = -grid_size, grid_size
+    min_x, max_x, min_y, max_y = room_bounds
     
     # Build set of all grid cells
     all_cells = {(x, y) for x in range(min_x, max_x + 1) for y in range(min_y, max_y + 1)}

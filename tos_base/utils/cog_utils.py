@@ -19,8 +19,6 @@ def _evaluate_cogmaps(
     cognitive_map_manager: CognitiveMapManager,
     responses_by_type: Dict[str, str],
     turn_log: Dict[str, Any],
-    possible_positions: Dict[str, Any] = None,
-    grid_size: int = 10,
 ):
     """Evaluate cognitive maps including unexplored areas.
     
@@ -39,8 +37,7 @@ def _evaluate_cogmaps(
         exploration_log = turn_log.get('exploration_log', {})
         observed_items = exploration_log.get('observed_items', [obj.name for obj in room_state.all_objects])
         # Get possible_positions from turn_log if not provided
-        if possible_positions is None:
-            possible_positions = exploration_log.get('possible_positions', {})
+        possible_positions = exploration_log.get('possible_positions', {})
     elif (not turn_log.get('is_exploration_phase', True)) and 'falsebelief' in turn_log.get('evaluation_log', {}).get('task_type', '').lower():
         observed_items = [turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('kwargs', {}).get('rotated_object')]
     else:
@@ -53,7 +50,6 @@ def _evaluate_cogmaps(
         agent_state,
         observed_items,
         possible_positions=possible_positions,
-        grid_size=grid_size,
     )
 
 def evaluate_cognitive_maps_from_turnlogs(
