@@ -13,29 +13,16 @@ from .types import UnexploredMetrics
 
 
 def compute_unexplored_regions(
-    observed_positions: Set[Tuple[int, int]],
-    room_bounds: Tuple[int, int, int, int],
+    unexplored_positions: Set[Tuple[int, int]],
 ) -> List[Set[Tuple[int, int]]]:
-    """Compute connected unexplored regions in the grid.
+    """Compute connected unexplored regions in the grid using BFS.
     
     Args:
-        observed_positions: Set of (x, y) coordinates that have been observed
-        room_bounds: (min_x, max_x, min_y, max_y) to define the search area
+        unexplored_positions: Set of (x, y) coordinates that are unexplored
         
     Returns:
         List of sets, each set containing (x, y) coordinates of a connected unexplored region
     """
-    min_x, max_x, min_y, max_y = room_bounds
-    
-    # Build set of all grid cells
-    all_cells = {(x, y) for x in range(min_x, max_x + 1) for y in range(min_y, max_y + 1)}
-    
-    # Unexplored cells = all cells - observed positions
-    unexplored = all_cells - observed_positions
-    
-    if not unexplored:
-        return []
-    
     # Find connected components using BFS
     regions: List[Set[Tuple[int, int]]] = []
     visited: Set[Tuple[int, int]] = set()
@@ -53,13 +40,13 @@ def compute_unexplored_regions(
             # Check 4-connected neighbors (can change to 8-connected if needed)
             for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
                 nx, ny = x + dx, y + dy
-                if (nx, ny) in unexplored and (nx, ny) not in visited:
+                if (nx, ny) in unexplored_positions and (nx, ny) not in visited:
                     visited.add((nx, ny))
                     queue.append((nx, ny))
         
         return region
     
-    for cell in unexplored:
+    for cell in unexplored_positions:
         if cell not in visited:
             region = bfs(cell)
             if region:
@@ -141,135 +128,51 @@ def evaluate_unexplored_predictions(
     )
 
 
-def parse_unexplored_response(json_data: Dict[str, Any]) -> List[Tuple[int, int]]:
-    """Parse unexplored points from LLM response JSON.
+def parse_unexplored_response(json_data: Dict[str, Any]) -> Dict[str, List[Tuple[int, int]]]:
+    """Parse unexplored points from LLM response JSON (multi-room format).
     
     Expected format:
     {
-        "unexplored_points": [[x1, y1], [x2, y2], ...]
+        "1": [[x1, y1], [x2, y2], ...],
+        "2": [[x1, y1], [x2, y2]]
     }
     
     Args:
         json_data: Parsed JSON from LLM response
         
     Returns:
-        List of (x, y) coordinate tuples
+        Dict mapping room_id (str) to list of (x, y) coordinate tuples
     """
-    points: List[Tuple[int, int]] = []
+    result: Dict[str, List[Tuple[int, int]]] = {}
     
     if not isinstance(json_data, dict):
-        return points
+        return result
     
-    raw_points = json_data.get('unexplored_points', [])
-    if not isinstance(raw_points, list):
-        return points
-    
-    for pt in raw_points:
-        if isinstance(pt, (list, tuple)) and len(pt) >= 2:
-            try:
-                x, y = int(pt[0]), int(pt[1])
-                points.append((x, y))
-            except (ValueError, TypeError):
-                continue
-    
-    return points
-
-
-def compute_observed_positions_from_solver(
-    possible_positions: Dict[str, List[List[int]]],
-    grid_size: int,
-) -> Set[Tuple[int, int]]:
-    """Compute observed positions based on spatial solver constraints.
-    
-    A position is considered "observed" if it's constrained by object observations.
-    We use the possible positions from the solver to infer observed areas.
-    
-    Args:
-        possible_positions: Dict mapping object names to lists of [x, y] possible positions
-        grid_size: Size of the grid
-        
-    Returns:
-        Set of (x, y) coordinates that are considered "observed"
-    """
-    observed: Set[Tuple[int, int]] = set()
-    
-    for name, positions in possible_positions.items():
-        if not positions:
+    # Multi-room format: keys are room IDs
+    for room_id_key, raw_points in json_data.items():
+        # Skip non-room-id keys (room IDs should be numeric strings)
+        try:
+            int(room_id_key)
+        except ValueError:
             continue
-        for pos in positions:
-            if isinstance(pos, (list, tuple)) and len(pos) >= 2:
-                try:
-                    observed.add((int(pos[0]), int(pos[1])))
-                except (ValueError, TypeError):
-                    continue
-    
-    return observed
-
-
-def compute_observed_positions_from_visibility(
-    agent_positions_history: List[Tuple[int, int]],
-    agent_orientations_history: List[Tuple[int, int]],
-    grid_size: int,
-    fov_angle: int = 90,
-    view_distance: int = 5,
-) -> Set[Tuple[int, int]]:
-    """Compute observed positions based on agent's visibility history.
-    
-    For each position/orientation in history, compute which grid cells were visible.
-    
-    Args:
-        agent_positions_history: List of agent (x, y) positions over time
-        agent_orientations_history: List of agent orientation vectors
-        grid_size: Size of the grid
-        fov_angle: Field of view angle in degrees
-        view_distance: Maximum view distance
         
-    Returns:
-        Set of (x, y) coordinates that have been observed
-    """
-    observed: Set[Tuple[int, int]] = set()
+        points: List[Tuple[int, int]] = []
+        if isinstance(raw_points, list):
+            for pt in raw_points:
+                if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                    try:
+                        x, y = int(pt[0]), int(pt[1])
+                        points.append((x, y))
+                    except (ValueError, TypeError):
+                        continue
+        result[room_id_key] = points
     
-    half_fov = np.radians(fov_angle / 2)
-    
-    for pos, ori in zip(agent_positions_history, agent_orientations_history):
-        px, py = pos
-        ox, oy = ori
-        
-        # Normalize orientation
-        ori_len = np.sqrt(ox**2 + oy**2)
-        if ori_len == 0:
-            continue
-        ox, oy = ox / ori_len, oy / ori_len
-        
-        # Check all cells within view distance
-        for dx in range(-view_distance, view_distance + 1):
-            for dy in range(-view_distance, view_distance + 1):
-                tx, ty = px + dx, py + dy
-                
-                # Check distance
-                dist = np.sqrt(dx**2 + dy**2)
-                if dist > view_distance or dist == 0:
-                    continue
-                
-                # Check angle
-                to_target = np.array([dx / dist, dy / dist])
-                dot = ox * to_target[0] + oy * to_target[1]
-                
-                # Within FOV
-                if dot >= np.cos(half_fov):
-                    observed.add((int(tx), int(ty)))
-        
-        # Agent's current position is always observed
-        observed.add((int(px), int(py)))
-    
-    return observed
+    return result
 
 
 __all__ = [
     'compute_unexplored_regions',
     'evaluate_unexplored_predictions',
     'parse_unexplored_response',
-    'compute_observed_positions_from_solver',
-    'compute_observed_positions_from_visibility',
     'UnexploredMetrics',
 ]

@@ -38,8 +38,6 @@ from .unexplored import (
     compute_unexplored_regions,
     evaluate_unexplored_predictions,
     parse_unexplored_response,
-    compute_observed_positions_from_solver,
-    compute_observed_positions_from_visibility,
 )
 
 __all__ = [
@@ -78,8 +76,6 @@ __all__ = [
     "compute_unexplored_regions",
     "evaluate_unexplored_predictions",
     "parse_unexplored_response",
-    "compute_observed_positions_from_solver",
-    "compute_observed_positions_from_visibility",
 ]
 
 

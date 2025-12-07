@@ -1453,8 +1453,8 @@ def get_observed_room_id(room: Room, agent_state: Dict[str, Any]) -> Union[int, 
                 # Fallback: return both connected rooms
                 return gate.room_id
             return None
-    
-    return None
+    # Not at a gate - get room ID from mask
+    return agent_state.get("room_id", None)
 
 
 def get_room_description(room: Room, agent: Agent) -> str:
@@ -1479,7 +1479,11 @@ def get_room_description(room: Room, agent: Agent) -> str:
 
     desc = f"Imagine {room_type}: {', '.join(room_names)}. You are currently in room {agent.room_id}. You face north."
     desc += f"\nObjects: {', '.join(objects)}" if objects else ""
-    desc += f"\nDoors: {', '.join(gates)}" if gates else ""
+    if gates:
+        gate_descriptions = []
+        for gate in room.gates:
+            gate_descriptions.append(f"{gate.name} connected room {gate.room_id[0]} and room {gate.room_id[1]}")
+        desc += f"\nDoors: {', '.join(gate_descriptions)}"
 
     return desc
 

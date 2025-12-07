@@ -30,6 +30,7 @@ class ExplorationTurnLog:
     agent_state: Optional['Agent'] = None
     information_gain: Optional[float] = None  # Information gain (uses exploration quality metric)
     possible_positions: Optional[Dict[str, List[List[int]]]] = None  # Sampled possible positions per object
+    unexplored_positions_by_room: Optional[Dict[str, List[List[int]]]] = None  # Unexplored positions per room (room_id -> [[x,y], ...])
 
     def to_dict(self):
         return {
@@ -44,6 +45,7 @@ class ExplorationTurnLog:
             "agent_state": self.agent_state.to_dict() if self.agent_state else {},
             "information_gain": self.information_gain or 0.0,
             "possible_positions": self.possible_positions or {},
+            "unexplored_positions_by_room": self.unexplored_positions_by_room or {},
         }
 
 class ExplorationManager:
@@ -64,6 +66,9 @@ class ExplorationManager:
         self.turn_logs: List[ExplorationTurnLog] = []
         # History now stores ActionResult for each executed action (in order)
         self.history: List['ActionResult'] = []
+        # Per-room unexplored positions (updated incrementally)
+        self._unexplored_by_room: Dict[str, Set[Tuple[int, int]]] = {}
+        self._init_unexplored()
         
         # Coverage tracking (exclude gates)
         self._init_node_name = "initial_pos"
@@ -111,11 +116,17 @@ class ExplorationManager:
         self.history.append(result)
         if not result.success:
             return result
-        
         # Count action, cost, and update coverage
         self.action_counts[result.action_type] = self.action_counts.get(result.action_type, 0) + 1
         self.action_cost += int(action.cost)
         if isinstance(action, ObserveAction):
+            room_ids = self.agent.room_id if isinstance(self.agent.room_id, list) else [self.agent.room_id]
+            for rid in room_ids:
+                self._subtract_fov(
+                    int(self.agent.pos[0]), int(self.agent.pos[1]),
+                    int(self.agent.ori[0]), int(self.agent.ori[1]),
+                    str(rid)
+                )
             self._update_coverage_from_observe(result)
         
         return result
@@ -419,6 +430,8 @@ class ExplorationManager:
         turn_quality = self._compute_exploration_quality()
         # Snapshot possible positions per object (only initialized/observed ones), with sampling
         possible_positions = self._get_possible_positions_snapshot(self.MAX_POSSIBLE_POSITIONS_PER_OBJECT)
+        # Compute unexplored positions per room based on FOV history
+        unexplored_positions_by_room = self._compute_unexplored_positions_by_room()
         
         step_idx = len(self.turn_logs) + 1
         turn_log = ExplorationTurnLog(
@@ -433,6 +446,7 @@ class ExplorationManager:
             agent_state=self.agent.copy(),
             information_gain=turn_quality if turn_quality is not None else (self.turn_logs[-1].information_gain if self.turn_logs else 0.0),
             possible_positions=possible_positions,
+            unexplored_positions_by_room=unexplored_positions_by_room,
         )
         self.turn_logs.append(turn_log)
     
@@ -472,6 +486,57 @@ class ExplorationManager:
                     self.spatial_solver.add_observation(filt)
 
     # === Exploration quality helpers ===
+    def _init_unexplored(self) -> None:
+        unique_vals = np.unique(self.exploration_room.mask)
+        for val in unique_vals:
+            if 1 <= val < 100:  # Valid room IDs are 1-99
+                rid = int(val)
+                room_coords = np.argwhere(self.exploration_room.mask == rid)
+                self._unexplored_by_room[str(rid)] = set((int(c[0]), int(c[1])) for c in room_coords)
+
+    def _subtract_fov(
+        self, px: int, py: int, ox: int, oy: int, room_id: str, fov_angle: int = 90
+    ) -> None:
+        """Remove visible positions from unexplored for the given room."""
+        unexplored = self._unexplored_by_room.get(room_id)
+        if not unexplored:
+            return
+        
+        # Normalize orientation
+        ori_len = np.sqrt(ox**2 + oy**2)
+        if ori_len == 0:
+            return
+        ox_n, oy_n = ox / ori_len, oy / ori_len
+        
+        # Agent's current position is observed
+        unexplored.discard((px, py))
+        
+        half_fov = np.radians(fov_angle / 2)
+        to_remove = []
+        
+        for (tx, ty) in unexplored:
+            dx, dy = tx - px, ty - py
+            dist = np.sqrt(dx**2 + dy**2)
+            if dist == 0:
+                continue
+            dot = ox_n * (dx / dist) + oy_n * (dy / dist)
+            if dot >= np.cos(half_fov):
+                to_remove.append((tx, ty))
+        
+        for pos in to_remove:
+            unexplored.discard(pos)
+    
+    def _compute_unexplored_positions_by_room(self) -> Dict[str, List[List[int]]]:
+        """Get unexplored positions for each room.
+        
+        Returns:
+            Dict mapping room_id (str) to list of [x, y] unexplored positions
+        """
+        return {
+            rid: [[x, y] for x, y in sorted(positions)]
+            for rid, positions in self._unexplored_by_room.items()
+        }
+
     def _full_grid_cell_count(self) -> int:
         return int(self.grid_size) * int(self.grid_size)
 
