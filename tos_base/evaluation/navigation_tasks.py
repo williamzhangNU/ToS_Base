@@ -5,7 +5,7 @@ BackwardNavEvaluationTask: infer action sequence from a final observation.
 BackwardNavRevEvaluationTask: navigate back to starting point from termination location.
 """
 
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Dict
 import numpy as np
 import json
 
@@ -188,16 +188,6 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
                 raise ValueError(f"Unknown navigation action: {action_type}")
         return mgr.agent.copy()
 
-    def _get_visible_objects(self, agent: Agent) -> List[Tuple[str, str, str]]:
-        """Get visible objects with their relations. Returns list of (name, direction, distance)."""
-        res = ObserveAction().execute(self.room, agent)
-        triples = res.data.get('relation_triples', [])
-        objects = []
-        for tr in triples:
-            if isinstance(tr.relation, PairwiseRelationshipDiscrete):
-                objects.append((tr.subject, tr.relation.direction.bin_label, tr.relation.dist.bin_label))
-        return objects
-
     def _describe_target(self, mgr: ExplorationManager, target_name: str) -> str:
         bin_sys = EgoFrontBins()
         dist_sys = StandardDistanceBins()
@@ -267,14 +257,14 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
             steps.append(f"{idx}. {label}")
         return "\n".join(steps)
 
-    def _sample_plan_with_visible(self, steps: int, max_attempts: int = 5) -> Tuple[List[NavAction], Agent, List[Tuple[str, str, str]]]:
+    def _sample_plan_with_visible(self, steps: int, max_attempts: int = 5) -> Tuple[List[NavAction], Agent, List[Dict[str, str]], Dict[str, Tuple[int, int]]]:
         attempts = max(1, min(int(self.config.get('plan_retry', max_attempts)), max_attempts))
         for _ in range(attempts):
             plan = self._generate_plan(steps)
             agent = self._execute_plan(plan)
-            visible = self._get_visible_objects(agent)
+            visible, obj_orientations = self._get_ground_truth_observations(agent)
             if visible:
-                return plan, agent, visible
+                return plan, agent, visible, obj_orientations
         raise ValueError("Failed to generate navigation plan with visible objects")
 
 class Action2ViewEvaluationTask(BaseNavEvaluationTask):
@@ -291,11 +281,16 @@ class Action2ViewEvaluationTask(BaseNavEvaluationTask):
     @retry_generate_question
     def generate_question(self) -> str:
         steps = int(self.config.get('steps', 2))
-        plan, end_agent, visible = self._sample_plan_with_visible(steps)
+        plan, end_agent, visible, _ = self._sample_plan_with_visible(steps)
         actions_str = self._plan_to_text(plan)
 
         self.np_random.shuffle(visible)
-        target_name, direction, distance = visible[0]
+        # visible is list of dicts now
+        first = visible[0]
+        target_name = first['name']
+        direction = first['direction']
+        distance = first['distance']
+        
         answer = f"{direction}, {distance}"
 
         self.eval_data.question = self.QUESTION_TEMPLATE.format(actions=actions_str, target=target_name)
@@ -316,13 +311,13 @@ class BaseView2ActionEvaluationTask(BaseNavEvaluationTask):
         "Example: Rotate(90), JumpTo(lamp), JumpTo(chair), Rotate(90)\n"
     )
 
-    def _get_final_obs(self, visible: List[Tuple[str, str, str]]) -> str:
+    def _get_final_obs(self, visible: List[Dict[str, str]]) -> str:
         raise NotImplementedError
 
     @retry_generate_question
     def generate_question(self) -> str:
         steps = int(self.config.get('steps', 3))
-        plan, end_agent, visible = self._sample_plan_with_visible(steps)
+        plan, end_agent, visible, obj_orientations = self._sample_plan_with_visible(steps)
         self.np_random.shuffle(visible)
         visible = visible[:3]
         
@@ -330,7 +325,13 @@ class BaseView2ActionEvaluationTask(BaseNavEvaluationTask):
 
         # Store expected final state and object positions for evaluation
         init_agent = self._agent_from_init()
-        object_positions = {obj.name: tuple(map(int, obj.pos)) for obj in self.room.all_objects}
+        object_positions = {obj.name.lower(): tuple(map(int, obj.pos)) for obj in self.room.all_objects}
+        
+        # Build answer with orientations
+        # Merge orientations: local visible ones + global ones if needed.
+        # Ideally satisfy _eval_backward_nav which needs orientations for checking.
+        # We assume room.all_objects has them, so we can re-extract global map of orientations
+        all_orientations = {obj.name.lower(): tuple(obj.ori) for obj in self.room.all_objects if obj.has_orientation}
 
         answer = {
             'final_pos': tuple(map(int, end_agent.pos)),
@@ -338,6 +339,7 @@ class BaseView2ActionEvaluationTask(BaseNavEvaluationTask):
             'init_pos': tuple(map(int, init_agent.pos)),
             'init_ori': tuple(map(int, init_agent.ori)),
             'object_positions': object_positions,
+            'object_orientations': all_orientations,
             "minimal_plan": compute_shortest_path(
                 self.room,
                 init_agent.pos,
@@ -345,34 +347,31 @@ class BaseView2ActionEvaluationTask(BaseNavEvaluationTask):
                 end_agent.pos,
                 end_agent.ori,
             ),
-            'final_observation': [
-                {
-                    'name': name,
-                    'direction': direction,
-                    'distance': distance,
-                }
-                for name, direction, distance in visible
-            ],
+            'final_observation': visible, # List of dicts
         }
 
         self.eval_data.question = self.QUESTION_TEMPLATE.format(final_obs=final_obs)
         self.eval_data.answer = answer
         self.eval_data.choices = []
-        self.eval_data.id = hash(self.eval_data.question + json.dumps(answer, sort_keys=True))
+        self.eval_data.id = hash(self.eval_data.question + json.dumps(answer, sort_keys=True, default=str)) # Use default=str for numpy types
         return self.eval_data.question
 
 
 class View2ActionTextEvaluationTask(BaseView2ActionEvaluationTask):
     """Infer action sequence from final observation (text)."""
-    def _get_final_obs(self, visible: List[Tuple[str, str, str]]) -> str:
-        obs_parts = [f"{name} is at {direction}, {distance}"
-                    for name, direction, distance in visible]
+    def _get_final_obs(self, visible: List[Dict[str, str]]) -> str:
+        obs_parts = []
+        for v in visible:
+            txt = f"{v['name']} is at {v['direction']}, {v['distance']}"
+            if v.get('orientation'):
+                txt += f", facing {v['orientation']}"
+            obs_parts.append(txt)
         return "; ".join(obs_parts)
 
 
 class View2ActionVisionEvaluationTask(BaseView2ActionEvaluationTask):
     """Infer action sequence from final observation (vision)."""
-    def _get_final_obs(self, visible: List[Tuple[str, str, str]]) -> str:
+    def _get_final_obs(self, visible: List[Dict[str, str]]) -> str:
         return "You observe: <image>"
 
 class View2ActionRevEvaluationTask(BaseNavEvaluationTask):
@@ -435,50 +434,30 @@ def _plan_to_action_str(plan: List[NavAction]) -> str:
 
 
 if __name__ == "__main__":
-    from ..utils.room_utils import RoomPlotter, RoomGenerator
+    from ..utils.eval_utilities import create_and_plot_room, manual_test_loop
     from .task_types import EvalTaskType
-    from tqdm import tqdm
-    import numpy as np
 
-    def test_task(task_name: str):
-        print(f"\nTesting task: {task_name}")
-        for seed in tqdm(range(0, 1)):
-            np_random = np.random.default_rng(seed)
-            room, agent = RoomGenerator.generate_room(
-                room_size=(30, 30),
-                n_objects=10,
-                np_random=np_random,
-                room_name='room',
-                level=2,
-                main=6,
-            )
-            try:
-                task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
-                print(f"Question: {task.generate_question()}")
-                print(f"Answer: {task.answer}")
-                
-                # Determine the prediction based on task type
-                if isinstance(task.answer, dict) and 'minimal_plan' in task.answer:
-                    # For navigation tasks, convert minimal_plan to action string
-                    pred = _plan_to_action_str(task.answer['minimal_plan'])
-                    print(f"Prediction (from minimal_plan): {pred}")
-                else:
-                    pred = task.answer
-                
-                # Test correct answer
-                score, info = EvalTaskType.evaluate_prediction(task_name, pred, task.answer, task.choices)
-                print(f"Correct Answer Evaluation: {score}, details: {info}")
-                assert score == 1.0, f"Failed correct answer test for {task_name}"
-
-                # Test incorrect answer
-                incorrect_answer = "wrong answer"
-                score, info = EvalTaskType.evaluate_prediction(task_name, incorrect_answer, task.answer, task.choices)
-                print(f"Incorrect Answer Evaluation: {score}, details: {info}")
-                assert score < 1.0, f"Failed incorrect answer test for {task_name}"
-
-            except ValueError as e:
-                print(f"Skipping seed {seed} for {task_name}: {e}")
+    # Robustness test suggestions:
+    # 1. Action formats: "JumpTo(obj)", "jumpto obj", "JumpTo( obj )".
+    # 2. Case insensitivity for actions and arguments.
+    # 3. Delimiters: Comma vs semicolon vs newline for action sequences.
+    # 4. Action abbreviations: "Rotate" vs "Rot" (if supported).
 
     task_names = ['fwd_fov', 'bwd_nav_text', 'bwd_nav_vision']
+    # task_names = ['fwd_fov']
+
     for task_name in task_names:
-        test_task(task_name)
+        print(f"\nTesting task: {task_name}")
+        try:
+            room, agent, np_random = create_and_plot_room()
+            task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
+            
+            # Helper to display friendly answer for navigation tasks
+            if isinstance(task.answer, dict) and 'minimal_plan' in task.answer:
+                friendly_pred = _plan_to_action_str(task.answer['minimal_plan'])
+                print(f"Computed Minimal Plan (Ground Truth): {friendly_pred}")
+            
+            manual_test_loop(task_name, task, EvalTaskType.evaluate_prediction)
+
+        except ValueError as e:
+            print(f"Skipping {task_name}: {e}")

@@ -154,6 +154,7 @@ class CardinalBinsEgo(_CardinalBinsBase):
     ]
 
 
+
 class StandardDistanceBins:
     """Standard distance bins (open intervals with eps; includes same-distance bin)."""
     EPS: ClassVar[float] = 1e-6

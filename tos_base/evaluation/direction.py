@@ -1,6 +1,6 @@
 """Direction and POV evaluation tasks."""
 
-from typing import Iterable, Tuple, List
+from typing import Iterable, Tuple, List, Dict
 import json
 from .tasks import BaseEvaluationTask, retry_generate_question
 from ..core.relationship import (
@@ -45,10 +45,9 @@ class DirectionEvaluationTask(BaseEvaluationTask):
 
     QUESTION_TEMPLATE = (
         "You return to your starting position and face north.\n"
-        "From a top-down map, consider these two objects: {obj_name} and {anchor_name}.\n"
-        "Describe where {obj_name} is relative to {anchor_name}.\n"
-        "Answer format: direction-bin, distance-bin\n"
-        "Example: front, near\n"
+        "From a Top-Down map, describe where {obj_name} is relative to {anchor_name}.\n"
+        "Answer format: cardinal direction-bin, distance-bin\n"
+        "Example: north-west, near\n"
     )
 
     @retry_generate_question
@@ -107,11 +106,11 @@ class BaseBackwardPovEvaluationTask(BaseEvaluationTask):
         "Now you jump to an oriented object's position, facing its direction.\n"
         "You observe that {observation}.\n"
         "Which object are you standing at?\n"
-        "Answer format: object name\n"
+        "Answer format: <object>\n"
         "Example: lamp\n"
     )
 
-    def _get_observation(self, target, rel) -> str:
+    def _format_observation(self, obs: dict) -> str:
         raise NotImplementedError
 
     @retry_generate_question
@@ -120,39 +119,64 @@ class BaseBackwardPovEvaluationTask(BaseEvaluationTask):
         if not oriented:
             raise ValueError("Need an oriented object for backward POV task")
         self.np_random.shuffle(oriented)
+        
         anchor = None
-        visibles: List[Tuple[object, PairwiseRelationshipDiscrete]] = []
+        observations = []
+        obj_orientations = {}
+        
+        # Try to find an anchor that has visible objects
         for candidate in oriented:
-            visibles = list(_visible_relations(self.room, candidate, self.np_random))
-            if visibles:
+            obs_list, oris = self._get_ground_truth_observations(candidate)
+            if obs_list:
                 anchor = candidate
+                observations = obs_list
+                obj_orientations = oris
                 break
+                
         if not anchor:
             raise ValueError("No visible objects from available anchors")
-        target, rel = self.np_random.choice(visibles)
+            
+        # Pick one observation to describe
+        target_obs = self.np_random.choice(observations)
         
-        observation = self._get_observation(target, rel)
-        question = self.QUESTION_TEMPLATE.format(observation=observation)
+        observation_text = self._format_observation(target_obs)
+        question = self.QUESTION_TEMPLATE.format(observation=observation_text)
         
         self.eval_data.question = question
-        self.eval_data.answer = anchor.name
+        
+        # Store detailed answer for validation
+        object_positions = {obj.name.lower(): tuple(obj.pos) for obj in self.room.all_objects}
+        
+        all_orientations = {obj.name.lower(): tuple(obj.ori) for obj in self.room.all_objects if obj.has_orientation}
+        
+        self.eval_data.answer = {
+            'answer': anchor.name,
+            'final_observation': [target_obs], # Only enforce the one we described
+            'object_positions': object_positions,
+            'object_orientations': all_orientations
+        }
         self.eval_data.choices = []
-        self.eval_data.id = hash(json.dumps(self.eval_data.answer) + question)
+        # Hash based on question + answer
+        self.eval_data.id = hash(json.dumps(anchor.name) + question)
         return question
 
 
 class BackwardPovTextEvaluationTask(BaseBackwardPovEvaluationTask):
     """Identify which oriented object matches the described egocentric relation (Text)."""
 
-    def _get_observation(self, target, rel) -> str:
-        relation_text = f"{rel.direction.bin_label}, {rel.dist.bin_label}"
-        return f"{target.name} is {relation_text}"
+    def _format_observation(self, obs: dict) -> str:
+        parts = [f"{obs['direction']}, {obs['distance']}"]
+        if obs.get('orientation'):
+             parts.append(f"facing {obs['orientation']}")
+        
+        relation_text = ", ".join(parts)
+        return f"{obs['name']} is {relation_text}"
 
 
 class BackwardPovVisionEvaluationTask(BaseBackwardPovEvaluationTask):
     """Identify which oriented object matches the described egocentric relation (Vision)."""
 
-    def _get_observation(self, target, rel) -> str:
+    def _format_observation(self, obs: dict) -> str:
         return "You observe: <image>"
 
 class DirectionPov(BaseEvaluationTask):
@@ -189,66 +213,25 @@ class DirectionPov(BaseEvaluationTask):
 
 
 if __name__ == "__main__":
-    from ..utils.room_utils import RoomPlotter, RoomGenerator
+    from ..utils.eval_utilities import create_and_plot_room, manual_test_loop
     from .task_types import EvalTaskType
     from tqdm import tqdm
-    import numpy as np
 
-    def test_task(task_name: str):
-        print(f"\nTesting task: {task_name}")
-        for seed in tqdm(range(0, 1)):
-            np_random = np.random.default_rng(seed)
-            room, agent = RoomGenerator.generate_room(
-                room_size=(30, 30),
-                n_objects=10,
-                np_random=np_random,
-                room_name='room',
-                level=2,
-                main=6,
-            )
-            # RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{task_name}.png')
-            try:
-                task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
-                print(f"Question: {task.generate_question()}")
-                print(f"Answer: {task.answer}")
-                
-                # Test correct answer
-                score, info = EvalTaskType.evaluate_prediction(task_name, task.answer, task.answer, task.choices)
-                print(f"Correct Answer Evaluation: {score}, details: {info}")
-                assert score == 1.0, f"Failed correct answer test for {task_name}"
-
-                # Test robustness
-                if isinstance(task.answer, str):
-                    # Case insensitivity
-                    robust_answer = task.answer.upper()
-                    score, info = EvalTaskType.evaluate_prediction(task_name, robust_answer, task.answer, task.choices)
-                    print(f"Robust Answer (Upper) Evaluation: {score}, details: {info}")
-                    assert score == 1.0, f"Failed robust answer (Upper) test for {task_name}"
-                    
-                    # Extra whitespace
-                    robust_answer = task.answer.replace(" ", "  ")
-                    score, info = EvalTaskType.evaluate_prediction(task_name, robust_answer, task.answer, task.choices)
-                    print(f"Robust Answer (Spaces) Evaluation: {score}, details: {info}")
-                    assert score == 1.0, f"Failed robust answer (Spaces) test for {task_name}"
-
-                    # Swapped order (for direction tasks)
-                    if "," in task.answer:
-                        parts = [p.strip() for p in task.answer.split(",")]
-                        if len(parts) == 2:
-                            swapped_answer = f"{parts[1]}, {parts[0]}"
-                            score, info = EvalTaskType.evaluate_prediction(task_name, swapped_answer, task.answer, task.choices)
-                            print(f"Robust Answer (Swapped) Evaluation: {score}, details: {info}")
-                            assert score == 1.0, f"Failed robust answer (Swapped) test for {task_name}"
-
-                # Test incorrect answer
-                incorrect_answer = "wrong answer"
-                score, info = EvalTaskType.evaluate_prediction(task_name, incorrect_answer, task.answer, task.choices)
-                print(f"Incorrect Answer Evaluation: {score}, details: {info}")
-                assert score < 1.0, f"Failed incorrect answer test for {task_name}"
-
-            except ValueError as e:
-                print(f"Skipping seed {seed} for {task_name}: {e}")
+    # Robustness test suggestions:
+    # 1. Case insensitivity: Ensure answers like "North, Near" and "north, near" are equivalent.
+    # 2. Extra whitespace: "north,  near" should be valid.
+    # 3. Component swapping: "near, north" should be valid if order doesn't matter (check specific task logic).
+    # 4. Partial matching: Verify strict vs loose matching requirements.
 
     task_names = ['dir', 'pov', 'bwd_pov_text', 'bwd_pov_vision', 'dir_anchor']
+    # task_names = ['dir'] # Uncomment to run only one
+
+    room, agent, np_random = create_and_plot_room(seed=0)
     for task_name in task_names:
-        test_task(task_name)
+        print(f"\nTesting task: {task_name}")
+        try:
+            task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
+            manual_test_loop(task_name, task, EvalTaskType.evaluate_prediction)
+
+        except ValueError as e:
+            print(f"Skipping {task_name}: {e}")

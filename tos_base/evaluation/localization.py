@@ -1,6 +1,6 @@
 """Localization task: infer your 2D coordinate from a new view."""
 
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 import numpy as np
 import json
 
@@ -12,15 +12,7 @@ from ..actions import ObserveAction
 from ..utils.utils import hash
 
 
-def _visible_relations(room, agent) -> List[Tuple[str, str, str]]:
-    res = ObserveAction().execute(room, agent.copy(), free_position=True)
-    triples = res.data.get('relation_triples', [])
-    out: List[Tuple[str, str, str]] = []
-    for tr in triples:
-        rel = getattr(tr, "relation", None)
-        if isinstance(rel, PairwiseRelationshipDiscrete):
-            out.append((tr.subject, rel.direction.bin_label, rel.dist.bin_label))
-    return out
+
 def _ori_to_name(ori: Tuple[int, int]) -> str:
     mapping = {(0, 1): "north", (1, 0): "east", (0, -1): "south", (-1, 0): "west"}
     return mapping.get(tuple(int(x) for x in ori), "north")
@@ -121,7 +113,9 @@ class BaseLocation2ActionEvaluationTask(BaseLocEvaluationTask):
         
         origin_pos, origin_name = self._get_origin()
         
-        observations = self._get_observations()
+        observations, _ = self._get_ground_truth_observations(self.agent) # Use shared method
+        
+        obs_text = self._format_observations_custom(observations)
 
         correct_coord = (
             int(self.agent.pos[0]) - int(origin_pos[0]),
@@ -131,26 +125,56 @@ class BaseLocation2ActionEvaluationTask(BaseLocEvaluationTask):
 
         self.eval_data.action = self.ACTION_TEMPLATE.format(
             orientation=correct_orientation,
-            observations=observations
+            observations=obs_text
         )
         
         self.eval_data.question = self.eval_data.action + self.QUESTION_TEMPLATE.format(origin_name=origin_name)
-        self.eval_data.answer = {'coord': correct_coord}
+        
+        # Construct detailed answer
+        init_agent = self.agent.copy() # Current pose is valid pose
+        object_positions = {obj.name.lower(): tuple(map(int, obj.pos)) for obj in self.room.all_objects}
+        all_orientations = {obj.name.lower(): tuple(obj.ori) for obj in self.room.all_objects if obj.has_orientation}
+        
+        self.eval_data.answer = {
+            'coord': correct_coord,
+            'final_pos': tuple(map(int, init_agent.pos)), # For backward nav compat
+            'final_ori': tuple(map(int, init_agent.ori)),
+            'object_positions': object_positions,
+            'object_orientations': all_orientations,
+            'final_observation': observations
+        }
+        
         self.eval_data.choices = []
-        self.eval_data.id = hash(json.dumps(self.eval_data.answer) + self.eval_data.question)
+        self.eval_data.id = hash(json.dumps(self.eval_data.answer, sort_keys=True, default=str) + self.eval_data.question)
         return self.eval_data.question
+
+    def _format_observations_custom(self, observations: List[Dict[str, str]]) -> str:
+        raise NotImplementedError
 
 
 class Location2ActionTextEvaluationTask(BaseLocation2ActionEvaluationTask):
     """Localize your own coordinate (x, y) and orientation using text observations."""
     def _get_observations(self) -> str:
-        return self._take_observations()
+        # This is deprecated by _format_observations_custom in generate_question
+        return "" 
+        
+    def _format_observations_custom(self, observations: List[Dict[str, str]]) -> str:
+        obs_parts = []
+        for v in observations:
+            txt = f"{v['name']} is at {v['direction']}, {v['distance']}"
+            if v.get('orientation'):
+                txt += f", facing {v['orientation']}"
+            obs_parts.append(txt)
+        return "; ".join(obs_parts)
 
 
 class Location2ActionVisionEvaluationTask(BaseLocation2ActionEvaluationTask):
     """Localize your own coordinate (x, y) and orientation using vision."""
     def _get_observations(self) -> str:
-        return "You observe: <image>"
+        return ""
+        
+    def _format_observations_custom(self, observations: List[Dict[str, str]]) -> str:
+         return "You observe: <image>"
 
 class Action2LocationEvaluationTask(BaseLocEvaluationTask):
     ACTION_TEMPLATE = (
@@ -175,11 +199,15 @@ class Action2LocationEvaluationTask(BaseLocEvaluationTask):
         dir_name = _ori_to_name(tuple(self.agent.ori))
 
         # compute correct observation text (pairwise-only, compact)
-        rels = _visible_relations(self.room, self.agent)
+        # compute correct observation text (pairwise-only, compact)
+        rels, _ = self._get_ground_truth_observations(self.agent) 
         self.np_random.shuffle(rels)
         if not rels:
             raise ValueError("No visible relations found")
-        target_name, direction, distance = rels[0]
+        first = rels[0]
+        target_name = first['name']
+        direction = first['direction']
+        distance = first['distance']
 
         self.eval_data.action = self.ACTION_TEMPLATE.format(
             origin_name=origin_name,
@@ -196,66 +224,26 @@ class Action2LocationEvaluationTask(BaseLocEvaluationTask):
 
 
 if __name__ == "__main__":
-    from ..utils.room_utils import RoomPlotter, RoomGenerator
+    from ..utils.eval_utilities import create_and_plot_room, manual_test_loop
     from .task_types import EvalTaskType
-    from tqdm import tqdm
-    import numpy as np
 
-    def test_task(task_name: str):
-        print(f"\nTesting task: {task_name}")
-        for seed in tqdm(range(0, 1)):
-            np_random = np.random.default_rng(seed)
-            room, agent = RoomGenerator.generate_room(
-                room_size=(30, 30),
-                n_objects=10,
-                np_random=np_random,
-                room_name='room',
-                level=2,
-                main=6,
-            )
-            try:
-                task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
-                print(f"Question: {task.generate_question()}")
-                print(f"Answer: {task.answer}")
-                
-                # Test correct answer
-                score, info = EvalTaskType.evaluate_prediction(task_name, task.answer, task.answer, task.choices)
-                print(f"Correct Answer Evaluation: {score}, details: {info}")
-                assert score == 1.0, f"Failed correct answer test for {task_name}"
-
-                # Test robustness
-                if isinstance(task.answer, str):
-                    # Case insensitivity
-                    robust_answer = task.answer.upper()
-                    score, info = EvalTaskType.evaluate_prediction(task_name, robust_answer, task.answer, task.choices)
-                    print(f"Robust Answer (Upper) Evaluation: {score}, details: {info}")
-                    assert score == 1.0, f"Failed robust answer (Upper) test for {task_name}"
-                    
-                    # Extra whitespace
-                    robust_answer = task.answer.replace(" ", "  ")
-                    score, info = EvalTaskType.evaluate_prediction(task_name, robust_answer, task.answer, task.choices)
-                    print(f"Robust Answer (Spaces) Evaluation: {score}, details: {info}")
-                    assert score == 1.0, f"Failed robust answer (Spaces) test for {task_name}"
-
-                    # Swapped order (for direction tasks)
-                    if "," in task.answer:
-                        parts = [p.strip() for p in task.answer.split(",")]
-                        if len(parts) == 2:
-                            swapped_answer = f"{parts[1]}, {parts[0]}"
-                            score, info = EvalTaskType.evaluate_prediction(task_name, swapped_answer, task.answer, task.choices)
-                            print(f"Robust Answer (Swapped) Evaluation: {score}, details: {info}")
-                            assert score == 1.0, f"Failed robust answer (Swapped) test for {task_name}"
-
-                # Test incorrect answer
-                incorrect_answer = "wrong answer"
-                score, info = EvalTaskType.evaluate_prediction(task_name, incorrect_answer, task.answer, task.choices)
-                print(f"Incorrect Answer Evaluation: {score}, details: {info}")
-                assert score < 1.0, f"Failed incorrect answer test for {task_name}"
-
-            except ValueError as e:
-                print(f"Skipping seed {seed} for {task_name}: {e}")
+    # Robustness test suggestions:
+    # 1. Coordinate format: "(x, y)", "x,y", "x y".
+    # 2. Coordinate list spacing: "(1,2)" vs "(1, 2)".
+    # 3. List delimiters: semicolons vs newlines.
+    # 4. Mixed Types: Handling when answer expects dict vs string input (auto-parsing).
 
     task_names = ['fwd_loc', 'bwd_loc_text', 'bwd_loc_vision']
+    # task_names = ['fwd_loc']
+
     for task_name in task_names:
-        test_task(task_name)
+        print(f"\nTesting task: {task_name}")
+        try:
+            room, agent, np_random = create_and_plot_room()
+            task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
+            
+            manual_test_loop(task_name, task, EvalTaskType.evaluate_prediction)
+
+        except ValueError as e:
+            print(f"Skipping {task_name}: {e}")
 

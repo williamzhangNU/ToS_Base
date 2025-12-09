@@ -17,7 +17,22 @@ from ..core.relationship import (
     PairwiseRelationshipDiscrete,
     StandardDistanceBins,
 )
+from ..core.relationship import (
+    PairwiseRelationshipDiscrete,
+    StandardDistanceBins,
+    EgoFrontBins,
+    DegreeRelBinned,
+    DegreeRel,
+)
 from ..utils.utils import hash
+
+# Helper for orientation
+def _agent_relative_orientation(agent_ori: np.ndarray, target_ori: np.ndarray) -> str:
+    from ..core.relationship import OrientationRel
+    return OrientationRel.to_string(
+        OrientationRel.get_relative_orientation(tuple(target_ori), tuple(agent_ori)),
+        perspective='ego'
+    )
 
 @dataclass
 class EvaluationData:
@@ -163,6 +178,44 @@ class BaseEvaluationTask(ABC):
             action_results.append(RotateAction(90).execute(room, agent))
             action_results.append(ObserveAction().execute(room, agent, neglect_objects=neglect_objects or [], free_position=True))
         return action_results_to_text(action_results)
+
+    def _get_ground_truth_observations(self, agent: Agent) -> Tuple[List[Dict[str, str]], Dict[str, Tuple[int, int]]]:
+        """
+        Get ground truth observations and object orientations from a specific agent state.
+        Returns:
+            - List of observation dicts [{'name', 'direction', 'distance', 'orientation'}]
+            - Dict of object orientations {name: (x, y)}
+        """
+        room_copy = self.room.copy()
+        agent_copy = agent.copy()
+        
+        obs = ObserveAction().execute(room_copy, agent_copy, free_position=True)
+        triples = obs.data.get('relation_triples', [])
+        
+        observations = []
+        obj_orientations = {}
+        
+        for tr in triples:
+            rel = getattr(tr, "relation", None)
+            if isinstance(rel, PairwiseRelationshipDiscrete):
+                obj_name = tr.subject
+                target_obj = self.room.get_object_by_name(obj_name)
+                
+                # Check orientation
+                ori_label = None
+                if target_obj and target_obj.has_orientation:
+                    # Compute relative orientation
+                    ori_label = _agent_relative_orientation(agent.ori, target_obj.ori)
+                    obj_orientations[obj_name] = tuple(int(x) for x in target_obj.ori)
+
+                observations.append({
+                    'name': obj_name,
+                    'direction': rel.direction.bin_label,
+                    'distance': rel.dist.bin_label,
+                    'orientation': ori_label
+                })
+                
+        return observations, obj_orientations
 
 
 

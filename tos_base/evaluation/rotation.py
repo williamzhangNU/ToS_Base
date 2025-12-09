@@ -126,63 +126,25 @@ class RotDualEvaluationTask(RotEvaluationTask):
 
 
 if __name__ == "__main__":
-    from ..utils.room_utils import RoomPlotter, RoomGenerator
+    from ..utils.eval_utilities import create_and_plot_room, manual_test_loop
     from .task_types import EvalTaskType
-    from tqdm import tqdm
-    import numpy as np
 
-    def test_task(task_name: str):
-        print(f"\nTesting task: {task_name}")
-        for seed in tqdm(range(0, 1)):
-            np_random = np.random.default_rng(seed)
-            room, agent = RoomGenerator.generate_room(
-                room_size=(30, 30),
-                n_objects=10,
-                np_random=np_random,
-                room_name='room',
-                level=2,
-                main=6,
-            )
-            try:
-                task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
-                print(f"Question: {task.generate_question()}")
-                print(f"Answer: {task.answer}")
-                
-                # Test correct answer
-                score, info = EvalTaskType.evaluate_prediction(task_name, task.answer, task.answer, task.choices)
-                print(f"Correct Answer Evaluation: {score}, details: {info}")
-                assert score == 1.0, f"Failed correct answer test for {task_name}"
-
-                # Test robustness
-                if isinstance(task.answer, str):
-                    # Case insensitivity
-                    robust_answer = task.answer.upper()
-                    score, info = EvalTaskType.evaluate_prediction(task_name, robust_answer, task.answer, task.choices)
-                    print(f"Robust Answer (Upper) Evaluation: {score}, details: {info}")
-                    assert score == 1.0, f"Failed robust answer (Upper) test for {task_name}"
-                    
-                    # Extra whitespace
-                    robust_answer = task.answer.replace(" ", "  ")
-                    score, info = EvalTaskType.evaluate_prediction(task_name, robust_answer, task.answer, task.choices)
-                    print(f"Robust Answer (Spaces) Evaluation: {score}, details: {info}")
-                    assert score == 1.0, f"Failed robust answer (Spaces) test for {task_name}"
-
-                elif isinstance(task.answer, list):
-                    # Test list answer with case insensitivity
-                    robust_answer = [a.upper() if isinstance(a, str) else a for a in task.answer]
-                    score, info = EvalTaskType.evaluate_prediction(task_name, robust_answer, task.answer, task.choices)
-                    print(f"Robust Answer (Upper) Evaluation: {score}, details: {info}")
-                    assert score == 1.0, f"Failed robust answer (Upper) test for {task_name}"
-
-                # Test incorrect answer
-                incorrect_answer = "wrong answer"
-                score, info = EvalTaskType.evaluate_prediction(task_name, incorrect_answer, task.answer, task.choices)
-                print(f"Incorrect Answer Evaluation: {score}, details: {info}")
-                assert score < 1.0, f"Failed incorrect answer test for {task_name}"
-
-            except ValueError as e:
-                print(f"Skipping seed {seed} for {task_name}: {e}")
+    # Robustness test suggestions:
+    # 1. Sequence delimiters: Commas, semicolons, or newlines.
+    # 2. Sequence order: Verify strict ordering vs set matching (rotation tasks usually require order).
+    # 3. Synonym matching: "CW" for "clockwise", "CCW" for "counterclockwise".
+    # 4. Starting point shift: (A, B, C) might be equivalent to (B, C, A) depending on task definition (usually not for this task).
 
     task_names = ['rot', 'rot_dual']
+    # task_names = ['rot']
+
     for task_name in task_names:
-        test_task(task_name)
+        print(f"\nTesting task: {task_name}")
+        try:
+            room, agent, np_random = create_and_plot_room(task_name)
+            task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
+            
+            manual_test_loop(task_name, task, EvalTaskType.evaluate_prediction)
+
+        except ValueError as e:
+            print(f"Skipping {task_name}: {e}")

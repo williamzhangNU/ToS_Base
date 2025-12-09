@@ -6,7 +6,7 @@ import math
 import re
 import numpy as np
 
-from ..core.relationship import PairwiseRelationshipDiscrete
+from ..core.relationship import PairwiseRelationshipDiscrete, OrientationRel
 
 if TYPE_CHECKING:
     from .cogmap.metrics import compute_pos_sim
@@ -22,8 +22,9 @@ _DEG_TO_ORI = {deg: ori for ori, deg in _ORI_TO_DEG.items()}
 
 # Label aliases for direction and distance
 _LABEL_ALIASES: Dict[str, Sequence[str]] = {
-    "front-left": ("front-left", "left-front", "front left", "left front", "frontleft", "leftfront"),
-    "front-right": ("front-right", "right-front", "front right", "right front", "frontright", "rightfront"),
+    # Egocentric
+    "front-left": ("front-left", "left-front", "front left", "left front", "frontleft", "leftfront", "fl"),
+    "front-right": ("front-right", "right-front", "front right", "right front", "frontright", "rightfront", "fr"),
     "front-slight-left": ("front-slight-left", "front slightly left", "slightly front left", "frontslightleft", "slight front left"),
     "front-slight-right": ("front-slight-right", "front slightly right", "slightly front right", "frontslightright", "slight front right"),
     "mid distance": ("mid distance", "mid-distance", "mid", "medium", "medium distance"),
@@ -31,6 +32,16 @@ _LABEL_ALIASES: Dict[str, Sequence[str]] = {
     "slightly far": ("slightly far", "slightly-far"),
     "very far": ("very far", "very-far"),
     "extremely far": ("extremely far", "extremely-far", "extreme", "extreme far"),
+    
+    # Cardinal
+    "north": ("north", "n"),
+    "south": ("south", "s"),
+    "east": ("east", "e"),
+    "west": ("west", "w"),
+    "north-east": ("north-east", "north east", "northeast", "ne"),
+    "north-west": ("north-west", "north west", "northwest", "nw"),
+    "south-east": ("south-east", "south east", "southeast", "se"),
+    "south-west": ("south-west", "south west", "southwest", "sw"),
 }
 
 
@@ -43,16 +54,16 @@ def _normalize_whitespace(text: str) -> str:
     """Normalize whitespace and convert to lowercase."""
     return re.sub(r"\s+", " ", text.strip()).lower()
 
-def _casefold(value: Any) -> str:
-    """Convert any value to lowercase string."""
-    return str(value).strip().lower()
-
 def _require_text(value: Any) -> Optional[str]:
     """Return stripped text if non-empty, else None."""
     if isinstance(value, str):
         text = value.strip()
         return text if text else None
     return None
+
+def _casefold(text: Any) -> str:
+    """Casefold string."""
+    return str(text).casefold()
 
 
 # ========== Label Matching System ==========
@@ -100,7 +111,7 @@ def _labels_match(pred_label: Any, target_label: Any) -> bool:
 
 
 # ========== Parsing Utilities ==========
-def _extract_sequence(
+def extract_sequence(
     raw: Any,
     value_type: type = str,
     clean_pattern: str | None = None,
@@ -155,13 +166,13 @@ def extract_elements(
     expected_type: type = str,
     clean_pattern: str | None = None,
 ) -> Optional[List[Any]]:
-    """Public API for sequence extraction."""
-    return _extract_sequence(raw, expected_type, clean_pattern)
+    """Public API for sequence extraction (alias for extract_sequence)."""
+    return extract_sequence(raw, expected_type, clean_pattern)
 
 def _parse_direction_distance(raw: str) -> Optional[Tuple[str, str]]:
     """Parse direction and distance from text."""
     # Try as comma-separated list
-    items = _extract_sequence(raw, str)
+    items = extract_sequence(raw, str)
     if items and len(items) >= 2:
         return items[0], items[1]
     
@@ -380,7 +391,7 @@ def _simulate_navigation(
 # ========== Task-Specific Evaluators ==========
 def _eval_token_sequence(pred: str, answer: Sequence[str]) -> Tuple[bool, Dict[str, Any]]:
     """Evaluate exact token sequence match."""
-    tokens = _extract_sequence(pred, str)
+    tokens = extract_sequence(pred, str)
     if not tokens or len(tokens) != len(answer):
         return False, {}
     
@@ -464,6 +475,62 @@ def _eval_forward_nav(pred: str, answer: str) -> Tuple[bool, Dict[str, Any]]:
     """Evaluate forward navigation/localization task."""
     return _eval_direction_text(pred, answer)
 
+
+def check_fov_consistency(agent_pos: Tuple[float, float], agent_ori: Tuple[int, int], answer: Dict[str, Any]) -> bool:
+    """Check if the agent's view matches the ground truth observation in answer."""
+    final_visible = answer.get('final_observation', [])
+    if not final_visible:
+        return True # specific logic: if no observation required, assume match? Or fail? 
+                    # Existing logic returned {'error': 'missing_ground_truth'} which is false-y.
+                    # But here helper returns bool.
+                    # If GT says nothing visible, and we see something? 
+                    # The prompt implies "You observe {observation}". 
+                    # If answer['final_observation'] stems from prompt generation, it should be valid.
+                    # If empty, maybe nothing visible.
+        # Let's assume safely False if key missing, but True if empty list (saw nothing).
+        pass
+
+    obs_visibles = {}
+    for item in final_visible:
+        name = str(item.get('name', '')).strip().lower()
+        direction = _canonicalize_label(item.get('direction', ''))
+        distance = _canonicalize_label(item.get('distance', ''))
+        orientation = _canonicalize_label(item.get('orientation')) if item.get('orientation') else None
+        
+        if name and direction and distance:
+            obs_visibles[name] = (direction, distance, orientation)
+            
+    object_positions = {str(k).lower(): _coerce_point(v) for k, v in answer.get('object_positions', {}).items()}
+    object_orientations = {str(k).lower(): _normalize_orientation(v) for k, v in answer.get('object_orientations', {}).items()}
+
+    for obj_name, (dir_gt, dist_gt, ori_gt) in obs_visibles.items():
+        target_pos = object_positions.get(obj_name)
+        
+        # Check if object exists and is visible
+        if target_pos is None or not _is_visible_from(agent_pos, agent_ori, target_pos):
+            return False
+        
+        # Check relations (Direction, Distance)
+        rel = PairwiseRelationshipDiscrete.relationship(target_pos, agent_pos, anchor_ori=agent_ori)
+        if _canonicalize_label(rel.direction.bin_label) != dir_gt or \
+           _canonicalize_label(rel.dist.bin_label) != dist_gt:
+            return False
+            
+        # Check relative orientation
+        if ori_gt:
+            # Skip if target object orientation is not known (e.g. spheres/unoriented in some cases)
+            if obj_name in object_orientations:
+                target_ori = object_orientations[obj_name]
+                
+                # Calculate relative orientation using OrientationRel
+                rel_ori = OrientationRel.get_relative_orientation(target_ori, agent_ori)
+                rel_label = OrientationRel.to_string(rel_ori, perspective='ego')
+                
+                if _canonicalize_label(rel_label) != ori_gt:
+                    return False
+    return True
+
+
 def _eval_backward_nav(pred: str, answer: Union[str, Dict], weight_by_steps: bool = False) -> Tuple[bool, Dict[str, Any]]:
     """Evaluate backward navigation task."""
     if not isinstance(answer, dict):
@@ -483,37 +550,9 @@ def _eval_backward_nav(pred: str, answer: Union[str, Dict], weight_by_steps: boo
     if error:
         return False, {'error': error}
     
-    # Get expected observations
-    final_visible = answer.get('final_observation', [])
-    if not final_visible:
-        return False, {'error': 'missing_ground_truth'}
-    
-    visibles: Dict[str, Tuple[str, str]] = {}
-    for item in final_visible:
-        name = str(item.get('name', '')).strip().lower()
-        direction = _canonicalize_label(item.get('direction', ''))
-        distance = _canonicalize_label(item.get('distance', ''))
-        if name and direction and distance:
-            visibles[name] = (direction, distance)
-    
-    def _relations_match(agent_pos: Tuple[float, float], agent_ori: Tuple[int, int]) -> bool:
-        """Check if all visible objects have matching relations."""
-        for obj_name, (dir_gt, dist_gt) in visibles.items():
-            target = object_positions.get(obj_name)
-            if target is None or not _is_visible_from(agent_pos, agent_ori, target):
-                return False
-            
-            rel = PairwiseRelationshipDiscrete.relationship(target, agent_pos, anchor_ori=agent_ori)
-            dir_label = _canonicalize_label(rel.direction.bin_label)
-            dist_label = _canonicalize_label(rel.dist.bin_label)
-            
-            if dir_label != dir_gt or dist_label != dist_gt:
-                return False
-        return True
-    
     # Check if predicted final state matches observations
     best_info = {'pos_match': False, 'ori_match': False, 'visible_match': False}
-    if final_pos and final_ori and _relations_match(final_pos, final_ori):
+    if final_pos and final_ori and check_fov_consistency(final_pos, final_ori, answer):
         best_info.update({
             'pos_match': final_pos == tuple(answer['final_pos']),
             'ori_match': final_ori == tuple(answer['final_ori']),
@@ -525,11 +564,11 @@ def _eval_backward_nav(pred: str, answer: Union[str, Dict], weight_by_steps: boo
             minimal_steps = len(minimal_plan) if isinstance(minimal_plan, list) else minimal_plan
             score = min(minimal_steps / len(pred_actions), 1.0)
         return score, best_info
-    
+
     # Also check ground truth position as fallback
     expected_pos = tuple(answer['final_pos'])
     expected_ori = tuple(answer['final_ori'])
-    if _relations_match(expected_pos, expected_ori):
+    if check_fov_consistency(expected_pos, expected_ori, answer):
         best_info.update({'pos_match': True, 'ori_match': True})
     
     return False, best_info
@@ -539,8 +578,6 @@ def _eval_backward_nav_rev(pred: str, answer: Union[str, Dict]) -> Tuple[bool, D
 
     This task requires navigating back to the starting position from a termination location.
     The action sequence must end with JumpTo(initial_pos).
-    After removing the final JumpTo(initial_pos), the remaining actions should position
-    the agent such that initial_pos is visible.
     """
     if not isinstance(answer, dict):
         return False, {}
@@ -586,9 +623,11 @@ def _eval_backward_nav_rev(pred: str, answer: Union[str, Dict]) -> Tuple[bool, D
 
     minimal_plan = answer.get('minimal_plan', [])
     minimal_steps = len(minimal_plan) if isinstance(minimal_plan, list) else minimal_plan
-    return is_visible * (minimal_steps / len(pred_actions)), best_info
+    eval_score = 1.0 if is_visible else 0.0
+    return eval_score * (minimal_steps / len(pred_actions)), best_info
 
-def _calculate_coord_similarity(pred_coord: tuple[float, float], gt_coord: tuple[float, float]) -> float:
+
+def _coord_similarity(pred_coord: tuple[float, float], gt_coord: tuple[float, float]) -> float:
     pred = np.array(pred_coord, dtype=float)
     gt = np.array(gt_coord, dtype=float)
 
@@ -601,7 +640,7 @@ def _calculate_coord_similarity(pred_coord: tuple[float, float], gt_coord: tuple
 
     return similarity_score
 
-def _score_similarity_mra_style(similarity: float) -> float:
+def _score_similarity_mra(similarity: float) -> float:
     similarity = max(0, min(1, similarity))
     
     quality_thresholds = [
@@ -617,6 +656,65 @@ def _score_similarity_mra_style(similarity: float) -> float:
     final_score = passed_levels / len(quality_thresholds)
     
     return final_score
+
+
+def _eval_backward_pov(pred: str, answer: Union[str, Dict]) -> Tuple[float, Dict[str, Any]]:
+    """Evaluate backward POV task (Text).
+    
+    Checks if predicted object is correct AND if the view from that object matches the description.
+    """
+    # If answer is just a string (old code compat), fallback
+    if isinstance(answer, str):
+        return _eval_exact_text(pred, answer)
+    
+    if not isinstance(answer, dict):
+        return False, {}
+    
+    # 1. Check if predicted object name is correct
+    gt_name = str(answer.get('answer', '')).strip()
+    pred_name = str(pred).strip()
+    
+    name_match = _labels_match(pred_name, gt_name)
+    if not name_match:
+        return 0.0, {'name_match': False}
+    
+    # 2. Check observation consistency (Superset check)
+    # We place agent at the predicted object's position and orientation
+    # and verify it sees what is described in 'final_observation'.
+    
+    # Extract object states from answer dict
+    object_positions = {str(k).lower(): _coerce_point(v) for k, v in answer.get('object_positions', {}).items()}
+    # We need orientations
+    object_orientations = {str(k).lower(): _normalize_orientation(v) for k, v in answer.get('object_orientations', {}).items()}
+    
+    pred_key = pred_name.lower()
+    if pred_key not in object_positions:
+        # Predicted object not found in room
+        return 0.0, {'name_match': True, 'error': 'object_not_found'}
+    
+    pos = object_positions[pred_key]
+    ori = object_orientations.get(pred_key, (0, 1)) # Default if missing, but should be there
+    
+    # Reuse check_fov_consistency
+    valid_view = check_fov_consistency(pos, ori, answer)
+    return (1.0 if valid_view else 0.0), {'name_match': True, 'view_match': valid_view}
+
+
+def _eval_backward_pov_vision(pred: str, answer: Union[str, Dict]) -> Tuple[float, Dict[str, Any]]:
+    """Evaluate backward POV task (Vision).
+    
+    Only checks if the predicted answer string matches the ground truth answer string.
+    Ignores FOV check.
+    """
+    gt_name = ""
+    if isinstance(answer, dict):
+        gt_name = str(answer.get('answer', ''))
+    else:
+        gt_name = str(answer)
+        
+    return _eval_exact_text(pred, gt_name)
+
+
 
 def _eval_backward_loc(pred: str, answer: Any, use_mra: bool = False) -> Tuple[float, Dict[str, Any]]:
     """Evaluate backward localization task."""
@@ -642,15 +740,32 @@ def _eval_backward_loc(pred: str, answer: Any, use_mra: bool = False) -> Tuple[f
     except ValueError:
         return False, {}
     
-    similarity = _calculate_coord_similarity(coord_pred, coord_ans)
+    similarity = _coord_similarity(coord_pred, coord_ans)
     
     if use_mra:
-        score = _score_similarity_mra_style(similarity)
+        score = _score_similarity_mra(similarity)
     else:
         score = similarity
         
-    return score, {
+    
+    # Check FOV (requirement: check both coordinate similarity and FOV match)
+    # We need orientation to check FOV. Use ground truth final orientation.
+    gt_ori = _normalize_orientation(answer.get('final_ori', (0, 1)))
+    fov_match = check_fov_consistency(coord_pred, gt_ori, answer)
+    
+    # Combined score: If FOV invalid, maybe penalize or fail?
+    # Requirement: "checks both". If one fails, task fails?
+    # If FOV checking is enabled/possible.
+    # Note: If distance is large (low similarity), FOV will likely fail anyway unless empty observation.
+    
+    final_score = score
+    if not fov_match:
+        final_score = 0.0 # Strict check
+        
+    return final_score, {
         'similarity': similarity,
+        'fov_match': fov_match,
+        'raw_score': score
     }
 
 
@@ -797,18 +912,61 @@ def obj_presence_eval_fn(pred: Any, answer: List[str]) -> Tuple[bool, Dict[str, 
     precision = correct_count / len(pred_set) if pred_set else 0.0
     recall = correct_count / total_gt if total_gt > 0 else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    return f1, {'precision': precision, 'recall': recall, 'f1': f1}
+
+
+# ========== Common Evaluation Utilities ==========
+def create_and_plot_room(seed: int = 0):
+    """Generate a room, plot it, and return room, agent, and rng."""
+    from ..utils.room_utils import RoomPlotter, RoomGenerator
     
-    info = {
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "correct_count": correct_count,
-        "total_gt": total_gt,
-        "predicted_objects": sorted(pred_set),
-        "ground_truth_objects": sorted(gt_objects),
-    }
+    np_random = np.random.default_rng(seed)
+    room, agent = RoomGenerator.generate_room(
+        room_size=(30, 30),
+        n_objects=10,
+        np_random=np_random,
+        room_name='room',
+        level=2,
+        main=6,
+    )
+    RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
+    return room, agent, np_random
+
+
+def manual_test_loop(task_name: str, task, eval_func: Callable[[str, Any, Any, Any], Tuple[float, Any]]):
+    """Interactive loop for manual testing of evaluation tasks."""
+    print(f"Question: {task.generate_question()}")
+    print(f"Ground Truth Answer: {task.answer}")
     
-    return correct_count == total_gt, info
+    # Run the automatic correct answer check first as requested
+    score, info = eval_func(task_name, task.answer, task.answer, task.choices)
+    print(f"Correct Answer Evaluation: {score}, details: {info}")
+    
+    print("\n--- Manual Testing Mode ---")
+    print(f"Enter your answer for '{task_name}' (or 'q' to quit).")
+    print("You can try robust variations like different casing, spacing, etc.")
+    
+    while True:
+        try:
+            user_input = input("Answer > ").strip()
+            if user_input.lower() == 'q':
+                break
+                
+            # If user uses the "answer=xxx; evaluate(answer)" style or just inputs the answer
+            # We treat the input as the answer candidates
+            # We can also support literally `answer=...` syntax if needed, but direct input is simpler.
+            # If the user typed "answer=foo", we strip "answer="
+            if user_input.lower().startswith("answer="):
+                user_input = user_input[7:].strip()
+            
+            score, info = eval_func(task_name, user_input, task.answer, task.choices)
+            print(f"Evaluation: Score={score}, Details={info}")
+            
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            print(f"Error during evaluation: {e}")
+    
 
 def multi_choice_eval_fn(pred: str, answer: Union[List[str], str]) -> bool:
     """Evaluate multiple choice with multiple acceptable answers."""
@@ -846,8 +1004,8 @@ TASK_EVALUATORS: Dict[str, TaskEvaluator] = {
     'RotDualEvaluationTask': _wrap_eval(_eval_rotation_direction),
     'DirectionEvaluationTask': _wrap_eval(_eval_direction_text),
     'PovEvaluationTask': _wrap_eval(_eval_direction_text),
-    'BackwardPovTextEvaluationTask': _wrap_eval(_eval_exact_text),
-    'BackwardPovVisionEvaluationTask': _wrap_eval(_eval_exact_text),
+    'BackwardPovTextEvaluationTask': _wrap_eval(_eval_backward_pov, pred_cast=str, answer_cast=None),
+    'BackwardPovVisionEvaluationTask': _wrap_eval(_eval_backward_pov_vision, pred_cast=str, answer_cast=None),
     'DirectionPov': _wrap_eval(_eval_direction_text),
     'AlloMappingEvaluationTask': lambda pred, answer, _choices: e2a_eval_fn(pred, answer),
     'Action2ViewEvaluationTask': _wrap_eval(_eval_forward_nav),
