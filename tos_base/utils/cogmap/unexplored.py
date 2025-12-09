@@ -128,37 +128,45 @@ def evaluate_unexplored_predictions(
     )
 
 
-def parse_unexplored_response(json_data: Dict[str, Any]) -> Dict[str, List[Tuple[int, int]]]:
+def parse_unexplored_response(json_data: Dict[str, Any]) -> Dict[str, Optional[List[Tuple[int, int]]]]:
     """Parse unexplored points from LLM response JSON (multi-room format).
     
     Expected format:
     {
         "1": [[x1, y1], [x2, y2], ...],
-        "2": [[x1, y1], [x2, y2]]
+        "2": "unknown"
     }
     
     Args:
         json_data: Parsed JSON from LLM response
         
     Returns:
-        Dict mapping room_id (str) to list of (x, y) coordinate tuples
+        Dict mapping room_id (str) to:
+        - list of (x, y) coordinate tuples if room was observed
+        - None if room value is "unknown" (not visited)
     """
-    result: Dict[str, List[Tuple[int, int]]] = {}
+    result: Dict[str, Optional[List[Tuple[int, int]]]] = {}
     
     if not isinstance(json_data, dict):
         return result
     
     # Multi-room format: keys are room IDs
-    for room_id_key, raw_points in json_data.items():
+    for room_id_key, raw_value in json_data.items():
         # Skip non-room-id keys (room IDs should be numeric strings)
         try:
             int(room_id_key)
         except ValueError:
             continue
         
+        # Handle "unknown" value
+        if isinstance(raw_value, str) and raw_value.lower() == "unknown":
+            result[room_id_key] = None
+            continue
+        
+        # Parse coordinate list
         points: List[Tuple[int, int]] = []
-        if isinstance(raw_points, list):
-            for pt in raw_points:
+        if isinstance(raw_value, list):
+            for pt in raw_value:
                 if isinstance(pt, (list, tuple)) and len(pt) >= 2:
                     try:
                         x, y = int(pt[0]), int(pt[1])

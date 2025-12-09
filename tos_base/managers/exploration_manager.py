@@ -68,6 +68,7 @@ class ExplorationManager:
         self.history: List['ActionResult'] = []
         # Per-room unexplored positions (updated incrementally)
         self._unexplored_by_room: Dict[str, Set[Tuple[int, int]]] = {}
+        self._visited_rooms: Set[str] = set()  # Rooms that have been observed at least once
         self._init_unexplored()
         
         # Coverage tracking (exclude gates)
@@ -502,6 +503,9 @@ class ExplorationManager:
         if not unexplored:
             return
         
+        # Mark this room as visited
+        self._visited_rooms.add(room_id)
+        
         # Normalize orientation
         ori_len = np.sqrt(ox**2 + oy**2)
         if ori_len == 0:
@@ -527,7 +531,10 @@ class ExplorationManager:
             unexplored.discard(pos)
     
     def _compute_unexplored_positions_by_room(self) -> Dict[str, List[List[int]]]:
-        """Get unexplored positions for each room.
+        """Get unexplored positions for each visited room.
+        
+        Only returns rooms that have been observed at least once.
+        Rooms that have never been visited are not included.
         
         Returns:
             Dict mapping room_id (str) to list of [x, y] unexplored positions
@@ -535,6 +542,7 @@ class ExplorationManager:
         return {
             rid: [[x, y] for x, y in sorted(positions)]
             for rid, positions in self._unexplored_by_room.items()
+            if rid in self._visited_rooms
         }
 
     def _full_grid_cell_count(self) -> int:

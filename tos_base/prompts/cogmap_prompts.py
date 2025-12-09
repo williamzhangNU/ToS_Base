@@ -132,34 +132,31 @@ def get_cogmap_prompt(map_type: str, enable_think: bool = True) -> str:
 UNEXPLORED_INSTRUCTION = """\
 ## Unexplored Areas (JSON)
 
-Based on your exploration history in the rooms you are currently observing, identify up to 3 grid coordinates each room that represent areas you have NOT yet observed.
+Based on your exploration history, identify up to 3 grid coordinates for EACH room that represent areas you have NOT yet observed.
 Each coordinate should represent a distinct connected unexplored region in that room.
 
 ### Rules
-- Each coordinate is relative to the agent at time of writing.
-- Output at most 3 coordinates as [x, y] integers
+- Coordinates are in GLOBAL coordinates (relative to your initial position and orientation)
+- Output at most 3 coordinates as [x, y] integers per room
 - Each coordinate must be within the room boundaries
 - Each coordinate should represent a different unexplored connected area
-- If you have fully explored the current room, output an empty list
+- If you have fully explored a room, output an empty list for that room
+- If you have NOT visited/observed a room at all, output "unknown" for that room
 
 ### Output Format
 ```json
 {
-    "1": [[x1, y1], [x2, y2]],
-}
-```
-or
-```json
-{
     "1": [[x1, y1], [x2, y2], [x3, y3]],
-    "2": [[x1, y1], [x2, y2]]
+    "2": [[x1, y1], [x2, y2]],
+    "3": "unknown"
 }
 ```
-If fewer than 3 unexplored areas exist, output fewer points. If fully explored, output:
+If a room is fully explored, output an empty list:
 ```json
 {
     "1": [],
-    "2": []
+    "2": [[x1, y1]],
+    "3": []
 }
 ```
 """
