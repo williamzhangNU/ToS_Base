@@ -9,19 +9,40 @@ from ..core.object import Object
 from ..core.relationship import PairwiseRelationship
 from ..utils.utils import hash
 
+"""
+Task Overview:
+1. RotEvaluationTask: List objects appearing during 360° rotation.
+   - Evaluated by: exact sequence match.
+2. RotDualEvaluationTask: Infer rotation direction from object sequence.
+   - Evaluated by: correct direction (CW/CCW).
+"""
+
+ROT_EVAL_TEMPLATE = (
+    "You return to your starting position and face north.\n"
+    "You will perform a full 360-degree rotation by continuously turning {turn_direction} in place.\n"
+    "Assume all walls are removed (you can see through walls), so every object is visible.\n"
+    "Focus on this set of objects: {object_pool}.\n"
+    "List them in the exact order they appear directly ahead while you rotate.\n"
+    "If two objects share a bearing, place the nearer one first.\n\n"
+    "Answer format: <object_name1>, <object_name2>, ...\n"
+    "Example: mug, sofa, plant\n"
+)
+
+ROT_DUAL_EVAL_TEMPLATE = (
+    "You return to your starting position and face north.\n"
+    "You performed a complete 360° rotation in place.\n"
+    "Assume all walls are removed (you can see through walls), so every object is visible.\n"
+    "During the rotation, these objects appeared directly in front of you in this order:\n"
+    "{object_sequence}\n\n"
+    "Based on this sequence, in which direction did you rotate?\n\n"
+    "Answer format: clockwise or counterclockwise\n"
+    "Example: clockwise\n"
+)
+
 class RotEvaluationTask(BaseEvaluationTask):
     """Ask the sequence of objects appearing when rotating in place."""
 
-    QUESTION_TEMPLATE = (
-        "You return to your starting position and face north.\n"
-        "You will perform a full 360-degree rotation by continuously turning {turn_direction} in place.\n"
-        "Assume all walls are removed (you can see through walls), so every object is visible.\n"
-        "Focus on this set of objects: {object_pool}.\n"
-        "List them in the exact order they appear directly ahead while you rotate.\n"
-        "If two objects share a bearing, place the nearer one first.\n\n"
-        "Answer format: lamp, chair, table (comma-separated order).\n"
-        "Example: mug, sofa, plant\n"
-    )
+    QUESTION_TEMPLATE = ROT_EVAL_TEMPLATE
 
     # ---------- helpers ----------
     def _get_object_info(self, obj: Object, turn_dir: str) -> Tuple[float, float]:
@@ -99,14 +120,7 @@ class RotEvaluationTask(BaseEvaluationTask):
 class RotDualEvaluationTask(RotEvaluationTask):
     """Given the appearing sequence, ask the rotation direction. TODO: different sequences in each option"""
 
-    QUESTION_TEMPLATE = (
-        "You return to your starting position and face north.\n"
-        "You performed a complete 360° rotation in place.\n"
-        "During the rotation, these objects appeared directly in front of you in this order:\n"
-        "{object_sequence}\n\n"
-        "Based on this sequence, in which direction did you rotate?\n\n"
-        "Which direction did you rotate? Reply with a single word like clockwise or counterclockwise.\n"
-    )
+    QUESTION_TEMPLATE = ROT_DUAL_EVAL_TEMPLATE
 
     @retry_generate_question
     def generate_question(self) -> str:
@@ -141,7 +155,7 @@ if __name__ == "__main__":
     for task_name in task_names:
         print(f"\nTesting task: {task_name}")
         try:
-            room, agent, np_random = create_and_plot_room(task_name)
+            room, agent, np_random = create_and_plot_room(seed=1)
             task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
             
             manual_test_loop(task_name, task, EvalTaskType.evaluate_prediction)

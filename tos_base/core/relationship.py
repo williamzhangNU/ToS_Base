@@ -166,7 +166,7 @@ class StandardDistanceBins:
         (4.0 + 1e-6, 8.0 + 1e-6),
         (8.0 + 1e-6, 16.0 + 1e-6),
         (16.0 + 1e-6, 32.0 + 1e-6),
-        (32.0 + 1e-6, 64.0 + 1e-6),
+        (32.0 + 1e-6, float('inf')),
     ]
     LABELS = ['same distance', 'near', 'mid distance', 'slightly far', 'far', 'very far', 'extremely far']
     
@@ -187,7 +187,7 @@ class StandardDistanceBins:
             "\t-(4,8]→slightly far",
             "\t-(8,16]→far",
             "\t-(16,32]→very far",
-            "\t-(32,64]→extremely far",
+            "\t->32→extremely far",
         ]
         return "\n".join(lines)
 
@@ -549,8 +549,8 @@ class ProximityRelationship:
             return None
             
         # Create pairwise relationship between the two objects using agent's perspective
-        # cardinal_bins = CardinalBinsAllo() # CardinalBinsEgo()
-        cardinal_bins = EgoFrontBins()
+        cardinal_bins = CardinalBinsAllo() # CardinalBinsEgo()
+        # cardinal_bins = EgoFrontBins()
         distance_bins = StandardDistanceBins()
         pairwise_rel = PairwiseRelationshipDiscrete.relationship(a_pos, b_pos, perspective_ori, cardinal_bins, distance_bins)
         
@@ -558,11 +558,7 @@ class ProximityRelationship:
     
     @classmethod
     def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> str:
-        return (
-            "Proximity reporting:\n"
-            f"\t-Observe also returns relations between mutually close objects (distance ≤ {cls.PROXIMITY_THRESHOLD}).\n"
-            "\t-Treat your current facing as north and use cardinal bins; distances use the standard bins."
-        )
+        return f"Proximity: relations between close objects (≤{cls.PROXIMITY_THRESHOLD}m). Use cardinal directions (facing=north) and standard distance bins."
     
     def to_string(self, a_name: str, b_name: str) -> str:
         rel_str = self.pairwise_rel.to_string()

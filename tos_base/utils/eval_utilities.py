@@ -476,19 +476,35 @@ def _eval_forward_nav(pred: str, answer: str) -> Tuple[bool, Dict[str, Any]]:
     return _eval_direction_text(pred, answer)
 
 
+def resolve_gate_orientation(
+    gate_room_ids: Union[List[int], Tuple[int, ...], int, None],
+    gate_ori_by_room: Dict[int, Tuple[int, int]],
+    gate_base_ori: Tuple[int, int],
+    agent_room_ids: Union[List[int], Tuple[int, ...], int, None]
+) -> Tuple[int, int]:
+    """Resolve effective orientation of a gate based on agent's room."""
+    # Normalize inputs to sets
+    def _to_set(x):
+        if x is None: return set()
+        if isinstance(x, (list, tuple)): return set(x)
+        return {x}
+
+    a_rids = _to_set(agent_room_ids)
+    g_rids = _to_set(gate_room_ids)
+    
+    # Find shared room
+    intersection = list(a_rids & g_rids)
+    rid = intersection[0] if len(intersection) == 1 else None
+    
+    if rid is not None and int(rid) in gate_ori_by_room:
+         return gate_ori_by_room[int(rid)]
+    return gate_base_ori
+
+
 def check_fov_consistency(agent_pos: Tuple[float, float], agent_ori: Tuple[int, int], answer: Dict[str, Any]) -> bool:
     """Check if the agent's view matches the ground truth observation in answer."""
     final_visible = answer.get('final_observation', [])
-    if not final_visible:
-        return True # specific logic: if no observation required, assume match? Or fail? 
-                    # Existing logic returned {'error': 'missing_ground_truth'} which is false-y.
-                    # But here helper returns bool.
-                    # If GT says nothing visible, and we see something? 
-                    # The prompt implies "You observe {observation}". 
-                    # If answer['final_observation'] stems from prompt generation, it should be valid.
-                    # If empty, maybe nothing visible.
-        # Let's assume safely False if key missing, but True if empty list (saw nothing).
-        pass
+    assert final_visible, "final_observation is empty"
 
     obs_visibles = {}
     for item in final_visible:
@@ -496,12 +512,15 @@ def check_fov_consistency(agent_pos: Tuple[float, float], agent_ori: Tuple[int, 
         direction = _canonicalize_label(item.get('direction', ''))
         distance = _canonicalize_label(item.get('distance', ''))
         orientation = _canonicalize_label(item.get('orientation')) if item.get('orientation') else None
-        
         if name and direction and distance:
             obs_visibles[name] = (direction, distance, orientation)
             
     object_positions = {str(k).lower(): _coerce_point(v) for k, v in answer.get('object_positions', {}).items()}
     object_orientations = {str(k).lower(): _normalize_orientation(v) for k, v in answer.get('object_orientations', {}).items()}
+    
+    # Extract extra info for gates if available
+    gate_info = answer.get('gate_info', {})
+    agent_room_ids = answer['room_id']
 
     for obj_name, (dir_gt, dist_gt, ori_gt) in obs_visibles.items():
         target_pos = object_positions.get(obj_name)
@@ -518,21 +537,47 @@ def check_fov_consistency(agent_pos: Tuple[float, float], agent_ori: Tuple[int, 
             
         # Check relative orientation
         if ori_gt:
-            # Skip if target object orientation is not known (e.g. spheres/unoriented in some cases)
+            # Skip if target object orientation is not known
             if obj_name in object_orientations:
                 target_ori = object_orientations[obj_name]
+                is_gate = False
                 
+                # Handle gate logic if info available
+                if obj_name in gate_info:
+                    is_gate = True
+                    g_info = gate_info[obj_name]
+                    # Parse gate info (handling json serialization types)
+                    g_rids = g_info.get('room_ids')
+                    g_ori_map = {int(k): tuple(v) for k, v in g_info.get('ori_by_room', {}).items()}
+                    
+                    target_ori = resolve_gate_orientation(
+                        gate_room_ids=g_rids,
+                        gate_ori_by_room=g_ori_map,
+                        gate_base_ori=target_ori,
+                        agent_room_ids=agent_room_ids
+                    )
+
                 # Calculate relative orientation using OrientationRel
                 rel_ori = OrientationRel.get_relative_orientation(target_ori, agent_ori)
-                rel_label = OrientationRel.to_string(rel_ori, perspective='ego')
+                rel_label = OrientationRel.to_string(rel_ori, perspective='ego', if_gate=is_gate)
                 
                 if _canonicalize_label(rel_label) != ori_gt:
                     return False
     return True
 
 
-def _eval_backward_nav(pred: str, answer: Union[str, Dict], weight_by_steps: bool = False) -> Tuple[bool, Dict[str, Any]]:
-    """Evaluate backward navigation task."""
+def _eval_backward_nav(
+    pred: str, 
+    answer: Union[str, Dict], 
+    require_exact_pose: bool = False,
+    weight_by_steps: bool = False
+) -> Tuple[bool, Dict[str, Any]]:
+    """Evaluate backward navigation task.
+    
+    Args:
+        require_exact_pose: If True, checks if final pose exactly matches ground truth.
+                          If False, checks if final view matches ground truth description (FOV simulation).
+    """
     if not isinstance(answer, dict):
         return False, {}
     
@@ -550,28 +595,40 @@ def _eval_backward_nav(pred: str, answer: Union[str, Dict], weight_by_steps: boo
     if error:
         return False, {'error': error}
     
-    # Check if predicted final state matches observations
-    best_info = {'pos_match': False, 'ori_match': False, 'visible_match': False}
-    if final_pos and final_ori and check_fov_consistency(final_pos, final_ori, answer):
-        best_info.update({
-            'pos_match': final_pos == tuple(answer['final_pos']),
-            'ori_match': final_ori == tuple(answer['final_ori']),
-            'visible_match': True,
-        })
-        score = 1.0
-        if weight_by_steps:
-            minimal_plan = answer.get('minimal_plan', [])
-            minimal_steps = len(minimal_plan) if isinstance(minimal_plan, list) else minimal_plan
-            score = min(minimal_steps / len(pred_actions), 1.0)
-        return score, best_info
-
-    # Also check ground truth position as fallback
-    expected_pos = tuple(answer['final_pos'])
-    expected_ori = tuple(answer['final_ori'])
-    if check_fov_consistency(expected_pos, expected_ori, answer):
-        best_info.update({'pos_match': True, 'ori_match': True})
+    # Common matching info
+    gt_pos = tuple(answer['final_pos'])
+    gt_ori = tuple(answer['final_ori'])
     
-    return False, best_info
+    best_info = {
+        'pos_match': final_pos == gt_pos,
+        'ori_match': final_ori == gt_ori,
+        'final_pos': final_pos,
+        'final_ori': final_ori,
+        'visible_match': False
+    }
+
+    if require_exact_pose:
+        # Vision task: exact pose match
+        is_correct = best_info['pos_match'] and best_info['ori_match']
+        return (1.0 if is_correct else 0.0), best_info
+    else:
+        # Text task: FOV consistency match
+        if final_pos and final_ori and check_fov_consistency(final_pos, final_ori, answer):
+            best_info['visible_match'] = True
+            score = 1.0
+            if weight_by_steps:
+                minimal_plan = answer.get('minimal_plan', [])
+                minimal_steps = len(minimal_plan) if isinstance(minimal_plan, list) else minimal_plan
+                score = min(minimal_steps / len(pred_actions), 1.0)
+            return score, best_info
+            
+        # Fallback check (if FOV check failed or not possible, but pos matches?)
+        if check_fov_consistency(gt_pos, gt_ori, answer):
+             # Ground truth pose is valid (sanity check)
+             pass
+        
+        return 0.0, best_info
+
 
 def _eval_backward_nav_rev(pred: str, answer: Union[str, Dict]) -> Tuple[bool, Dict[str, Any]]:
     """Evaluate backward navigation reverse task.
@@ -661,7 +718,7 @@ def _score_similarity_mra(similarity: float) -> float:
 def _eval_backward_pov(pred: str, answer: Union[str, Dict]) -> Tuple[float, Dict[str, Any]]:
     """Evaluate backward POV task (Text).
     
-    Checks if predicted object is correct AND if the view from that object matches the description.
+    Checks if the view from predicted object matches the description.
     """
     # If answer is just a string (old code compat), fallback
     if isinstance(answer, str):
@@ -670,17 +727,8 @@ def _eval_backward_pov(pred: str, answer: Union[str, Dict]) -> Tuple[float, Dict
     if not isinstance(answer, dict):
         return False, {}
     
-    # 1. Check if predicted object name is correct
-    gt_name = str(answer.get('answer', '')).strip()
+    # 1. Identify the object by name
     pred_name = str(pred).strip()
-    
-    name_match = _labels_match(pred_name, gt_name)
-    if not name_match:
-        return 0.0, {'name_match': False}
-    
-    # 2. Check observation consistency (Superset check)
-    # We place agent at the predicted object's position and orientation
-    # and verify it sees what is described in 'final_observation'.
     
     # Extract object states from answer dict
     object_positions = {str(k).lower(): _coerce_point(v) for k, v in answer.get('object_positions', {}).items()}
@@ -690,14 +738,20 @@ def _eval_backward_pov(pred: str, answer: Union[str, Dict]) -> Tuple[float, Dict
     pred_key = pred_name.lower()
     if pred_key not in object_positions:
         # Predicted object not found in room
-        return 0.0, {'name_match': True, 'error': 'object_not_found'}
+        return 0.0, {'name_match': False, 'error': 'object_not_found'}
     
     pos = object_positions[pred_key]
-    ori = object_orientations.get(pred_key, (0, 1)) # Default if missing, but should be there
+    ori = object_orientations.get(pred_key, (0, 1)) # Default if missing
     
-    # Reuse check_fov_consistency
+    # 2. Check observation consistency (Superset check)
     valid_view = check_fov_consistency(pos, ori, answer)
-    return (1.0 if valid_view else 0.0), {'name_match': True, 'view_match': valid_view}
+    
+    # Debug info (name matching)
+    gt_name = str(answer.get('answer', '')).strip()
+    is_name_match = _labels_match(pred_name, gt_name)
+    
+    score = 1.0 if (is_name_match or valid_view) else 0.0
+    return score, {'name_match': is_name_match, 'view_match': valid_view}
 
 
 def _eval_backward_pov_vision(pred: str, answer: Union[str, Dict]) -> Tuple[float, Dict[str, Any]]:
@@ -713,7 +767,6 @@ def _eval_backward_pov_vision(pred: str, answer: Union[str, Dict]) -> Tuple[floa
         gt_name = str(answer)
         
     return _eval_exact_text(pred, gt_name)
-
 
 
 def _eval_backward_loc(pred: str, answer: Any, use_mra: bool = False) -> Tuple[float, Dict[str, Any]]:
@@ -747,24 +800,8 @@ def _eval_backward_loc(pred: str, answer: Any, use_mra: bool = False) -> Tuple[f
     else:
         score = similarity
         
-    
-    # Check FOV (requirement: check both coordinate similarity and FOV match)
-    # We need orientation to check FOV. Use ground truth final orientation.
-    gt_ori = _normalize_orientation(answer.get('final_ori', (0, 1)))
-    fov_match = check_fov_consistency(coord_pred, gt_ori, answer)
-    
-    # Combined score: If FOV invalid, maybe penalize or fail?
-    # Requirement: "checks both". If one fails, task fails?
-    # If FOV checking is enabled/possible.
-    # Note: If distance is large (low similarity), FOV will likely fail anyway unless empty observation.
-    
-    final_score = score
-    if not fov_match:
-        final_score = 0.0 # Strict check
-        
-    return final_score, {
+    return score, {
         'similarity': similarity,
-        'fov_match': fov_match,
         'raw_score': score
     }
 
@@ -784,11 +821,11 @@ def e2a_eval_fn(pred: Any, answer: Any) -> Tuple[float, Dict[str, Any]]:
     from .cogmap.metrics import compute_pos_sim, compute_dir_sim
     
     if not isinstance(pred, str):
-        return False, {'error': 'prediction_not_string'}
+        return 0.0, {'error': 'prediction_not_string'}
     
     coords = _parse_coordinate_list(pred)
     if not coords:
-        return False, {'error': 'invalid_prediction_format'}
+        return 0.0, {'error': 'invalid_prediction_format'}
     
     # Extract ground truth and threshold
     threshold = _E2A_DEFAULT_SIM_THRESHOLD
@@ -802,15 +839,15 @@ def e2a_eval_fn(pred: Any, answer: Any) -> Tuple[float, Dict[str, Any]]:
         norm_coords_raw = answer.get('absolute_coords', None)
     
     if not isinstance(gt_coords_raw, (list, tuple)) or not gt_coords_raw:
-        return False, {'error': 'missing_ground_truth'}
+        return 0.0, {'error': 'missing_ground_truth'}
     
     try:
         gt_coords = [_coerce_point(pt) for pt in gt_coords_raw]
     except ValueError:
-        return False, {'error': 'invalid_ground_truth'}
+        return 0.0, {'error': 'invalid_ground_truth'}
     
     if len(coords) != len(gt_coords):
-        return False, {'error': 'mismatched_coordinate_count'}
+        return 0.0, {'error': 'mismatched_coordinate_count'}
     
     # Use absolute coordinates for normalization if provided, otherwise use gt_coords
     if norm_coords_raw:
@@ -1009,8 +1046,8 @@ TASK_EVALUATORS: Dict[str, TaskEvaluator] = {
     'DirectionPov': _wrap_eval(_eval_direction_text),
     'AlloMappingEvaluationTask': lambda pred, answer, _choices: e2a_eval_fn(pred, answer),
     'Action2ViewEvaluationTask': _wrap_eval(_eval_forward_nav),
-    'View2ActionTextEvaluationTask': _wrap_eval(_eval_backward_nav, pred_cast=str, answer_cast=None),
-    'View2ActionVisionEvaluationTask': _wrap_eval(_eval_backward_nav, pred_cast=str, answer_cast=None),
+    'View2ActionTextEvaluationTask': _wrap_eval(lambda p, a: _eval_backward_nav(p, a, require_exact_pose=False), pred_cast=str, answer_cast=None),
+    'View2ActionVisionEvaluationTask': _wrap_eval(lambda p, a: _eval_backward_nav(p, a, require_exact_pose=True), pred_cast=str, answer_cast=None),
     'View2ActionRevEvaluationTask': _wrap_eval(_eval_backward_nav_rev, pred_cast=str, answer_cast=None),
     'Action2LocationEvaluationTask': _wrap_eval(_eval_forward_nav),
     'Location2ActionTextEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
@@ -1048,5 +1085,6 @@ __all__ = [
     'obj_presence_eval_fn',
     'multi_choice_eval_fn',
     'e2a_eval_fn',
+    'resolve_gate_orientation',
     'extract_elements',
 ]

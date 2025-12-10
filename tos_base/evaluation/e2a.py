@@ -7,16 +7,25 @@ from .tasks import BaseEvaluationTask, retry_generate_question
 from ..core.object import Object
 from ..utils.utils import hash
 
+"""
+Task Overview:
+1. AlloMappingEvaluationTask (E2A): Report allocentric coordinates for objects.
+   - Evaluated by: coordinate similarity (position + direction) vs ground truth.
+"""
+
+ALLO_MAPPING_TEMPLATE = (
+    "Treat your starting position as the origin (0, 0) while facing north.\n"
+    "Report allocentric coordinates using (x right/east, y up/north).\n"
+    "Objects: {object_list}.\n"
+    "Answer format: (x0, y0); (x1, y1); ... in the same order.\n"
+    "Example: (1, 0); (-2, 3); (0, -1)\n"
+)
+
+
 class AlloMappingEvaluationTask(BaseEvaluationTask):
     """Report allocentric coordinates for selected objects."""
 
-    QUESTION_TEMPLATE = (
-        "Treat your starting position as the origin (0, 0) while facing north.\n"
-        "Report allocentric coordinates using (x right, y up).\n"
-        "Objects: {object_list}.\n"
-        "Answer format: (x0, y0); (x1, y1); ... in the same order.\n"
-        "Example: (1, 0); (-2, 3); (0, -1)\n"
-    )
+    QUESTION_TEMPLATE = ALLO_MAPPING_TEMPLATE
 
     @retry_generate_question
     def generate_question(self) -> str:
@@ -32,7 +41,7 @@ class AlloMappingEvaluationTask(BaseEvaluationTask):
     def _pick_objects(self) -> List[Object]:
         pool = list(self.room.objects)
         self.np_random.shuffle(pool)
-        count = int(self.np_random.integers(3, min(6, len(pool)) + 1))
+        count = int(self.np_random.integers(3, min(5, len(pool)) + 1))
         return pool[:count]
 
     def _collect_coordinates(self, objects: List[Object]) -> List[Tuple[int, int]]:
@@ -57,7 +66,7 @@ if __name__ == "__main__":
     task_name = 'e2a'
     print(f"\nTesting task: {task_name}")
     try:
-        room, agent, np_random = create_and_plot_room(task_name)
+        room, agent, np_random = create_and_plot_room(seed=2)
         task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
         
         manual_test_loop(task_name, task, EvalTaskType.evaluate_prediction)

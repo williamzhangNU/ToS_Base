@@ -8,10 +8,52 @@ from ..core.relationship import (
     CardinalBinsAllo,
     EgoFrontBins,
     StandardDistanceBins,
+    OrientationRel,
 )
+from ..core.object import Gate
 from ..actions.base import BaseAction
 from ..utils.utils import hash
 
+"""
+Task Overview:
+1. DirectionEvaluationTask: Allo relation between two objects.
+   - Evaluated by: direction and distance match.
+2. PovEvaluationTask: Ego relation from oriented anchor.
+   - Evaluated by: direction and distance match.
+3. BackwardPovEvaluationTask: Identify which perspective from Ego relation description.
+   - Evaluated by: simulate fov (superset of ground truth).
+4. DirectionPov: Ego relation using anchor's facing as North.
+   - Evaluated by: direction and distance match.
+"""
+
+DIRECTION_EVAL_TEMPLATE = (
+    "You return to your starting position and face north.\n"
+    "From a Top-Down map, describe where {obj_name} is relative to {anchor_name}.\n"
+    "Answer format: <cardinal direction>, <distance>\n"
+    "Example: north-west, near\n"
+)
+
+POV_EVAL_TEMPLATE = (
+    "Now you jump to {anchor_name}'s direction, facing its direction.\n"
+    "Describe where {obj_name} is relative to you.\n"
+    "Answer format: <ego direction>, <distance>\n"
+    "Example: front-left, near\n"
+)
+
+BACKWARD_POV_EVAL_TEMPLATE = (
+    "Now you jump to an object's position, facing its direction.\n"
+    "You observe that {observation}.\n"
+    "Which object are you standing at?\n"
+    "Answer format: <object_name>\n"
+    "Example: lamp\n"
+)
+
+DIRECTION_POV_TEMPLATE = (
+    "Assume the {anchor_name}'s facing defines local north.\n"
+    "Where is {obj_name} relative to {anchor_name}?\n"
+    "Answer format: <cardinal direction>, <distance>\n"
+    "Example: north-west, near\n"
+)
 
 # ---- shared helpers ----
 def _store_relation(task: BaseEvaluationTask, question: str, rel: PairwiseRelationshipDiscrete) -> str:
@@ -43,12 +85,7 @@ def _visible_relations(room, anchor, rng) -> Iterable[Tuple[object, PairwiseRela
 class DirectionEvaluationTask(BaseEvaluationTask):
     """Ask allocentric relation between two objects."""
 
-    QUESTION_TEMPLATE = (
-        "You return to your starting position and face north.\n"
-        "From a Top-Down map, describe where {obj_name} is relative to {anchor_name}.\n"
-        "Answer format: cardinal direction-bin, distance-bin\n"
-        "Example: north-west, near\n"
-    )
+    QUESTION_TEMPLATE = DIRECTION_EVAL_TEMPLATE
 
     @retry_generate_question
     def generate_question(self) -> str:
@@ -70,12 +107,7 @@ class DirectionEvaluationTask(BaseEvaluationTask):
 class PovEvaluationTask(BaseEvaluationTask):
     """Ask egocentric relation from an oriented anchor's perspective."""
 
-    QUESTION_TEMPLATE = (
-        "Now you jump to where the {anchor_name} is and face the way it faces.\n"
-        "Describe {obj_name}'s egocentric relation.\n"
-        "Answer format: direction-bin, distance-bin\n"
-        "Example: front, near\n"
-    )
+    QUESTION_TEMPLATE = POV_EVAL_TEMPLATE
 
     @retry_generate_question
     def generate_question(self) -> str:
@@ -97,20 +129,12 @@ class PovEvaluationTask(BaseEvaluationTask):
         return _store_relation(self, question, rel)
 
 
-
-
 class BaseBackwardPovEvaluationTask(BaseEvaluationTask):
     """Identify which oriented object matches the described egocentric relation."""
 
-    QUESTION_TEMPLATE = (
-        "Now you jump to an oriented object's position, facing its direction.\n"
-        "You observe that {observation}.\n"
-        "Which object are you standing at?\n"
-        "Answer format: <object>\n"
-        "Example: lamp\n"
-    )
+    QUESTION_TEMPLATE = BACKWARD_POV_EVAL_TEMPLATE
 
-    def _format_observation(self, obs: dict) -> str:
+    def _format_observations(self, obs_list: List[Dict]) -> str:
         raise NotImplementedError
 
     @retry_generate_question
@@ -120,26 +144,15 @@ class BaseBackwardPovEvaluationTask(BaseEvaluationTask):
             raise ValueError("Need an oriented object for backward POV task")
         self.np_random.shuffle(oriented)
         
-        anchor = None
-        observations = []
-        obj_orientations = {}
-        
-        # Try to find an anchor that has visible objects
-        for candidate in oriented:
-            obs_list, oris = self._get_ground_truth_observations(candidate)
-            if obs_list:
-                anchor = candidate
-                observations = obs_list
-                obj_orientations = oris
-                break
-                
-        if not anchor:
-            raise ValueError("No visible objects from available anchors")
+        # Use shared helper to pick best anchor
+        anchor, observations, _ = self._select_best_candidate(
+            candidates=oriented,
+            get_agent_func=lambda x: x,
+            min_visible=1,
+            max_obs=3
+        )
             
-        # Pick one observation to describe
-        target_obs = self.np_random.choice(observations)
-        
-        observation_text = self._format_observation(target_obs)
+        observation_text = self._format_observations(observations)
         question = self.QUESTION_TEMPLATE.format(observation=observation_text)
         
         self.eval_data.question = question
@@ -149,11 +162,25 @@ class BaseBackwardPovEvaluationTask(BaseEvaluationTask):
         
         all_orientations = {obj.name.lower(): tuple(obj.ori) for obj in self.room.all_objects if obj.has_orientation}
         
+        gate_info = {}
+        object_rooms = {}
+        for obj in self.room.all_objects:
+            name = obj.name.lower()
+            object_rooms[name] = obj.room_id
+            if isinstance(obj, Gate):
+                 gate_info[name] = {
+                     'room_ids': obj.room_id,
+                     'ori_by_room': {k: tuple(v) for k, v in obj.ori_by_room.items()}
+                 }
+
         self.eval_data.answer = {
             'answer': anchor.name,
-            'final_observation': [target_obs], # Only enforce the one we described
+            'final_observation': observations,
             'object_positions': object_positions,
-            'object_orientations': all_orientations
+            'object_orientations': all_orientations,
+            'room_id': anchor.room_id,
+            'gate_info': gate_info,
+            'object_rooms': object_rooms
         }
         self.eval_data.choices = []
         # Hash based on question + answer
@@ -164,30 +191,27 @@ class BaseBackwardPovEvaluationTask(BaseEvaluationTask):
 class BackwardPovTextEvaluationTask(BaseBackwardPovEvaluationTask):
     """Identify which oriented object matches the described egocentric relation (Text)."""
 
-    def _format_observation(self, obs: dict) -> str:
-        parts = [f"{obs['direction']}, {obs['distance']}"]
-        if obs.get('orientation'):
-             parts.append(f"facing {obs['orientation']}")
-        
-        relation_text = ", ".join(parts)
-        return f"{obs['name']} is {relation_text}"
+    def _format_observations(self, obs_list: List[Dict]) -> str:
+        descriptions = []
+        for obs in obs_list:
+            parts = [f"{obs['direction']}, {obs['distance']}"]
+            if obs.get('orientation'):
+                parts.append(obs['orientation'])
+            relation_text = ", ".join(parts)
+            descriptions.append(f"{obs['name']} is {relation_text}")
+        return "; ".join(descriptions)
 
 
 class BackwardPovVisionEvaluationTask(BaseBackwardPovEvaluationTask):
     """Identify which oriented object matches the described egocentric relation (Vision)."""
 
-    def _format_observation(self, obs: dict) -> str:
+    def _format_observations(self, obs_list: List[Dict]) -> str:
         return "You observe: <image>"
 
 class DirectionPov(BaseEvaluationTask):
     """Allocentric relation treating the anchor's facing as north."""
 
-    QUESTION_TEMPLATE = (
-        "Assume the {anchor_name}'s facing defines local north.\n"
-        "Where is {obj_name} relative to {anchor_name}?\n"
-        "Answer format: direction-bin, distance-bin\n"
-        "Example: front, near\n"
-    )
+    QUESTION_TEMPLATE = DIRECTION_POV_TEMPLATE
 
     @retry_generate_question
     def generate_question(self) -> str:
@@ -215,7 +239,7 @@ class DirectionPov(BaseEvaluationTask):
 if __name__ == "__main__":
     from ..utils.eval_utilities import create_and_plot_room, manual_test_loop
     from .task_types import EvalTaskType
-    from tqdm import tqdm
+    import numpy as np
 
     # Robustness test suggestions:
     # 1. Case insensitivity: Ensure answers like "North, Near" and "north, near" are equivalent.
@@ -223,10 +247,15 @@ if __name__ == "__main__":
     # 3. Component swapping: "near, north" should be valid if order doesn't matter (check specific task logic).
     # 4. Partial matching: Verify strict vs loose matching requirements.
 
-    task_names = ['dir', 'pov', 'bwd_pov_text', 'bwd_pov_vision', 'dir_anchor']
-    # task_names = ['dir'] # Uncomment to run only one
+    # task_names = ['dir', 'pov', 'bwd_pov_text', 'bwd_pov_vision', 'dir_anchor']
+    task_names = ['dir_anchor'] # Uncomment to run only one
 
-    room, agent, np_random = create_and_plot_room(seed=0)
+    room, agent, np_random = create_and_plot_room(seed=2)
+    # scanner = room.get_object_by_name('scanner')
+    # cabinet = room.get_object_by_name('cabinet')
+    # cabinet.ori = scanner.ori
+    # cabinet.pos = np.array([12.1, 15])
+    # print(room)
     for task_name in task_names:
         print(f"\nTesting task: {task_name}")
         try:

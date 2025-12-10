@@ -7,21 +7,24 @@ from ..core.relationship import CardinalBinsAllo, StandardDistanceBins, Pairwise
 from ..utils.utils import hash
 from .direction import DirectionPov
 
+"""
+Task Overview:
+1. FalseBeliefDirectionPov: Relative location after object rotation (false belief).
+   - Evaluated by: direction and distance match.
+"""
 
-
+FALSE_BELIEF_TEMPLATE = (
+    "Facing north in one room, you note some objects' orientation:\n{observations}\n\n"
+    "Assume the {anchor_name}'s facing defines local north.\n"
+    "Where is {obj_name} relative to {anchor_name}?\n\n"
+    "Answer format: direction-bin, distance-bin\n"
+    "Example: front, near\n"
+)
 
 # ---- New task: rotate one oriented object, then ask DirectionPov using it as anchor ----
 class FalseBeliefDirectionPov(DirectionPov):
-    ACTION_TEMPLATE = (
-        "Facing north in one room, you note some objects' orientation:\n{observations}\n\n"
-    )
     
-    QUESTION_TEMPLATE = (
-        "Assume the {anchor_name}'s facing defines local north.\n"
-        "Where is {obj_name} relative to {anchor_name}?\n\n"
-        "Answer format: direction-bin, distance-bin\n"
-        "Example: front, near\n"
-    )
+    QUESTION_TEMPLATE = FALSE_BELIEF_TEMPLATE
 
     @retry_generate_question
     def generate_question(self) -> str:
@@ -58,9 +61,11 @@ class FalseBeliefDirectionPov(DirectionPov):
         )
         
         # Store the answer directly (open-ended format)
-        question = self.QUESTION_TEMPLATE.format(anchor_name=anchor.name, obj_name=target.name)
-        self.eval_data.action = self.ACTION_TEMPLATE.format(observations=observations)
-        self.eval_data.question = self.eval_data.action + question
+        self.eval_data.question = self.QUESTION_TEMPLATE.format(
+            observations=observations,
+            anchor_name=anchor.name,
+            obj_name=target.name
+        )
         self.eval_data.answer = (rel.direction.bin_label, rel.dist.bin_label)
         self.eval_data.choices = []
         self.eval_data.id = hash(self.eval_data.question)

@@ -16,6 +16,43 @@ from ..actions import ObserveAction, RotateAction, MoveAction
 from ..managers.exploration_manager import ExplorationManager
 from ..utils.utils import hash, compute_shortest_path
 
+"""
+Task Overview:
+1. Action2ViewEvaluationTask (Forward FOV): Predict final observation (of target object) after actions.
+   - Evaluated by: direction and distance match of target object.
+2. View2ActionEvaluationTask (Backward Nav): Infer action sequence from final view.
+   - Evaluated by: simulating actions and checking final state/view match.
+3. View2ActionRevEvaluationTask: Navigate back to start from end location.
+   - Evaluated by: success of reaching start and visibility.
+"""
+
+ACTION_2_VIEW_TEMPLATE = (
+    "You return to your starting position and face north.\n"
+    "You will execute the following action sequence:\n"
+    "{actions}\n\n"
+    "After executing the actions, what is the ego relation of {target} relative to you?\n\n"
+    "Answer format: <ego direction>, <distance>\n"
+    "Example: front, near\n"
+)
+
+VIEW_2_ACTION_TEMPLATE = (
+    "You return to your starting position and face north.\n"
+    "Then you have executed an action sequence and changed to a new location and facing direction.\n"
+    "You observe the following:\n"
+    "{final_obs}\n\n"
+    "What action sequence led to this final view?\n\n"
+    "Answer format: <action sequence>\n"
+    "Example: JumpTo(lamp), Rotate(90)\n"
+)
+
+VIEW_2_ACTION_REV_TEMPLATE = (
+    "You are currently at the termination location.\n"
+    "What action sequence will navigate you back to your starting position?\n\n"
+    "You must end with a JumpTo(initial_pos) action.\n"
+    "Answer format: <action sequence>\n"
+    "Example: JumpTo(lamp), Rotate(90), JumpTo(initial_pos)\n"
+)
+
 # Nav action descriptor: ('rotate', degrees) or ('jumpto', object_name)
 NavAction = Tuple[str, Any]
 
@@ -259,24 +296,29 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
 
     def _sample_plan_with_visible(self, steps: int, max_attempts: int = 5) -> Tuple[List[NavAction], Agent, List[Dict[str, str]], Dict[str, Tuple[int, int]]]:
         attempts = max(1, min(int(self.config.get('plan_retry', max_attempts)), max_attempts))
-        for _ in range(attempts):
-            plan = self._generate_plan(steps)
-            agent = self._execute_plan(plan)
-            visible, obj_orientations = self._get_ground_truth_observations(agent)
-            if visible:
-                return plan, agent, visible, obj_orientations
-        raise ValueError("Failed to generate navigation plan with visible objects")
+        
+        def plan_candidate_generator():
+            for _ in range(attempts):
+                plan = self._generate_plan(steps)
+                agent = self._execute_plan(plan)
+                yield (plan, agent)
+
+        try:
+            best_cand, visible, obj_orientations = self._select_best_candidate(
+                candidates=plan_candidate_generator(),
+                get_agent_func=lambda c: c[1],
+                min_visible=1,
+                max_obs=3
+            )
+            return best_cand[0], best_cand[1], visible, obj_orientations
+        except ValueError as e:
+            # Re-raise with specific message to match expectations or keep original
+            raise ValueError(f"Failed to generate navigation plan with visible objects: {e}")
 
 class Action2ViewEvaluationTask(BaseNavEvaluationTask):
     """Predict final observation from an action sequence."""
-    QUESTION_TEMPLATE = (
-        "You return to your starting position and face north.\n"
-        "You will execute the following action sequence:\n"
-        "{actions}\n\n"
-        "After executing the actions, what is the egocentric relation of {target}?\n\n"
-        "Answer format: <direction>, <distance>\n"
-        "Example: front, near\n"
-    )
+
+    QUESTION_TEMPLATE = ACTION_2_VIEW_TEMPLATE
 
     @retry_generate_question
     def generate_question(self) -> str:
@@ -301,15 +343,8 @@ class Action2ViewEvaluationTask(BaseNavEvaluationTask):
 
 class BaseView2ActionEvaluationTask(BaseNavEvaluationTask):
     """Base class for View2Action (Backward Navigation) tasks."""
-    QUESTION_TEMPLATE = (
-        "You return to your starting position and face north.\n"
-        "Then you have executed an action sequence and changed to a new location and facing direction.\n"
-        "You observe the following:\n"
-        "{final_obs}\n\n"
-        "What action sequence led to this final view?\n\n"
-        "Answer format: use a valid action sequence\n"
-        "Example: Rotate(90), JumpTo(lamp), JumpTo(chair), Rotate(90)\n"
-    )
+
+    QUESTION_TEMPLATE = VIEW_2_ACTION_TEMPLATE
 
     def _get_final_obs(self, visible: List[Dict[str, str]]) -> str:
         raise NotImplementedError
@@ -318,8 +353,6 @@ class BaseView2ActionEvaluationTask(BaseNavEvaluationTask):
     def generate_question(self) -> str:
         steps = int(self.config.get('steps', 3))
         plan, end_agent, visible, obj_orientations = self._sample_plan_with_visible(steps)
-        self.np_random.shuffle(visible)
-        visible = visible[:3]
         
         final_obs = self._get_final_obs(visible)
 
@@ -333,13 +366,27 @@ class BaseView2ActionEvaluationTask(BaseNavEvaluationTask):
         # We assume room.all_objects has them, so we can re-extract global map of orientations
         all_orientations = {obj.name.lower(): tuple(obj.ori) for obj in self.room.all_objects if obj.has_orientation}
 
+        gate_info = {}
+        object_rooms = {}
+        for obj in self.room.all_objects:
+            name = obj.name.lower()
+            object_rooms[name] = obj.room_id
+            if isinstance(obj, Gate):
+                 gate_info[name] = {
+                     'room_ids': obj.room_id,
+                     'ori_by_room': {k: tuple(v) for k, v in obj.ori_by_room.items()}
+                 }
+
         answer = {
             'final_pos': tuple(map(int, end_agent.pos)),
             'final_ori': tuple(map(int, end_agent.ori)),
+            'room_id': (list(end_agent.room_id) if isinstance(end_agent.room_id, (list, tuple)) else int(end_agent.room_id)) if end_agent.room_id is not None else None,
             'init_pos': tuple(map(int, init_agent.pos)),
             'init_ori': tuple(map(int, init_agent.ori)),
             'object_positions': object_positions,
             'object_orientations': all_orientations,
+            'gate_info': gate_info,
+            'object_rooms': object_rooms,
             "minimal_plan": compute_shortest_path(
                 self.room,
                 init_agent.pos,
@@ -376,13 +423,8 @@ class View2ActionVisionEvaluationTask(BaseView2ActionEvaluationTask):
 
 class View2ActionRevEvaluationTask(BaseNavEvaluationTask):
     """Navigate back to starting point from termination location."""
-    QUESTION_TEMPLATE = (
-        "You are currently at the termination location.\n"
-        "What action sequence will navigate you back to your starting position?\n\n"
-        "Answer format: use a valid action sequence\n"
-        "You must end with a JumpTo(initial_pos) action.\n"
-        "Example: Rotate(90), JumpTo(lamp), Rotate(90), JumpTo(initial_pos)\n"
-    )
+
+    QUESTION_TEMPLATE = VIEW_2_ACTION_REV_TEMPLATE
 
     @retry_generate_question
     def generate_question(self) -> str:
@@ -449,7 +491,7 @@ if __name__ == "__main__":
     for task_name in task_names:
         print(f"\nTesting task: {task_name}")
         try:
-            room, agent, np_random = create_and_plot_room()
+            room, agent, np_random = create_and_plot_room(seed=2)
             task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
             
             # Helper to display friendly answer for navigation tasks

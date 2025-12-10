@@ -3,27 +3,17 @@ Base evaluation definitions (data and abstract base classes).
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, Iterable, Callable
 import numpy as np
 from dataclasses import dataclass
 from functools import wraps
 
 from ..core.room import Room
-from ..core.object import Agent
-from ..utils.eval_utilities import evaluate_task_answer
+from ..core.object import Agent, Gate
+from ..utils.eval_utilities import evaluate_task_answer, resolve_gate_orientation
 from ..actions import RotateAction, ObserveAction
 from ..utils.action_utils import action_results_to_text
-from ..core.relationship import (
-    PairwiseRelationshipDiscrete,
-    StandardDistanceBins,
-)
-from ..core.relationship import (
-    PairwiseRelationshipDiscrete,
-    StandardDistanceBins,
-    EgoFrontBins,
-    DegreeRelBinned,
-    DegreeRel,
-)
+from ..core.relationship import (PairwiseRelationshipDiscrete, OrientationRel)
 from ..utils.utils import hash
 
 # Helper for orientation
@@ -179,7 +169,7 @@ class BaseEvaluationTask(ABC):
             action_results.append(ObserveAction().execute(room, agent, neglect_objects=neglect_objects or [], free_position=True))
         return action_results_to_text(action_results)
 
-    def _get_ground_truth_observations(self, agent: Agent) -> Tuple[List[Dict[str, str]], Dict[str, Tuple[int, int]]]:
+    def _get_ground_truth_observations(self, agent: Agent, limit: int = None) -> Tuple[List[Dict[str, str]], Dict[str, Tuple[int, int]]]:
         """
         Get ground truth observations and object orientations from a specific agent state.
         Returns:
@@ -205,7 +195,18 @@ class BaseEvaluationTask(ABC):
                 ori_label = None
                 if target_obj and target_obj.has_orientation:
                     # Compute relative orientation
-                    ori_label = _agent_relative_orientation(agent.ori, target_obj.ori)
+                    if isinstance(target_obj, Gate):
+                        gate_ori = resolve_gate_orientation(
+                            gate_room_ids=target_obj.room_id,
+                            gate_ori_by_room={k: tuple(v) for k, v in target_obj.ori_by_room.items()},
+                            gate_base_ori=tuple(target_obj.ori),
+                            agent_room_ids=agent.room_id
+                        )
+                        ori_pair = OrientationRel.get_relative_orientation(tuple(gate_ori), tuple(agent.ori))
+                        ori_label = OrientationRel.to_string(ori_pair, 'ego', 'orientation', if_gate=True)
+                    else:
+                        ori_label = _agent_relative_orientation(agent.ori, target_obj.ori)
+                    
                     obj_orientations[obj_name] = tuple(int(x) for x in target_obj.ori)
 
                 observations.append({
@@ -214,8 +215,46 @@ class BaseEvaluationTask(ABC):
                     'distance': rel.dist.bin_label,
                     'orientation': ori_label
                 })
-                
+        
+        if limit is not None and len(observations) > limit:
+            self.np_random.shuffle(observations)
+            observations = observations[:limit]
+
         return observations, obj_orientations
+
+    def _select_best_candidate(
+        self,
+        candidates: Iterable[Any],
+        get_agent_func: Callable[[Any], Agent],
+        min_visible: int = 1,
+        max_obs: int = 3
+    ) -> Tuple[Any, List[Dict], Dict]:
+        """
+        Try multiple times for a list of candidates, select the one with most objects in fov.
+        Returns (best_candidate, observations, obj_orientations).
+        """
+        results = []
+        for cand in candidates:
+            agent = get_agent_func(cand)
+            # Use limit=None to get full count
+            obs, oris = self._get_ground_truth_observations(agent, limit=None)
+            if len(obs) >= min_visible:
+                results.append((len(obs), cand, obs, oris))
+        
+        if not results:
+             raise ValueError(f"No candidate found with at least {min_visible} visible objects")
+             
+        # Sort by count descending
+        results.sort(key=lambda x: x[0], reverse=True)
+        best_count, best_cand, best_obs_full, best_oris = results[0]
+        
+        # Apply limit to observations
+        final_obs = best_obs_full
+        if max_obs is not None and len(final_obs) > max_obs:
+            self.np_random.shuffle(final_obs)
+            final_obs = final_obs[:max_obs]
+            
+        return best_cand, final_obs, best_oris
 
 
 
