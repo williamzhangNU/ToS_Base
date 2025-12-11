@@ -3,9 +3,9 @@
 import numpy as np
 
 from .tasks import retry_generate_question
-from ..core.relationship import CardinalBinsAllo, StandardDistanceBins, PairwiseRelationshipDiscrete, OrientationRel
+from ..core.relationship import CardinalBinsAllo, PairwiseRelationshipDiscrete, OrientationRel
 from ..utils.utils import hash
-from .direction import DirectionPov
+from .direction import DirectionPov, _store_relation
 
 """
 Task Overview:
@@ -17,8 +17,8 @@ FALSE_BELIEF_TEMPLATE = (
     "Facing north in one room, you note some objects' orientation:\n{observations}\n\n"
     "Assume the {anchor_name}'s facing defines local north.\n"
     "Where is {obj_name} relative to {anchor_name}?\n\n"
-    "Answer format: direction-bin, distance-bin\n"
-    "Example: front, near\n"
+    "Answer format: <cardinal direction>, <distance>\n"
+    "Example: north-west, near\n"
 )
 
 # ---- New task: rotate one oriented object, then ask DirectionPov using it as anchor ----
@@ -57,20 +57,17 @@ class FalseBeliefDirectionPov(DirectionPov):
             tuple(anchor.pos),
             anchor_ori=tuple(anchor.ori),
             bin_system=CardinalBinsAllo(),
-            distance_bin_system=StandardDistanceBins(),
         )
         
         # Store the answer directly (open-ended format)
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(
+        question = self.QUESTION_TEMPLATE.format(
             observations=observations,
             anchor_name=anchor.name,
             obj_name=target.name
         )
-        self.eval_data.answer = (rel.direction.bin_label, rel.dist.bin_label)
-        self.eval_data.choices = []
-        self.eval_data.id = hash(self.eval_data.question)
+        _store_relation(self, question, rel)
         self.eval_data.kwargs = {"rotated_object": anchor.name, "rotation_degrees": deg}
-        return self.eval_data.question
+        return question
 
 
 if __name__ == "__main__":

@@ -230,7 +230,7 @@ class BaseEvaluationTask(ABC):
         max_obs: int = 3
     ) -> Tuple[Any, List[Dict], Dict]:
         """
-        Try multiple times for a list of candidates, select the one with most objects in fov.
+        Select candidate with weighted random sampling based on visible object count.
         Returns (best_candidate, observations, obj_orientations).
         """
         results = []
@@ -244,9 +244,10 @@ class BaseEvaluationTask(ABC):
         if not results:
              raise ValueError(f"No candidate found with at least {min_visible} visible objects")
              
-        # Sort by count descending
-        results.sort(key=lambda x: x[0], reverse=True)
-        best_count, best_cand, best_obs_full, best_oris = results[0]
+        # Weighted random selection: more objects -> higher chance
+        weights = np.array([r[0] for r in results], dtype=float)
+        idx = self.np_random.choice(len(results), p=weights/weights.sum() if weights.sum() > 0 else None)
+        _, best_cand, best_obs_full, best_oris = results[idx]
         
         # Apply limit to observations
         final_obs = best_obs_full

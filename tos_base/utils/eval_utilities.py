@@ -76,8 +76,7 @@ def _build_label_system() -> None:
         canonical_norm = _normalize_joined(canonical)
         _LABEL_LOOKUP[canonical_norm] = canonical_norm
         
-        parts = {_normalize_joined(token) for token in re.split(r"[-\s]+", canonical) if token}
-        parts.add(canonical_norm)
+        parts = {canonical_norm}
         _LABEL_COMPONENTS[canonical_norm] = parts
         
         for variant in variants:
@@ -338,21 +337,24 @@ def _is_visible_from(
     fov: int = 90,
 ) -> bool:
     """Check if target is visible from agent position and orientation."""
-    if agent_pos == target_pos:
+    a_pos = np.array(agent_pos, dtype=float)
+    t_pos = np.array(target_pos, dtype=float)
+    
+    if np.allclose(a_pos, t_pos):
         return False
     
-    direction = np.array(target_pos, dtype=float) - np.array(agent_pos, dtype=float)
-    if np.allclose(direction, 0.0):
-        return False
-    direction /= np.linalg.norm(direction)
+    direction_vec = t_pos - a_pos
+    direction_norm = (direction_vec) / np.linalg.norm(direction_vec)
     
     ori_vec = np.array(agent_ori, dtype=float)
-    if np.allclose(ori_vec, 0.0):
-        return False
-    ori_vec /= np.linalg.norm(ori_vec)
+    if np.allclose(ori_vec, 0):
+        raise ValueError("Invalid orientation")
+        # return False
+        
+    ori_norm = ori_vec / np.linalg.norm(ori_vec)
     
-    limit = 0.0 if int(fov) == 180 else _COS_45
-    return float(np.dot(direction, ori_vec)) >= limit - 1e-3
+    threshold = (0.707 - 1e-3) if fov == 90 else (0.0 - 1e-3)
+    return np.dot(direction_norm, ori_norm) >= threshold
 
 
 # ========== Navigation Simulation ==========
@@ -446,10 +448,16 @@ def _eval_direction_text(pred: str, answer: Union[str, Sequence[str]]) -> Tuple[
     normalized_pred = (_canonicalize_label(parsed[0]), _canonicalize_label(parsed[1]))
     
     # Check normal order
-    score_normal = (_labels_match(normalized_pred[0], normalized_answer[0]) + _labels_match(normalized_pred[1], normalized_answer[1])) / 2
+    match_normal_0 = _labels_match(normalized_pred[0], normalized_answer[0])
+    match_normal_1 = _labels_match(normalized_pred[1], normalized_answer[1])
+    score_normal = (1.0 if match_normal_0 else 0.0) + (1.0 if match_normal_1 else 0.0)
+    score_normal /= 2.0
     
     # Check swapped order
-    score_swapped = (_labels_match(normalized_pred[1], normalized_answer[0]) + _labels_match(normalized_pred[0], normalized_answer[1])) / 2
+    match_swapped_0 = _labels_match(normalized_pred[1], normalized_answer[0])
+    match_swapped_1 = _labels_match(normalized_pred[0], normalized_answer[1])
+    score_swapped = (1.0 if match_swapped_0 else 0.0) + (1.0 if match_swapped_1 else 0.0)
+    score_swapped /= 2.0
     
     return max(score_normal, score_swapped), {}
 
@@ -953,7 +961,7 @@ def obj_presence_eval_fn(pred: Any, answer: List[str]) -> Tuple[bool, Dict[str, 
 
 
 # ========== Common Evaluation Utilities ==========
-def create_and_plot_room(seed: int = 0):
+def create_and_plot_room(seed: int = 0, plot: bool = True):
     """Generate a room, plot it, and return room, agent, and rng."""
     from ..utils.room_utils import RoomPlotter, RoomGenerator
     
@@ -966,7 +974,8 @@ def create_and_plot_room(seed: int = 0):
         level=2,
         main=6,
     )
-    RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
+    if plot:
+        RoomPlotter.plot(room, agent, mode='img', save_path=f'room_{seed}.png')
     return room, agent, np_random
 
 

@@ -22,14 +22,14 @@ Task Overview:
 LOC_2_ACTION_TEMPLATE = (
     "You move to a new location and your current facing direction is {orientation}.\n"
     "{observations}\n"
-    "Treat {origin_name} as the origin (0, 0), and your starting facing direction is north.\n"
+    "Treat {origin_name} as the new origin (0, 0).\n"
     "What is your current 2D coordinate (x, y)?\n\n"
     "Answer format: (x, y)\n"
     "Example: (2, -1)\n"
 )
 
 ACTION_2_LOC_TEMPLATE = (
-    "Treat {origin_name} as the origin (0, 0), and your starting facing direction is north.\n"
+    "Treat {origin_name} as the new origin (0, 0).\n"
     "You move to {loc} and face {direction}.\n"
     "What is the egocentric relation of {target}?\n\n"
     "Answer format: <direction>, <distance>\n"
@@ -145,13 +145,18 @@ class BaseLocation2ActionEvaluationTask(BaseLocEvaluationTask):
         for obj in self.room.all_objects:
             name = obj.name.lower()
             object_positions[name] = tuple(map(int, obj.pos))
-            object_rooms[name] = obj.room_id
+            
+            if isinstance(obj.room_id, (list, tuple, np.ndarray)):
+                object_rooms[name] = [int(x) for x in obj.room_id]
+            else:
+                object_rooms[name] = int(obj.room_id)
+                
             if obj.has_orientation:
-                all_orientations[name] = tuple(obj.ori)
+                all_orientations[name] = tuple(map(int, obj.ori))
             if isinstance(obj, Gate):
                  gate_info[name] = {
-                     'room_ids': obj.room_id,
-                     'ori_by_room': {k: tuple(v) for k, v in obj.ori_by_room.items()}
+                     'room_ids': [int(x) for x in obj.room_id] if isinstance(obj.room_id, (list, tuple, np.ndarray)) else [int(obj.room_id)],
+                     'ori_by_room': {int(k): tuple(map(int, v)) for k, v in obj.ori_by_room.items()}
                  }
 
         self.eval_data.answer = {

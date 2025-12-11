@@ -2,6 +2,7 @@
 
 from typing import Iterable, Tuple, List, Dict
 import json
+import numpy as np
 from .tasks import BaseEvaluationTask, retry_generate_question
 from ..core.relationship import (
     PairwiseRelationshipDiscrete,
@@ -12,6 +13,7 @@ from ..core.relationship import (
 )
 from ..core.object import Gate
 from ..actions.base import BaseAction
+from ..utils.eval_utilities import _is_visible_from
 from ..utils.utils import hash
 
 """
@@ -70,7 +72,7 @@ def _visible_relations(room, anchor, rng) -> Iterable[Tuple[object, PairwiseRela
     candidates: List = [obj for obj in room.objects if obj is not anchor]
     rng.shuffle(candidates)
     for obj in candidates:
-        if not BaseAction._is_visible(anchor, obj):
+        if not _is_visible_from(tuple(anchor.pos), tuple(anchor.ori), tuple(obj.pos)):
             continue
         rel = PairwiseRelationshipDiscrete.relationship(
             tuple(obj.pos),
@@ -158,19 +160,23 @@ class BaseBackwardPovEvaluationTask(BaseEvaluationTask):
         self.eval_data.question = question
         
         # Store detailed answer for validation
-        object_positions = {obj.name.lower(): tuple(obj.pos) for obj in self.room.all_objects}
+        object_positions = {obj.name.lower(): tuple(map(float, obj.pos)) for obj in self.room.all_objects}
         
-        all_orientations = {obj.name.lower(): tuple(obj.ori) for obj in self.room.all_objects if obj.has_orientation}
+        all_orientations = {obj.name.lower(): tuple(map(int, obj.ori)) for obj in self.room.all_objects if obj.has_orientation}
         
         gate_info = {}
         object_rooms = {}
         for obj in self.room.all_objects:
             name = obj.name.lower()
-            object_rooms[name] = obj.room_id
+            if isinstance(obj.room_id, (list, tuple, np.ndarray)):
+                object_rooms[name] = [int(x) for x in obj.room_id]
+            else:
+                object_rooms[name] = int(obj.room_id)
+
             if isinstance(obj, Gate):
                  gate_info[name] = {
-                     'room_ids': obj.room_id,
-                     'ori_by_room': {k: tuple(v) for k, v in obj.ori_by_room.items()}
+                     'room_ids': [int(x) for x in obj.room_id] if isinstance(obj.room_id, (list, tuple, np.ndarray)) else [int(obj.room_id)],
+                     'ori_by_room': {int(k): tuple(map(int, v)) for k, v in obj.ori_by_room.items()}
                  }
 
         self.eval_data.answer = {
@@ -178,7 +184,7 @@ class BaseBackwardPovEvaluationTask(BaseEvaluationTask):
             'final_observation': observations,
             'object_positions': object_positions,
             'object_orientations': all_orientations,
-            'room_id': anchor.room_id,
+            'room_id': [int(x) for x in anchor.room_id] if isinstance(anchor.room_id, (list, tuple, np.ndarray)) else int(anchor.room_id),
             'gate_info': gate_info,
             'object_rooms': object_rooms
         }
@@ -250,7 +256,7 @@ if __name__ == "__main__":
     # task_names = ['dir', 'pov', 'bwd_pov_text', 'bwd_pov_vision', 'dir_anchor']
     task_names = ['dir_anchor'] # Uncomment to run only one
 
-    room, agent, np_random = create_and_plot_room(seed=2)
+    room, agent, np_random = create_and_plot_room(seed=3)
     # scanner = room.get_object_by_name('scanner')
     # cabinet = room.get_object_by_name('cabinet')
     # cabinet.ori = scanner.ori

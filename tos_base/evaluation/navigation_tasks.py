@@ -40,14 +40,14 @@ VIEW_2_ACTION_TEMPLATE = (
     "Then you have executed an action sequence and changed to a new location and facing direction.\n"
     "You observe the following:\n"
     "{final_obs}\n\n"
-    "What action sequence led to this final view?\n\n"
+    "What action sequence led to this final view? The action sequence must be valid.\n\n"
     "Answer format: <action sequence>\n"
     "Example: JumpTo(lamp), Rotate(90)\n"
 )
 
 VIEW_2_ACTION_REV_TEMPLATE = (
     "You are currently at the termination location.\n"
-    "What action sequence will navigate you back to your starting position?\n\n"
+    "What action sequence will navigate you back to your starting position? The action sequence must be valid.\n\n"
     "You must end with a JumpTo(initial_pos) action.\n"
     "Answer format: <action sequence>\n"
     "Example: JumpTo(lamp), Rotate(90), JumpTo(initial_pos)\n"
@@ -268,9 +268,9 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
             idx = 1 + next(i for i, (obj, _) in enumerate(dist_group) if obj.name == target.name)
             dist_phrase = f"{_nearfar_phrase(idx, len(dist_group))} one"
 
-        if dir_phrase or dist_phrase:
+        if dir_phrase and dist_phrase:
             descriptors = " also ".join(filter(None, (dir_phrase, dist_phrase)))
-            return f"Among objects which are {dir_label}, {dist_label}, you jump to the {descriptors}."
+            return f"Among objects which are {dir_label}, {dist_label} to you, you jump to the {descriptors}."
 
         return f"Jump to the object at {dir_label}, {dist_label}."
 
@@ -364,17 +364,21 @@ class BaseView2ActionEvaluationTask(BaseNavEvaluationTask):
         # Merge orientations: local visible ones + global ones if needed.
         # Ideally satisfy _eval_backward_nav which needs orientations for checking.
         # We assume room.all_objects has them, so we can re-extract global map of orientations
-        all_orientations = {obj.name.lower(): tuple(obj.ori) for obj in self.room.all_objects if obj.has_orientation}
+        all_orientations = {obj.name.lower(): tuple(map(int, obj.ori)) for obj in self.room.all_objects if obj.has_orientation}
 
         gate_info = {}
         object_rooms = {}
         for obj in self.room.all_objects:
             name = obj.name.lower()
-            object_rooms[name] = obj.room_id
+            if isinstance(obj.room_id, (list, tuple, np.ndarray)):
+                object_rooms[name] = [int(x) for x in obj.room_id]
+            else:
+                object_rooms[name] = int(obj.room_id)
+                
             if isinstance(obj, Gate):
                  gate_info[name] = {
-                     'room_ids': obj.room_id,
-                     'ori_by_room': {k: tuple(v) for k, v in obj.ori_by_room.items()}
+                     'room_ids': [int(x) for x in obj.room_id] if isinstance(obj.room_id, (list, tuple, np.ndarray)) else [int(obj.room_id)],
+                     'ori_by_room': {int(k): tuple(map(int, v)) for k, v in obj.ori_by_room.items()}
                  }
 
         answer = {

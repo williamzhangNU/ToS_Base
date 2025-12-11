@@ -52,47 +52,38 @@ class RotEvaluationTask(BaseEvaluationTask):
         angle = (bearing % 360.0) if turn_dir == "clockwise" else ((-bearing) % 360.0)
         return angle, distance
 
-    def _sorted_pts(self, turn_dir: str) -> List[Tuple[str, float, float]]:
-        pts = []
+    def _gen_valid_sequence(self, turn_dir: str, start_eps: float) -> List[str]:
+        candidates = []
         for o in self.room.objects:
-            if not np.array_equal(o.pos, self.agent.pos):
-                ang, dist = self._get_object_info(o, turn_dir)
-                pts.append((o.name, ang, dist))
-        pts.sort(key=lambda x: (x[1], x[2]))  # by angle, tie -> nearer first
-        return pts
+            if np.array_equal(o.pos, self.agent.pos):
+                continue
+            ang, dist = self._get_object_info(o, turn_dir)
+            if ang < 1e-3 or ang > 360.0 - 1e-3:
+                continue
+            candidates.append((o.name, ang, dist))
 
-    def _greedy_from(self, pts, start_idx: int, eps: float) -> Tuple[List[str], List[float]]:
-        n = len(pts)
-        names, angs = [], []
-        last = None
-        for t in range(n):  # one full wrap
-            j = (start_idx + t) % n
-            name, ang, _ = pts[j]
-            if last is None or ((ang - last) % 360.0) > eps:
-                names.append(name); angs.append(ang); last = ang
-        if (angs[0] - angs[-1]) % 360.0 < eps:
-            angs.pop(); names.pop()
-        # normalize: start from smallest angle (e.g., [90,180,270,45] -> [45,90,180,270] for CW)
-        k = int(np.argmin(angs))
-        return names[k:] + names[:k], angs[k:] + angs[:k]
+        if len(candidates) < 3:
+             raise ValueError(f"Too few objects available ({len(candidates)}) for rotation task")
 
-    def _gen_valid_sequence(self, turn_dir: str, eps: float) -> List[str]:
-        pts = self._sorted_pts(turn_dir)
-        assert len(pts) >= 3, "Need at least 3 objects"
-        tries, cur_eps = 0, float(eps)
-        while tries < 10:
-            start = int(self.np_random.integers(0, len(pts)))
-            names, angs = self._greedy_from(pts, start, cur_eps)
-            if len(names) >= 3:
-                return names[:self.np_random.integers(3, min(len(names), 7) + 1)]
-            tries += 1
-        # fallback: tighten epsilon and try once more
-        cur_eps = min(cur_eps, 1.0)
-        print(f"[Rotation Task] Fallback: tighten epsilon to {cur_eps}")
-        start = int(self.np_random.integers(0, len(pts)))
-        names, angs = self._greedy_from(pts, start, cur_eps)
-        assert len(names) >= 3, "Increase object count or decrease angle_eps"
-        return names[:self.np_random.integers(3, min(len(names), 7) + 1)]
+        eps_schedule = list(dict.fromkeys(max(v,1) for v in [start_eps, start_eps/2, start_eps/4, 1.0]))
+
+        for eps in eps_schedule:
+            for _ in range(5):
+                self.np_random.shuffle(candidates)
+                selected = []
+
+                for item in candidates:
+                    _, ang, _ = item
+                    # Check distance from ALL currently selected
+                    if all(abs(ang - s[1]) > eps for s in selected):
+                        selected.append(item)
+
+                if len(selected) >= 3:
+                    selected.sort(key=lambda x: (x[1], x[2]))
+                    count = self.np_random.integers(3, min(len(selected), 5) + 1)
+                    return [x[0] for x in selected[:count]]
+        
+        raise ValueError("Failed to generate valid rotation sequence")
 
     # ---------- main ----------
     @retry_generate_question
@@ -155,7 +146,7 @@ if __name__ == "__main__":
     for task_name in task_names:
         print(f"\nTesting task: {task_name}")
         try:
-            room, agent, np_random = create_and_plot_room(seed=1)
+            room, agent, np_random = create_and_plot_room(seed=2, plot=True)
             task = EvalTaskType.create_task(task_name, np_random=np_random, room=room, agent=agent)
             
             manual_test_loop(task_name, task, EvalTaskType.evaluate_prediction)
