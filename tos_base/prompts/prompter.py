@@ -120,7 +120,7 @@ class PromptManager:
             'title': 'Spatial Exploration Task' if is_active else 'Spatial Reasoning Task',
             'intro': SHARED_INTRO_TEXT if not is_vision else SHARED_INTRO_VISION,
             'goal_lines': (
-                'Goal: **Minimize total COST** while building a complete and accurate map of the environment.'
+                'Goal: Build a **COMPLETE AND ACCURATE MAP** of the environment with **MINIMAL TOTAL COST**.'
                 if is_active else ''
             ),
             'format_rules': self._build_format_rules(is_active),
