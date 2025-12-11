@@ -5,6 +5,8 @@ A single BASE prompt contains all shared schema and general rules.
 Per-type prompts ONLY add their specific instructions (no repetition).
 """
 
+from typing import Optional, Dict, List, Tuple
+
 BASE_COGMAP_PROMPT = """\
 ## Cognitive Map (JSON)
 
@@ -111,7 +113,7 @@ Example:
 ```
 """
 
-def get_cogmap_prompt(map_type: str, enable_think: bool = True) -> str:
+def get_cogmap_prompt(map_type: str, enable_think: bool = True, all_candidate_coords: Optional[List[Tuple[int, int]]] = None) -> str:
     """Return the assembled cognitive-map prompt for a given type, with format rules."""
     t = (map_type or "global").strip().lower()
     fmt = _cogmap_format_rules(enable_think)
@@ -123,8 +125,51 @@ def get_cogmap_prompt(map_type: str, enable_think: bool = True) -> str:
         return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_ROOMS_ONLY}\n\n{fmt}"
     if t == "relations":
         return f"{RELATIONS_PROMPT}\n\n{fmt}"
+    if t == "unexplored":
+        return get_unexplored_prompt(enable_think, all_candidate_coords)
+    if t == "false_belief":
+        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
     # default to global
     return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
+
+# --- Unexplored Areas Prompt ---
+UNEXPLORED_INSTRUCTION = """\
+### Task
+Select ALL coordinates that correspond to points in unexplored regions.
+{candidate_coords_str}
+### Rules
+- Coordinates are in GLOBAL coordinates (relative to your initial position and orientation)
+- Output only the selected coordinates in the same format
+- Separate multiple coordinates with semicolons
+- If all areas are explored, output "none"
+
+### Output Format
+Just the coordinates separated by semicolons:
+```json
+{{
+    "unexplored": "(5, 3); (2, 1); (10, 2)"
+}}
+```
+"""
+
+def get_unexplored_prompt(enable_think: bool = True, all_candidate_coords: Optional[List[Tuple[int, int]]] = None) -> str:
+    """Return the unexplored areas prompt with format rules.
+    
+    Args:
+        enable_think: Whether to include thinking section
+        all_candidate_coords: List of all candidate (x, y) coordinates
+    """
+    # Format all coordinates
+    if all_candidate_coords:
+        coord_strs = [f"({x}, {y})" for x, y in all_candidate_coords]
+        candidate_coords_str = '; '.join(coord_strs)
+    else:
+        raise ValueError("all_candidate_coords must be provided for unexplored prompt.")
+    
+    instruction = UNEXPLORED_INSTRUCTION.format(candidate_coords_str=candidate_coords_str)
+    fmt = _cogmap_format_rules(enable_think)
+    return f"{instruction}\n\n{fmt}"
+
 
 # --- Pairwise relations ---
 from ..utils.relation_codes import _DIR_LABEL_TO_CODE as _DLC, _DIST_LABEL_TO_CODE as _SLC

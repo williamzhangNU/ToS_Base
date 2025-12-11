@@ -2,7 +2,7 @@ import copy
 from copy import deepcopy
 from typing import List, Tuple, Dict, Any, Optional, Set, TYPE_CHECKING
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import defaultdict
  
 import random
@@ -10,6 +10,7 @@ import random
 from ..core.object import Agent
 from ..core.room import Room
 from .spatial_solver import SpatialSolver
+from ..utils.cogmap.unexplored import compute_unexplored_regions, generate_labeled_points
 
 if TYPE_CHECKING:
     from ..actions import ActionSequence
@@ -30,6 +31,9 @@ class ExplorationTurnLog:
     agent_state: Optional['Agent'] = None
     information_gain: Optional[float] = None  # Information gain (uses exploration quality metric)
     possible_positions: Optional[Dict[str, List[List[int]]]] = None  # Sampled possible positions per object
+    unexplored_positions_by_room: Optional[Dict[str, List[List[int]]]] = None  # Unexplored positions per room (room_id -> [[x,y], ...])
+    all_candidate_coords: Optional[List[Tuple[int, int]]] = None  # All candidate coordinates (unexplored + distractors)
+    all_correct_coords: Optional[List[Tuple[int, int]]] = None  # All correct unexplored coordinates
 
     def to_dict(self):
         return {
@@ -44,6 +48,9 @@ class ExplorationTurnLog:
             "agent_state": self.agent_state.to_dict() if self.agent_state else {},
             "information_gain": self.information_gain or 0.0,
             "possible_positions": self.possible_positions or {},
+            "unexplored_positions_by_room": self.unexplored_positions_by_room or {},
+            "all_candidate_coords": [[int(x), int(y)] for x, y in (self.all_candidate_coords or [])],
+            "all_correct_coords": [[int(x), int(y)] for x, y in (self.all_correct_coords or [])],
         }
 
 class ExplorationManager:
@@ -64,6 +71,10 @@ class ExplorationManager:
         self.turn_logs: List[ExplorationTurnLog] = []
         # History now stores ActionResult for each executed action (in order)
         self.history: List['ActionResult'] = []
+        # Per-room unexplored positions (updated incrementally)
+        self._unexplored_by_room: Dict[str, Set[Tuple[int, int]]] = {}
+        self._visited_rooms: Set[str] = set()  # Rooms that have been observed at least once
+        self._init_unexplored()
         
         # Coverage tracking (exclude gates)
         self._init_node_name = "initial_pos"
@@ -111,11 +122,17 @@ class ExplorationManager:
         self.history.append(result)
         if not result.success:
             return result
-        
         # Count action, cost, and update coverage
         self.action_counts[result.action_type] = self.action_counts.get(result.action_type, 0) + 1
         self.action_cost += int(action.cost)
         if isinstance(action, ObserveAction):
+            room_ids = self.agent.room_id if isinstance(self.agent.room_id, list) else [self.agent.room_id]
+            for rid in room_ids:
+                self._subtract_fov(
+                    int(self.agent.pos[0]), int(self.agent.pos[1]),
+                    int(self.agent.ori[0]), int(self.agent.ori[1]),
+                    str(rid)
+                )
             self._update_coverage_from_observe(result)
         
         return result
@@ -419,6 +436,11 @@ class ExplorationManager:
         turn_quality = self._compute_exploration_quality()
         # Snapshot possible positions per object (only initialized/observed ones), with sampling
         possible_positions = self._get_possible_positions_snapshot(self.MAX_POSSIBLE_POSITIONS_PER_OBJECT)
+        # Compute unexplored positions per room based on FOV history
+        unexplored_positions_by_room = self._compute_unexplored_positions_by_room()
+        
+        # Generate all candidate and correct coordinates for unexplored areas
+        all_candidate_coords, all_correct_coords = self._generate_all_correct_coords(unexplored_positions_by_room)
         
         step_idx = len(self.turn_logs) + 1
         turn_log = ExplorationTurnLog(
@@ -433,6 +455,9 @@ class ExplorationManager:
             agent_state=self.agent.copy(),
             information_gain=turn_quality if turn_quality is not None else (self.turn_logs[-1].information_gain if self.turn_logs else 0.0),
             possible_positions=possible_positions,
+            unexplored_positions_by_room=unexplored_positions_by_room,
+            all_candidate_coords=all_candidate_coords,
+            all_correct_coords=all_correct_coords,
         )
         self.turn_logs.append(turn_log)
     
@@ -472,6 +497,111 @@ class ExplorationManager:
                     self.spatial_solver.add_observation(filt)
 
     # === Exploration quality helpers ===
+    def _init_unexplored(self) -> None:
+        unique_vals = np.unique(self.exploration_room.mask)
+        for val in unique_vals:
+            if 1 <= val < 100:  # Valid room IDs are 1-99
+                rid = int(val)
+                room_coords = np.argwhere(self.exploration_room.mask == rid)
+                self._unexplored_by_room[str(rid)] = set((int(c[0]), int(c[1])) for c in room_coords)
+
+    def _subtract_fov(
+        self, px: int, py: int, ox: int, oy: int, room_id: str, fov_angle: int = 90
+    ) -> None:
+        """Remove visible positions from unexplored for the given room."""
+        unexplored = self._unexplored_by_room.get(room_id)
+        if not unexplored:
+            return
+        
+        # Mark this room as visited
+        self._visited_rooms.add(room_id)
+        
+        # Normalize orientation
+        ori_len = np.sqrt(ox**2 + oy**2)
+        if ori_len == 0:
+            return
+        ox_n, oy_n = ox / ori_len, oy / ori_len
+        
+        # Agent's current position is observed
+        unexplored.discard((px, py))
+        
+        half_fov = np.radians(fov_angle / 2)
+        to_remove = []
+        
+        for (tx, ty) in unexplored:
+            dx, dy = tx - px, ty - py
+            dist = np.sqrt(dx**2 + dy**2)
+            if dist == 0:
+                continue
+            dot = ox_n * (dx / dist) + oy_n * (dy / dist)
+            if dot >= np.cos(half_fov):
+                to_remove.append((tx, ty))
+        
+        for pos in to_remove:
+            unexplored.discard(pos)
+    
+    def _compute_unexplored_positions_by_room(self) -> Dict[str, List[List[int]]]:
+        """Get unexplored positions for each visited room.
+        
+        Only returns rooms that have been observed at least once.
+        Rooms that have never been visited are not included.
+        
+        Returns:
+            Dict mapping room_id (str) to list of [x, y] unexplored positions
+        """
+        return {
+            rid: [[x, y] for x, y in sorted(positions)]
+            for rid, positions in self._unexplored_by_room.items()
+            if rid in self._visited_rooms
+        }
+    
+    def _generate_all_correct_coords(
+        self,
+        unexplored_positions_by_room: Dict[str, List[List[int]]]
+    ) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
+        """Generate all candidate and correct coordinates from unexplored regions.
+        
+        Args:
+            unexplored_positions_by_room: Dict mapping room_id to unexplored positions
+            
+        Returns:
+            Tuple of (all_candidate_coords, all_correct_coords)
+        """
+        all_candidate_coords: List[Tuple[int, int]] = []
+        all_correct_coords: List[Tuple[int, int]] = []
+        
+        # Get all room positions from mask for computing explored positions
+        for rid_str, unexplored_list in unexplored_positions_by_room.items():
+            if not unexplored_list:
+                continue
+            
+            rid = int(rid_str)
+            unexplored_set = set((int(p[0]), int(p[1])) for p in unexplored_list)
+            
+            # Compute unexplored regions
+            unexplored_regions = compute_unexplored_regions(unexplored_set)
+            
+            # Get all room positions and compute explored positions
+            room_coords = np.argwhere(self.exploration_room.mask == rid)
+            all_room_positions = set((int(c[0]), int(c[1])) for c in room_coords)
+            explored_positions = all_room_positions - unexplored_set
+            
+            # Generate labeled points (one per region + equal number of distractors)
+            labeled_points, correct_labels = generate_labeled_points(
+                unexplored_regions,
+                explored_positions,
+                num_distractors=len(unexplored_regions),  # Same number as regions
+                seed=None,  # Can be parameterized if needed
+            )
+            
+            # Extract all candidate coords and correct coords
+            for _, (x, y), is_unexplored in labeled_points:
+                all_candidate_coords.append((int(x), int(y)))
+                if is_unexplored:
+                    all_correct_coords.append((int(x), int(y)))
+        
+        return all_candidate_coords, all_correct_coords
+
     def _full_grid_cell_count(self) -> int:
         return int(self.grid_size) * int(self.grid_size)
 
