@@ -30,12 +30,15 @@ def _evaluate_cogmaps(
     room_state = Room.from_dict(turn_log['room_state'])
     agent_state = Agent.from_dict(turn_log['agent_state'])
 
-    # Determine observed items and unexplored_positions_by_room
-    unexplored_positions_by_room = None
+    # Determine observed items and all_correct_coords
+    all_correct_coords = None
     if turn_log.get('is_exploration_phase'):
         exploration_log = turn_log.get('exploration_log', {})
         observed_items = exploration_log.get('observed_items', [obj.name for obj in room_state.all_objects])
-        unexplored_positions_by_room = exploration_log.get('unexplored_positions_by_room', {})
+        # Extract correct coordinates directly
+        all_correct_coords_raw = exploration_log.get('all_correct_coords', [])
+        if all_correct_coords_raw:
+            all_correct_coords = [(int(pt[0]), int(pt[1])) for pt in all_correct_coords_raw]
     elif (not turn_log.get('is_exploration_phase', True)) and 'falsebelief' in turn_log.get('evaluation_log', {}).get('task_type', '').lower():
         observed_items = [turn_log.get('evaluation_log', {}).get('evaluation_data', {}).get('kwargs', {}).get('rotated_object')]
     else:
@@ -47,7 +50,7 @@ def _evaluate_cogmaps(
         room_state,
         agent_state,
         observed_items,
-        unexplored_positions_by_room=unexplored_positions_by_room,
+        all_correct_coords=all_correct_coords,
     )
 
 def evaluate_cognitive_maps_from_turnlogs(

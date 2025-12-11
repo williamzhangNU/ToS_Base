@@ -2,7 +2,7 @@ import copy
 from copy import deepcopy
 from typing import List, Tuple, Dict, Any, Optional, Set, TYPE_CHECKING
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import defaultdict
  
 import random
@@ -10,6 +10,7 @@ import random
 from ..core.object import Agent
 from ..core.room import Room
 from .spatial_solver import SpatialSolver
+from ..utils.cogmap.unexplored import compute_unexplored_regions, generate_labeled_points
 
 if TYPE_CHECKING:
     from ..actions import ActionSequence
@@ -31,6 +32,8 @@ class ExplorationTurnLog:
     information_gain: Optional[float] = None  # Information gain (uses exploration quality metric)
     possible_positions: Optional[Dict[str, List[List[int]]]] = None  # Sampled possible positions per object
     unexplored_positions_by_room: Optional[Dict[str, List[List[int]]]] = None  # Unexplored positions per room (room_id -> [[x,y], ...])
+    all_candidate_coords: Optional[List[Tuple[int, int]]] = None  # All candidate coordinates (unexplored + distractors)
+    all_correct_coords: Optional[List[Tuple[int, int]]] = None  # All correct unexplored coordinates
 
     def to_dict(self):
         return {
@@ -46,6 +49,8 @@ class ExplorationTurnLog:
             "information_gain": self.information_gain or 0.0,
             "possible_positions": self.possible_positions or {},
             "unexplored_positions_by_room": self.unexplored_positions_by_room or {},
+            "all_candidate_coords": [[int(x), int(y)] for x, y in (self.all_candidate_coords or [])],
+            "all_correct_coords": [[int(x), int(y)] for x, y in (self.all_correct_coords or [])],
         }
 
 class ExplorationManager:
@@ -434,6 +439,9 @@ class ExplorationManager:
         # Compute unexplored positions per room based on FOV history
         unexplored_positions_by_room = self._compute_unexplored_positions_by_room()
         
+        # Generate all candidate and correct coordinates for unexplored areas
+        all_candidate_coords, all_correct_coords = self._generate_all_correct_coords(unexplored_positions_by_room)
+        
         step_idx = len(self.turn_logs) + 1
         turn_log = ExplorationTurnLog(
             node_coverage=len(self.observed_nodes) / len(self.node_names),
@@ -448,6 +456,8 @@ class ExplorationManager:
             information_gain=turn_quality if turn_quality is not None else (self.turn_logs[-1].information_gain if self.turn_logs else 0.0),
             possible_positions=possible_positions,
             unexplored_positions_by_room=unexplored_positions_by_room,
+            all_candidate_coords=all_candidate_coords,
+            all_correct_coords=all_correct_coords,
         )
         self.turn_logs.append(turn_log)
     
@@ -544,6 +554,53 @@ class ExplorationManager:
             for rid, positions in self._unexplored_by_room.items()
             if rid in self._visited_rooms
         }
+    
+    def _generate_all_correct_coords(
+        self,
+        unexplored_positions_by_room: Dict[str, List[List[int]]]
+    ) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
+        """Generate all candidate and correct coordinates from unexplored regions.
+        
+        Args:
+            unexplored_positions_by_room: Dict mapping room_id to unexplored positions
+            
+        Returns:
+            Tuple of (all_candidate_coords, all_correct_coords)
+        """
+        all_candidate_coords: List[Tuple[int, int]] = []
+        all_correct_coords: List[Tuple[int, int]] = []
+        
+        # Get all room positions from mask for computing explored positions
+        for rid_str, unexplored_list in unexplored_positions_by_room.items():
+            if not unexplored_list:
+                continue
+            
+            rid = int(rid_str)
+            unexplored_set = set((int(p[0]), int(p[1])) for p in unexplored_list)
+            
+            # Compute unexplored regions
+            unexplored_regions = compute_unexplored_regions(unexplored_set)
+            
+            # Get all room positions and compute explored positions
+            room_coords = np.argwhere(self.exploration_room.mask == rid)
+            all_room_positions = set((int(c[0]), int(c[1])) for c in room_coords)
+            explored_positions = all_room_positions - unexplored_set
+            
+            # Generate labeled points (one per region + equal number of distractors)
+            labeled_points, correct_labels = generate_labeled_points(
+                unexplored_regions,
+                explored_positions,
+                num_distractors=len(unexplored_regions),  # Same number as regions
+                seed=None,  # Can be parameterized if needed
+            )
+            
+            # Extract all candidate coords and correct coords
+            for _, (x, y), is_unexplored in labeled_points:
+                all_candidate_coords.append((int(x), int(y)))
+                if is_unexplored:
+                    all_correct_coords.append((int(x), int(y)))
+        
+        return all_candidate_coords, all_correct_coords
 
     def _full_grid_cell_count(self) -> int:
         return int(self.grid_size) * int(self.grid_size)

@@ -45,6 +45,7 @@ from ..utils.cogmap.analysis import (
 from ..utils.cogmap.confidence import calculate_confidence_metrics
 from ..utils.cogmap.unexplored import (
     compute_unexplored_regions,
+    generate_labeled_points,
     evaluate_unexplored_predictions,
     parse_unexplored_response,
 )
@@ -135,15 +136,17 @@ class RelationsCogMapTurnLog(BaseCogMapTurnLog):
 @dataclass
 class UnexploredCogMapTurnLog(BaseCogMapTurnLog):
     """Turn log for unexplored area predictions."""
-    pred_points: Dict[str, List[Tuple[int, int]]] = field(default_factory=dict)  # room_id -> points
-    gt_unexplored_regions: Dict[str, List[List[int]]] = field(default_factory=dict)  # room_id -> [[x,y], ...]
+    pred_labels: Dict[str, List[int]] = field(default_factory=dict)  # room_id -> predicted labels
+    correct_labels: Dict[str, List[int]] = field(default_factory=dict)  # room_id -> correct labels
+    labeled_points: Dict[str, List[Tuple[int, Tuple[int, int], bool]]] = field(default_factory=dict)  # room_id -> (label, point, is_unexplored)
     metrics_per_room: Dict[str, Any] = field(default_factory=dict)  # room_id -> UnexploredMetrics dict
 
     def to_dict(self) -> Dict[str, Any]:
         out = super().to_dict()
         out.update({
-            "pred_points": {rid: [[int(x), int(y)] for x, y in pts] for rid, pts in self.pred_points.items()},
-            "gt_unexplored_regions": self.gt_unexplored_regions,
+            "pred_labels": self.pred_labels,
+            "correct_labels": self.correct_labels,
+            "labeled_points": {rid: [(lbl, [int(x), int(y)], is_unexp) for lbl, (x, y), is_unexp in pts] for rid, pts in self.labeled_points.items()},
             "metrics_per_room": self.metrics_per_room,
         })
         return out
@@ -255,81 +258,55 @@ class CognitiveMapManager:
     def evaluate_unexplored(
         self, 
         assistant_response: str,
-        unexplored_positions_by_room: Dict[str, List[List[int]]],
+        correct_coords: List[Tuple[int, int]],
     ) -> UnexploredCogMapTurnLog:
-        """Evaluate unexplored area predictions in global coordinates (per-room, then averaged).
+        """Evaluate unexplored area predictions using coordinate selection.
         
-        Predicted points are already in global coordinates (relative to initial pos/ori).
-        For multi-room environments, evaluates each room separately and averages metrics.
-        Rooms marked as "unknown" in predictions are skipped from evaluation.
+        The LLM is presented with candidate coordinates and must select those
+        corresponding to unexplored regions.
         
         Args:
             assistant_response: LLM response text containing unexplored predictions
-            unexplored_positions_by_room: Precomputed unexplored positions per room {room_id: [[x,y], ...]}
-                Only contains rooms that have been visited/explored.
+            correct_coords: List of correct unexplored (x, y) coordinates
             
         Returns:
-            UnexploredCogMapTurnLog with evaluation metrics (averaged across rooms)
+            UnexploredCogMapTurnLog with evaluation metrics
         """
-        json_dict = self._extract_json_from_text(assistant_response)
-        if json_dict is None:
-            return UnexploredCogMapTurnLog(
-                type="unexplored",
-                extraction_success=False,
-                original_response=assistant_response,
-                metrics=UnexploredMetrics.invalid(),
-            )
+        # Parse predicted coordinates from plain text
+        pred_coords = parse_unexplored_response(assistant_response)
         
-        # Parse predicted points per room (already in global coordinates)
-        # Returns None for rooms marked as "unknown"
-        pred_points_per_room = parse_unexplored_response(json_dict)
-        
-        if not unexplored_positions_by_room:
+        if pred_coords is None:
+            # Response was "unknown"
             return UnexploredCogMapTurnLog(
                 type="unexplored",
                 extraction_success=True,
                 original_response=assistant_response,
-                pred_json=json_dict,
+                pred_json={},
                 metrics=UnexploredMetrics.invalid(),
             )
         
-        # Evaluate all rooms from ground truth data
-        gt_unexplored_per_room: Dict[str, List[List[int]]] = {}
-        metrics_per_room: Dict[str, Any] = {}
-        room_metrics_list: List[UnexploredMetrics] = []
+        if not correct_coords:
+            return UnexploredCogMapTurnLog(
+                type="unexplored",
+                extraction_success=True,
+                original_response=assistant_response,
+                pred_json={},
+                metrics=UnexploredMetrics.invalid(),
+            )
         
-        for rid_str, gt_unexplored_list in unexplored_positions_by_room.items():
-            # Get predicted points for this room (None means "unknown" or missing)
-            pred_value = pred_points_per_room.get(rid_str,[])
-
-            # pred_value is a list of points (already global coords)
-            pred_global = list(pred_value)
-            
-            # Get ground truth unexplored positions
-            gt_unexplored_set = set((int(p[0]), int(p[1])) for p in gt_unexplored_list)
-            
-            # Compute connected unexplored regions
-            unexplored_regions = compute_unexplored_regions(gt_unexplored_set)
-            
-            # Store ground truth unexplored positions
-            gt_unexplored_per_room[rid_str] = gt_unexplored_list
-            
-            # Evaluate predictions for this room
-            room_metrics = evaluate_unexplored_predictions(pred_global, unexplored_regions)
-            metrics_per_room[rid_str] = room_metrics.to_dict()
-            room_metrics_list.append(room_metrics)
-        
-        # Average metrics across evaluated rooms (excluding "unknown" ones)
-        avg_metrics = UnexploredMetrics.average(room_metrics_list) if room_metrics_list else UnexploredMetrics.invalid()
+        # Evaluate predictions
+        metrics = evaluate_unexplored_predictions(pred_coords, correct_coords)
         
         return UnexploredCogMapTurnLog(
             type="unexplored",
             extraction_success=True,
             original_response=assistant_response,
-            pred_json=json_dict,
-            gt_unexplored_regions=gt_unexplored_per_room,
-            metrics=avg_metrics,
-            metrics_per_room=metrics_per_room,
+            pred_json={"parsed_from_text": True, "predicted_coords": [[int(x), int(y)] for x, y in pred_coords]},
+            pred_labels={},
+            correct_labels={},
+            labeled_points={},
+            metrics=metrics,
+            metrics_per_room={},
         )
 
     def _eval_global(self, pred_global_br: BaseRoom,  gt_global_br: BaseRoom, gt_room_state_full: BaseRoom, agent_br: BaseRoom, assistant_response: str, pred_json: Dict) -> GlobalCogMapTurnLog:
@@ -526,7 +503,7 @@ class CognitiveMapManager:
                             out[key] = f"({d1}, {r1})"
         return out
 
-    def evaluate_cogmaps(self, responses_by_type: Dict[str, str], gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]], unexplored_positions_by_room: Optional[Dict[str, List[List[int]]]] = None) -> CognitiveMapTurnLog:
+    def evaluate_cogmaps(self, responses_by_type: Dict[str, str], gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]], all_correct_coords: Optional[List[Tuple[int, int]]] = None) -> CognitiveMapTurnLog:
         """Evaluate multiple types and record one aggregate log for the turn.
         
         Args:
@@ -534,7 +511,7 @@ class CognitiveMapManager:
             gt_room: Ground truth room
             gt_agent: Ground truth agent
             observed_items: List of observed item names
-            unexplored_positions_by_room: Precomputed unexplored positions per room {room_id: [[x,y], ...]}
+            all_correct_coords: List of correct unexplored (x, y) coordinates
         """
         out = CognitiveMapTurnLog()
         for map_type_key, resp in (responses_by_type or {}).items():
@@ -542,8 +519,8 @@ class CognitiveMapManager:
                 continue
             # Handle unexplored separately as it needs different parameters
             if map_type_key == "unexplored":
-                if unexplored_positions_by_room is not None:
-                    unexplored_log = self.evaluate_unexplored(resp, unexplored_positions_by_room)
+                if all_correct_coords is not None:
+                    unexplored_log = self.evaluate_unexplored(resp, all_correct_coords)
                     out.unexplored_log = unexplored_log
                 continue
             single = self.evaluate_cogmap_type(resp, gt_room, gt_agent, observed_items, map_type_key)
@@ -1225,8 +1202,18 @@ def test_evaluate_cogmaps():
 
     print(f"\n🚀 Calling manager.evaluate_cogmaps()...")
 
+    # Extract correct coordinates directly
+    all_correct_coords_raw = turn_log['exploration_log'].get('all_correct_coords', [])
+    all_correct_coords = [(int(pt[0]), int(pt[1])) for pt in all_correct_coords_raw] if all_correct_coords_raw else []
+
     # Call the actual evaluate_cogmaps method
-    result = manager.evaluate_cogmaps(responses_by_type, gt_room, gt_agent, observed_items, turn_log['exploration_log']['unexplored_positions_by_room'] )
+    result = manager.evaluate_cogmaps(
+        responses_by_type, 
+        gt_room, 
+        gt_agent, 
+        observed_items, 
+        all_correct_coords=all_correct_coords
+    )
 
     print(f"✅ Successfully called evaluate_cogmaps!")
     print(f"📊 Result type: {type(result)}")

@@ -7,9 +7,64 @@ Uses connectivity analysis to determine if predictions correctly identify distin
 
 from typing import List, Tuple, Set, Dict, Any, Optional
 import numpy as np
+import random
 from collections import deque
 
 from .types import UnexploredMetrics
+
+
+def generate_labeled_points(
+    unexplored_regions: List[Set[Tuple[int, int]]],
+    explored_positions: Set[Tuple[int, int]],
+    num_distractors: Optional[int] = None,
+    seed: Optional[int] = None,
+) -> Tuple[List[Tuple[int, Tuple[int, int], bool]], List[int]]:
+    """Generate labeled points: one representative per unexplored region + distractor points.
+    
+    Args:
+        unexplored_regions: List of connected unexplored region sets
+        explored_positions: Set of already explored positions (for selecting distractors)
+        num_distractors: Number of distractor points (defaults to same as number of regions)
+        seed: Random seed for reproducibility
+        
+    Returns:
+        Tuple of:
+        - List of (label, (x, y), is_unexplored) tuples, randomly shuffled
+        - List of correct labels (unexplored region labels)
+    """
+    if seed is not None:
+        random.seed(seed)
+    
+    if num_distractors is None:
+        num_distractors = len(unexplored_regions)
+    
+    labeled_points: List[Tuple[int, Tuple[int, int], bool]] = []
+    correct_labels: List[int] = []
+    
+    # Select one point from each unexplored region
+    for i, region in enumerate(unexplored_regions):
+        label = i + 1  # Labels start from 1
+        point = random.choice(list(region))
+        labeled_points.append((label, point, True))
+        correct_labels.append(label)
+    
+    # Select distractor points from explored positions
+    if explored_positions and num_distractors > 0:
+        available_distractors = list(explored_positions)
+        if len(available_distractors) > num_distractors:
+            distractor_points = random.sample(available_distractors, num_distractors)
+        else:
+            distractor_points = available_distractors
+        
+        start_label = len(unexplored_regions) + 1
+        for i, point in enumerate(distractor_points):
+            label = start_label + i
+            labeled_points.append((label, point, False))
+    
+    # Shuffle to randomize order
+    random.shuffle(labeled_points)
+    
+    return labeled_points, correct_labels
 
 
 def compute_unexplored_regions(
@@ -61,63 +116,50 @@ def point_in_region(point: Tuple[int, int], region: Set[Tuple[int, int]]) -> boo
 
 
 def evaluate_unexplored_predictions(
-    predicted_points: List[Tuple[int, int]],
-    unexplored_regions: List[Set[Tuple[int, int]]],
+    predicted_coords: List[Tuple[int, int]],
+    correct_coords: List[Tuple[int, int]],
 ) -> UnexploredMetrics:
-    """Evaluate predicted unexplored points against ground truth regions.
+    """Evaluate predicted unexplored coordinates against ground truth.
+    
+    Scoring formula: (correct answers / total correct) - (wrong answers / total correct)
     
     Args:
-        predicted_points: List of (x, y) coordinates predicted as unexplored
-        unexplored_regions: List of connected unexplored region sets
+        predicted_coords: List of (x, y) coordinates predicted as unexplored
+        correct_coords: List of ground truth unexplored (x, y) coordinates
         
     Returns:
-        UnexploredMetrics with precision, recall, region_diversity, and overall scores
+        UnexploredMetrics with precision, recall, and overall scores
     """
-    if not unexplored_regions:
+    if not correct_coords:
         # No unexplored regions exist
-        if not predicted_points:
+        if not predicted_coords:
             # Correctly predicted empty
             return UnexploredMetrics(precision=1.0, recall=1.0, region_diversity=1.0, overall=1.0, valid=True)
         else:
-            # Predicted points when there are none
+            # Predicted coords when there are none
             return UnexploredMetrics(precision=0.0, recall=1.0, region_diversity=0.0, overall=0.0, valid=True)
     
-    if not predicted_points:
+    if not predicted_coords:
         # No predictions when there are unexplored regions
         return UnexploredMetrics(precision=0.0, recall=0.0, region_diversity=0.0, overall=0.0, valid=True)
     
-    # Calculate precision: fraction of predicted points in unexplored regions
-    points_in_unexplored = 0
-    covered_region_indices: Set[int] = set()
-    point_to_region: Dict[Tuple[int, int], int] = {}  # Track which region each point belongs to
+    correct_set = set(correct_coords)
+    predicted_set = set(predicted_coords)
     
-    for point in predicted_points:
-        for i, region in enumerate(unexplored_regions):
-            if point_in_region(point, region):
-                points_in_unexplored += 1
-                covered_region_indices.add(i)
-                point_to_region[point] = i
-                break  # A point can only be in one region
+    # Calculate correct and wrong predictions
+    correct_predictions = len(predicted_set & correct_set)
+    wrong_predictions = len(predicted_set - correct_set)
+    total_correct = len(correct_set)
     
-    precision = points_in_unexplored / len(predicted_points)
+    # Calculate precision and recall
+    precision = correct_predictions / len(predicted_set) if predicted_set else 0.0
+    recall = correct_predictions / total_correct if total_correct else 0.0
     
-    # Calculate recall: fraction of unexplored regions that have at least one prediction
-    recall = len(covered_region_indices) / len(unexplored_regions)
+    # Overall score: (correct / total_correct) - (wrong / total_correct)
+    overall = (correct_predictions / total_correct) - (wrong_predictions / total_correct)
     
-    # Calculate region diversity: are predictions in different regions?
-    # If all valid predictions are in the same region, diversity is low
-    if points_in_unexplored > 0:
-        unique_regions_hit = len(set(point_to_region.values()))
-        max_possible = min(points_in_unexplored, len(unexplored_regions))
-        region_diversity = unique_regions_hit / max_possible if max_possible > 0 else 0.0
-    else:
-        region_diversity = 0.0
-    
-    # Overall: harmonic mean of precision and recall (F1-like)
-    if precision + recall > 0:
-        overall = 2 * precision * recall / (precision + recall)
-    else:
-        overall = 0.0
+    # Region diversity (always 1.0 for coordinate format)
+    region_diversity = 1.0
     
     return UnexploredMetrics(
         precision=precision,
@@ -128,58 +170,109 @@ def evaluate_unexplored_predictions(
     )
 
 
-def parse_unexplored_response(json_data: Dict[str, Any]) -> Dict[str, Optional[List[Tuple[int, int]]]]:
-    """Parse unexplored points from LLM response JSON (multi-room format).
+def parse_unexplored_response(text: str) -> Optional[List[Tuple[int, int]]]:
+    """Parse unexplored coordinates from LLM JSON response.
     
-    Expected format:
+    Expected JSON format:
     {
-        "1": [[x1, y1], [x2, y2], ...],
-        "2": "unknown"
+        "unexplored": "(5, 3); (2, 1); (10, 2)"
+    }
+    
+    Or:
+    {
+        "unexplored": "none"
+    }
+    
+    Or:
+    {
+        "unexplored": "unknown"
     }
     
     Args:
-        json_data: Parsed JSON from LLM response
+        text: JSON response from LLM
         
     Returns:
-        Dict mapping room_id (str) to:
-        - list of (x, y) coordinate tuples if room was observed
-        - None if room value is "unknown" (not visited)
+        List of (x, y) coordinate tuples, or None if "unknown", or empty list if "none"
     """
-    result: Dict[str, Optional[List[Tuple[int, int]]]] = {}
+    import re
+    import json
     
-    if not isinstance(json_data, dict):
-        return result
+    if not isinstance(text, str):
+        return []
     
-    # Multi-room format: keys are room IDs
-    for room_id_key, raw_value in json_data.items():
-        # Skip non-room-id keys (room IDs should be numeric strings)
+    text = text.strip()
+    
+    # Try to extract JSON from the text
+    json_dict = None
+    
+    # Try fenced blocks first
+    fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    candidates = fenced if fenced else []
+    
+    # Fallback: scan for outermost balanced braces
+    if not candidates:
+        stack, start = [], None
+        for i, ch in enumerate(text):
+            if ch == '{':
+                if not stack:
+                    start = i
+                stack.append(ch)
+            elif ch == '}' and stack:
+                stack.pop()
+                if not stack and start is not None:
+                    candidates.append(text[start:i+1])
+                    start = None
+    
+    # Try to parse JSON
+    for cand in candidates:
         try:
-            int(room_id_key)
+            json_dict = json.loads(cand)
+            break
+        except json.JSONDecodeError:
+            continue
+    
+    if not json_dict or not isinstance(json_dict, dict):
+        # Fallback: try to parse as plain text
+        text_lower = text.lower()
+        if "unknown" in text_lower:
+            return None
+        if "none" in text_lower:
+            return []
+        return []
+    
+    # Extract the "unexplored" field
+    unexplored_value = json_dict.get("unexplored", "")
+    
+    if not isinstance(unexplored_value, str):
+        return []
+    
+    unexplored_str = unexplored_value.strip().lower()
+    
+    # Handle special values
+    if unexplored_str == "unknown":
+        return None
+    
+    if unexplored_str == "none" or not unexplored_str:
+        return []
+    
+    # Parse coordinates in format (x, y); (x, y); ...
+    coords: List[Tuple[int, int]] = []
+    pattern = r'\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)'
+    matches = re.findall(pattern, unexplored_value)
+    
+    for match in matches:
+        try:
+            x, y = int(match[0]), int(match[1])
+            coords.append((x, y))
         except ValueError:
             continue
-        
-        # Handle "unknown" value
-        if isinstance(raw_value, str) and raw_value.lower() == "unknown":
-            result[room_id_key] = None
-            continue
-        
-        # Parse coordinate list
-        points: List[Tuple[int, int]] = []
-        if isinstance(raw_value, list):
-            for pt in raw_value:
-                if isinstance(pt, (list, tuple)) and len(pt) >= 2:
-                    try:
-                        x, y = int(pt[0]), int(pt[1])
-                        points.append((x, y))
-                    except (ValueError, TypeError):
-                        continue
-        result[room_id_key] = points
     
-    return result
+    return coords
 
 
 __all__ = [
     'compute_unexplored_regions',
+    'generate_labeled_points',
     'evaluate_unexplored_predictions',
     'parse_unexplored_response',
     'UnexploredMetrics',
