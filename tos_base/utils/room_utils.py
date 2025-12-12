@@ -1479,11 +1479,16 @@ def get_room_description(room: Room, agent: Agent) -> str:
 
     desc = f"Imagine {room_type}: {', '.join(room_names)}. You are currently in room {agent.room_id}. You face north."
     desc += f"\nObjects: {', '.join(objects)}" if objects else ""
+
     if gates:
-        gate_descriptions = []
-        for gate in room.gates:
-            gate_descriptions.append(f"{gate.name} connected room {gate.room_id[0]} and room {gate.room_id[1]}")
-        desc += f"\nDoors: {', '.join(gate_descriptions)}"
+        desc += f"\nDoors: {', '.join(gates)}"
+
+    # include topology connection for gates
+    # if gates:
+    #     gate_descriptions = []
+    #     for gate in room.gates:
+    #         gate_descriptions.append(f"{gate.name} connected room {gate.room_id[0]} and room {gate.room_id[1]}")
+    #     desc += f"\nDoors: {', '.join(gate_descriptions)}"
 
     return desc
 

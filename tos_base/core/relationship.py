@@ -102,16 +102,15 @@ class EgoFrontBins:
 
     @classmethod
     def prompt(cls) -> str:
-        lines = [
-            "Egocentric angle bins (0° is front):",
-            "\t-[-45°,-22.5°)→front-left",
-            "\t-[-22.5°,0°)→front-slight-left",
-            "\t-0°→front",
-            "\t-(0°,22.5°]→front-slight-right",
-            "\t-(22.5°,45°]→front-right",
-            "\t-otherwise→beyond-fov",
-        ]
-        return "\n".join(lines)
+        # Prompt text is for LLM instruction; binning logic stays unchanged.
+        return (
+            "    - Ego: [-45°, -22.5°): front-left. "
+            "[-22.5°, 0°): front-slight-left. "
+            "0°: front."
+            "(0°, 22.5]: front-slight-right. "
+            "(22.5°, 45°]: front-right. "
+            "Else: beyond-fov."
+        )
 
 
 class _CardinalBinsBase:
@@ -131,10 +130,14 @@ class _CardinalBinsBase:
 
     @classmethod
     def prompt(cls) -> str:
-        lines = ["Cardinal angle bins (45° each):"]
-        for i, (lo, hi) in enumerate(cls.BINS):
-            lines.append(f"\t-({lo}°,{hi}°]→{cls.LABELS[i]}")
-        return "\n".join(lines)
+        centers = [0, 45, 90, 135, 180, 225, 270, 315]
+        labels = [str(x).strip().title() for x in cls.LABELS]
+        parts = [f"{labels[i]}={centers[i]}°" for i in range(8)]
+        return (
+            "    - Cardinal: "
+            f"Centers: ({', '.join(parts)}). "
+            "Bin range around each center: [-22.5°, 22.5°), i.e. [center-22.5°, center+22.5°)"
+        )
 
 
 class CardinalBinsAllo(_CardinalBinsBase):
@@ -179,17 +182,10 @@ class StandardDistanceBins:
     
     @classmethod
     def prompt(cls) -> str:
-        lines = [
-            "Distance bins:",
-            "\t-=0→same distance",
-            "\t-(0,2]→near",
-            "\t-(2,4]→mid distance",
-            "\t-(4,8]→slightly far",
-            "\t-(8,16]→far",
-            "\t-(16,32]→very far",
-            "\t->32→extremely far",
-        ]
-        return "\n".join(lines)
+        return (
+            "    - Distance: 0=Same, (0,2]=Near, (2,4]=Mid, (4,8]=Slightly far, "
+            "(8,16]=Far, (16,32]=Very far, >32=Extremely far."
+        )
 
 
 class Dir(Enum):
@@ -501,11 +497,13 @@ class PairwiseRelationshipDiscrete(PairwiseRelationship):
     @classmethod
     def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> str:
         return (
-            "Binned relationship reporting:\n"
-            f"EgoFront (egocentric, object-to-agent); Cardinal (object-to-object).\n"
+            "- Coords: Integer (x, y).\n"
+            "- Bearing: 0° = Front. + = Clockwise, - = Counterclockwise.\n"
+            "- Bins (Input Interpretation):\n"
             f"{EgoFrontBins.prompt()}\n"
             f"{CardinalBinsAllo.prompt()}\n"
-            f"{StandardDistanceBins.prompt()}"
+            f"{StandardDistanceBins.prompt()}\n"
+            f"{OrientationRel.prompt()}"
         )
     
     @classmethod

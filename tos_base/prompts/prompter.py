@@ -3,10 +3,7 @@ from typing import Optional
 from .. import Room, Agent, ActionSequence, EvaluationManager
 from ..utils.room_utils import get_room_description
 from ..core.relationship import (
-    PairwiseRelationship, 
-    PairwiseRelationshipDiscrete, 
-    ProximityRelationship, 
-    DegreeRel, OrientationRel
+    PairwiseRelationshipDiscrete,
 )
 from .prompts import *
 from ..utils.utils import THINK_LABEL, ANSWER_LABEL
@@ -14,7 +11,7 @@ from ..utils.utils import THINK_LABEL, ANSWER_LABEL
 class PromptManager:
     @staticmethod
     def system_prompt() -> str:
-        return  f"You answer should strictly follow this format:\n{THINK_LABEL} Your thoughts\n{ANSWER_LABEL} Your final answer"
+        return f"Strictly follow the required output format with labels {THINK_LABEL} and {ANSWER_LABEL}."
 
     # Simple env message helpers
     def invalid_action_message(self) -> str:
@@ -28,40 +25,19 @@ class PromptManager:
 
     def task_finished_message(self) -> str:
         return "Task finished"
-    # Dynamic, reusable format blocks
-    def _build_format_rules(self, is_exploration: bool) -> str:
-        if self.enable_think:
-            think = "[Your thoughts on next step actions]" if is_exploration else "[Your thoughts on the question]"
-            answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
-            fmt = f"{THINK_LABEL}\n{think}\n{ANSWER_LABEL}\n{answer}"
-        else:
-            answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
-            fmt = f"{ANSWER_LABEL}\n{answer}"
-        return (
-            "!!! IMPORTANT OUTPUT RULES !!!\n"
-            "1. You must always output in this format (labels followed by a newline):\n"
-            f"   {fmt}\n"
-            f"2. Inside {ANSWER_LABEL}, include ONLY the required answer. No extra text, notes, or formatting.\n"
-            "   - No bullet points, prose, boxes, calculations, or explanations.\n"
-            "3. Any deviation is invalid."
-        )
 
     def get_format_footer(self, is_exploration: bool) -> str:
         # Decide answer hint
         if is_exploration:
             answer_hint = "Actions: [ ... ]"
         else:
-            # Special stricter format for InternVL during evaluation
-            if self._is_internvl_model():
-                answer_hint = "[ONLY the letter (A, B, C, ...)]"
-            else:
-                answer_hint = "[your answer (only required answer, no extra text, notes, formatting or anything else)]"
+            answer_hint = "[your answer (only required answer, no extra text, notes, formatting or anything else)]"
 
         if self.enable_think:
-            think = "[Your thoughts on next step actions]" if is_exploration else "[Your thoughts on the question]"
-            return f"Strictly follow this format:\n{THINK_LABEL}\n{think}\n{ANSWER_LABEL}\n{answer_hint}"
+            think = "[Reasoning for next step. Track pose/coverage.]" if is_exploration else "[Your thoughts on the question]"
+            return f"## Output Format\n{THINK_LABEL}\n{think}\n{ANSWER_LABEL}\n{answer_hint}"
         else:
-            return f"Strictly follow this format:\n{ANSWER_LABEL}\n{answer_hint}"
+            return f"## Output Format\n{ANSWER_LABEL}\n{answer_hint}"
 
     def __init__(self, config, np_random: np.random.RandomState, image_handler = None):
         self.config = config
@@ -73,7 +49,6 @@ class PromptManager:
         """Return True if current model is InternVL (e.g., internvl3_5)."""
         model_cfg = self.config.get_model_config()
         model_name = str((model_cfg or {}).get('model_name', '')).lower()
-        print(f"Model name: {model_name}")
         return 'internvl' in model_name
 
     def get_initial_observation_prompt(
@@ -90,21 +65,18 @@ class PromptManager:
 
         room_desc = get_room_description(room, agent)
 
-        observation_instructions = (
-            PairwiseRelationship.prompt()
-            + f"\n{DegreeRel.prompt()}"
-            + f"\n{OrientationRel.prompt()}"
-            + f"\n{PairwiseRelationshipDiscrete.prompt()}"
-        )
-        if not is_vision:
-            observation_instructions += f"\n{ProximityRelationship.prompt()}"
+        # Keep this section aligned to Prompts.md (coords + bins).
+        observation_instructions = PairwiseRelationshipDiscrete.prompt()
 
+        exp_instructions = ActionSequence.get_usage_instructions(is_vision)
         if is_active:
-            exp_instructions = f"Action Instructions:\n{ActionSequence.get_usage_instructions(is_vision)}"
-            exp_instructions += f"\n\nYou have a maximum of {self.config.max_exp_steps} exploration steps."
+            exp_instructions += (
+                "- Exploration Strategy:\n"
+                "\t- Achieve complete coverage with the fewest steps;\n"
+                "\t- Prefer actions that reveal more unknowns; avoid redundancy"
+            )
         else:
-            exp_history_str = f"Action Instructions:\n{ActionSequence.get_usage_instructions(is_vision)}"
-            exp_history_str += f"## Exploration History\n{exp_history['obs_str']}" 
+            exp_history_str = f"## Exploration History\n{exp_history['obs_str']}"
         images_path = []
         if is_vision:
             images = [self.image_handler.get_image('instruction'), self.image_handler.get_image('label')]
@@ -118,28 +90,24 @@ class PromptManager:
         template = INSTRUCTION_TEMPLATE_VISION if is_vision else INSTRUCTION_TEMPLATE_TEXT
 
         fmt_kwargs = {
-            'title': 'Spatial Exploration Task' if is_active else 'Spatial Reasoning Task',
-            'intro': SHARED_INTRO_TEXT if not is_vision else SHARED_INTRO_VISION,
             'goal_lines': (
-                'Goal: Build a **COMPLETE AND ACCURATE MAP** of the environment with **MINIMAL TOTAL COST**.'
-                if is_active else ''
+                GOAL_EXPLORATION if is_active else ''
             ),
-            'format_rules': self._build_format_rules(is_active),
+            'env_rules_header': ENV_RULES_HEADER,
+            'format_rules': self.get_format_footer(is_active),
             'observation_instructions': observation_instructions,
-            'exp_instructions': exp_instructions if is_active else '',
+            'exp_instructions': exp_instructions,
             'room_info': room_desc,
-            'multiroom_rules': SHARED_MULTIROOM_RULES,
-            'active_rules_extra': ACTIVE_RULES_EXTRA if is_active else '',
-            'rules_common': SHARED_RULES_COMMON,
+            'context_footer': (
+                "Unless otherwise specified, treat the starting position as origin (0, 0), facing North (+y axis).\n"
+                f"You have a maximum of {int(self.config.max_exp_steps)} steps."
+            ),
             'exp_history': exp_history_str if not is_active else '',
             'vision_example': (VISION_EXAMPLE.format(image_placeholder=self.config.image_placeholder) if is_vision else ''),
         }
 
         obs_str = template.format(**fmt_kwargs)
-        if is_active:
-            obs['obs_str'] = obs_str + "\n" + self.get_format_footer(is_active)
-        else:
-            obs['obs_str'] = obs_str
+        obs['obs_str'] = obs_str
         return obs, images_path
         
             
@@ -148,4 +116,5 @@ class PromptManager:
         """Generate the evaluation prompt."""
         eval_question = eval_manager.get_current_question()
         assert eval_question, "No question found after exploration phase"
-        return EVALUATION_INSTRUCTION.format(eval_question=f"## Evaluation Question\n{eval_question}")
+        q = EVALUATION_INSTRUCTION.format(eval_question=f"## Evaluation Question\n{eval_question}")
+        return f"{q}\n\n{self.get_format_footer(False)}"
