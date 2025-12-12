@@ -199,46 +199,9 @@ class UnexploredMetrics(BaseCogMetrics):
     """Metrics for evaluating unexplored area predictions.
     
     Attributes:
-        precision: Fraction of predicted points that are in unexplored areas
-        recall: Fraction of unexplored regions that are covered by predictions
-        overall: Combined score (harmonic mean of precision and recall)
+        overall: Combined score for unexplored area prediction accuracy
     """
-    precision: float = 0.0
-    recall: float = 0.0
-
-    def to_dict(self) -> Dict[str, float]:
-        return {
-            "precision": float(self.precision),
-            "recall": float(self.recall),
-            "overall": float(self.overall),
-        }
-
-    @classmethod
-    def invalid(cls) -> 'UnexploredMetrics':
-        return cls(precision=0.0, recall=0.0, overall=0.0, valid=False)
-
-    @staticmethod
-    def from_dict(d: Dict[str, float]) -> 'UnexploredMetrics':
-        if not isinstance(d, dict) or not d:
-            return UnexploredMetrics.invalid()
-        return UnexploredMetrics(
-            precision=float(d.get('precision', 0.0)),
-            recall=float(d.get('recall', 0.0)),
-            overall=float(d.get('overall', 0.0)),
-            valid=True,
-        )
-
-    @staticmethod
-    def average(items: List['UnexploredMetrics']) -> 'UnexploredMetrics':
-        valid_items = [i for i in items if isinstance(i, UnexploredMetrics) and i.valid]
-        if not valid_items:
-            return UnexploredMetrics.invalid()
-        return UnexploredMetrics(
-            precision=float(np.mean([i.precision for i in valid_items])),
-            recall=float(np.mean([i.recall for i in valid_items])),
-            overall=float(np.mean([i.overall for i in valid_items])),
-            valid=True,
-        )
+    pass
 
 
 __all__ = [
