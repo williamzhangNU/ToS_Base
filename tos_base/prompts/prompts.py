@@ -1,10 +1,27 @@
-GOAL_EXPLORATION = "Goal: Build a **COMPLETE AND ACCURATE MAP** of the environment with **MINIMAL TOTAL COST**."
-
-ENV_RULES_HEADER = (
-    "- Rooms connect via doors\n"
-    "- Vision: 90° FOV. Confined to current room. No occlusion in room. "
-    "Doors block vision. Exception: When located in a doorway, door is open and invisible, you can see into both connected rooms."
+SHARED_INTRO_TEXT = "You are a spatial reasoner in a 2D, text-only N×M grid. Every object including you is a point at integer (x, y) coordinates."
+SHARED_INTRO_VISION = (
+    "You are a spatial reasoner in a 3D simulated environment. "
+    "The world is rendered in 3D but abstracted into a discrete 2D grid of size N×M. "
+    "Every entity, including yourself, is represented by integer coordinates (x, y) on this grid."
 )
+
+SHARED_MULTIROOM_RULES = """\
+Multi-room rules (may exist multiple rooms):
+- Your vision is confined to your current room.
+- Doors block vision between rooms.
+- Exception: When located in a doorway, door is open and invisible, you can see into both connected rooms.
+- Rooms connect via doors on vertical (front/back) or horizontal (left/right) walls.
+"""
+
+SHARED_RULES_COMMON = """\
+- FOV is 90°, you can NOT see objects outside your FOV.
+- Track your current and initial pose
+"""
+
+ACTIVE_RULES_EXTRA = """\
+- Achieve complete coverage with the fewest steps;
+- Prefer actions that reveal more unknowns; avoid redundancy
+"""
 
 VISION_EXAMPLE = """\
 Here is an example of your observation: blue cylinder 1 m straight ahead; red cylinder 2 m straight ahead; yellow cylinder 2 m at 45° to your front-left; green cylinder 3 m at 22.5° to your front-slight-right:
@@ -17,43 +34,61 @@ Items without a meaningful facing direction are shown once.
 """
 
 INSTRUCTION_TEMPLATE_TEXT = """\
-Role: Spatial Reasoner in a 2D N×M grid.
+# {title}
+
+{intro}
+
 {goal_lines}
 
-## Environment Rules
-{env_rules_header}
+{multiroom_rules}
+
+Relationship instructions:
 {observation_instructions}
 
-## Actions & Grammar
 {exp_instructions}
 
-## Current Context:
-{room_info}
-{context_footer}
-{exp_history}
-
 {format_rules}
+
+Rules:
+{active_rules_extra}{rules_common}
+
+Room Layout and initial state:
+{room_info}
+
+{exp_history}
 """
 
+
+
+
+
 INSTRUCTION_TEMPLATE_VISION = """\
-Role: Spatial Reasoner in a 2D N×M grid.
+# {title}
+
+{intro}
+
 {goal_lines}
 
-## Environment Rules
-{env_rules_header}
+{multiroom_rules}
+
+Relationship instructions:
 {observation_instructions}
 
-## Actions & Grammar
 {exp_instructions}
 
-## Current Context:
+{format_rules}
+
+Rules:
+{active_rules_extra}{rules_common}
+
+Room Layout and initial state:
 {room_info}
-{context_footer}
 
 {vision_example}
-{exp_history}
 
-{format_rules}
+{exp_history}
 """
 
 EVALUATION_INSTRUCTION = "{eval_question}"
+SHORT_EXPLORATION_PROMPT = "Please respond with valid actions to explore the rooms."
+SHORT_EVALUATION_PROMPT = "Please respond with a valid answer to the question."
