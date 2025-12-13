@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 from .html_templates import HTML_TEMPLATE, CSS_STYLES, JAVASCRIPT_CODE
 
 from ..utils import parse_llm_response
-from .charts import create_infogain_plot, create_cogmap_metrics_plot, create_correlation_plot
+from .charts import create_infogain_plot, create_cogmap_metrics_plot, create_correlation_plot, create_scalar_metric_plot
 
 
 
@@ -118,6 +118,9 @@ class HTMLGenerator:
             cogmap_update_plot = None
             cogmap_full_plot = None
             cogmap_self_tracking_plot = None
+            confidence_match_plot = None
+            confidence_ratio_plot = None
+            unexplored_f1_plot = None
 
             # Exploration infogain plot
             if self.exp_summary.get("group_performance", {}).get(gname):
@@ -129,9 +132,13 @@ class HTMLGenerator:
             # Cognitive map plots (only global now)
             if self.cogmap_summary.get("group_performance", {}).get(gname):
                 cogmap_group = self.cogmap_summary["group_performance"][gname]
-                update_data = cogmap_group.pop("cogmap_update_per_turn", {})
-                full_data = cogmap_group.pop("cogmap_full_per_turn", {})
-                self_tracking_data = cogmap_group.pop("self_tracking_per_turn", {})
+                per_turn = cogmap_group.pop("per_turn_metrics", {}) if isinstance(cogmap_group, dict) else {}
+                update_data = per_turn.get("cogmap_update_per_turn", cogmap_group.pop("cogmap_update_per_turn", {}))
+                full_data = per_turn.get("cogmap_full_per_turn", cogmap_group.pop("cogmap_full_per_turn", {}))
+                self_tracking_data = per_turn.get("self_tracking_per_turn", cogmap_group.pop("self_tracking_per_turn", {}))
+                conf_match = per_turn.get("confidence_match_per_turn", cogmap_group.pop("confidence_match_per_turn", []))
+                conf_ratio = per_turn.get("confidence_ratio_per_turn", cogmap_group.pop("confidence_ratio_per_turn", []))
+                unexplored_f1 = per_turn.get("unexplored_f1_per_turn", cogmap_group.pop("unexplored_f1_per_turn", []))
 
                 # Only accept new shape (metric -> list)
                 global_update = update_data if isinstance(update_data, dict) else {}
@@ -150,6 +157,28 @@ class HTMLGenerator:
                 if global_self_tracking and any(global_self_tracking.values()):
                     title = f"{gname} - Global (Self-Tracking)"
                     cogmap_self_tracking_plot = create_cogmap_metrics_plot(global_self_tracking, title)
+
+                if isinstance(conf_match, list):
+                    confidence_match_plot = create_scalar_metric_plot(
+                        conf_match,
+                        title=f"Confidence Match per Turn - {gname}",
+                        y_label="Match",
+                        ylim=(0.0, 1.0),
+                    )
+                if isinstance(conf_ratio, list):
+                    confidence_ratio_plot = create_scalar_metric_plot(
+                        conf_ratio,
+                        title=f"Confidence High-Ratio per Turn - {gname}",
+                        y_label="High ratio",
+                        ylim=(0.0, 1.0),
+                    )
+                if isinstance(unexplored_f1, list):
+                    unexplored_f1_plot = create_scalar_metric_plot(
+                        unexplored_f1,
+                        title=f"Unexplored F1 per Turn - {gname}",
+                        y_label="F1",
+                        ylim=(0.0, 1.0),
+                    )
 
             # Generate correlation plots
             correlation_plots = {}
@@ -207,7 +236,9 @@ class HTMLGenerator:
             if cogmap_group:
                 # Display main cognitive map metrics (exclude per_turn data)
                 main_metrics = {k: v for k, v in cogmap_group.items()
-                               if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn", "self_tracking_per_turn"]}
+                               if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn", "self_tracking_per_turn",
+                                            "confidence_match_per_turn", "confidence_ratio_per_turn", "unexplored_f1_per_turn",
+                                            "per_turn_metrics"]}
                 if main_metrics:
                     f.write("<div class='metrics-box cogmap'>\n")
                     f.write("<h4>🧠 Cognitive Map</h4>\n")
@@ -239,6 +270,12 @@ class HTMLGenerator:
                 available_plots.append(("Cognitive Map (Full)", cogmap_full_plot, "Cognitive Map Full Turn Averages"))
             if cogmap_self_tracking_plot:
                 available_plots.append(("Cognitive Map (Self-Tracking)", cogmap_self_tracking_plot, "Cognitive Map Self-Tracking Turn Averages"))
+            if confidence_match_plot:
+                available_plots.append(("Confidence Match", confidence_match_plot, "Confidence Match per Turn"))
+            if confidence_ratio_plot:
+                available_plots.append(("Confidence Ratio", confidence_ratio_plot, "Confidence Ratio per Turn"))
+            if unexplored_f1_plot:
+                available_plots.append(("Unexplored F1", unexplored_f1_plot, "Unexplored F1 per Turn"))
 
             # Add correlation plots
             if correlation_plots.get('cogmap_vs_accuracy'):
@@ -308,7 +345,7 @@ class HTMLGenerator:
         def filter_per_turn_keys(data):
             if not isinstance(data, dict):
                 return data
-            return {k: v for k, v in data.items() if "per_turn" not in k}
+            return {k: v for k, v in data.items() if ("per_turn" not in k and k != "per_turn_metrics")}
 
         # Exploration metrics
         exploration_metrics = metrics.get("exploration", {})
@@ -347,15 +384,37 @@ class HTMLGenerator:
         """Generate cognitive map charts and information gain chart in a single row"""
         # Extract information gain data from exploration turns
         infogain_per_turn = entry['metrics'].get('exploration', {}).pop('infogain_per_turn', [])
-        cogmap_update_data = entry['metrics'].get('cogmap', {}).pop('cogmap_update_per_turn', {})
-        cogmap_full_data = entry['metrics'].get('cogmap', {}).pop('cogmap_full_per_turn', {})
-        self_tracking_data = entry['metrics'].get('cogmap', {}).pop('self_tracking_per_turn', {})
+        cogmap_metrics = entry['metrics'].get('cogmap', {}) or {}
+        per_turn_metrics = cogmap_metrics.get('per_turn_metrics', {}) if isinstance(cogmap_metrics, dict) else {}
+        cogmap_update_data = per_turn_metrics.get('cogmap_update_per_turn', None)
+        cogmap_full_data = per_turn_metrics.get('cogmap_full_per_turn', None)
+        self_tracking_data = per_turn_metrics.get('self_tracking_per_turn', None)
+        confidence_match_per_turn = per_turn_metrics.get('confidence_match_per_turn', None)
+        confidence_ratio_per_turn = per_turn_metrics.get('confidence_ratio_per_turn', None)
+        unexplored_f1_per_turn = per_turn_metrics.get('unexplored_f1_per_turn', None)
+
+        # Backward compatibility (older metric shape)
+        if cogmap_update_data is None:
+            cogmap_update_data = entry['metrics'].get('cogmap', {}).pop('cogmap_update_per_turn', {})
+        if cogmap_full_data is None:
+            cogmap_full_data = entry['metrics'].get('cogmap', {}).pop('cogmap_full_per_turn', {})
+        if self_tracking_data is None:
+            self_tracking_data = entry['metrics'].get('cogmap', {}).pop('self_tracking_per_turn', {})
+        if confidence_match_per_turn is None:
+            confidence_match_per_turn = entry['metrics'].get('cogmap', {}).pop('confidence_match_per_turn', [])
+        if confidence_ratio_per_turn is None:
+            confidence_ratio_per_turn = entry['metrics'].get('cogmap', {}).pop('confidence_ratio_per_turn', [])
+        if unexplored_f1_per_turn is None:
+            unexplored_f1_per_turn = entry['metrics'].get('cogmap', {}).pop('unexplored_f1_per_turn', [])
 
         # Generate plots
         infogain_plot = None
         update_plot = None
         full_plot = None
         self_tracking_plot = None
+        confidence_match_plot = None
+        confidence_ratio_plot = None
+        unexplored_f1_plot = None
 
         # Information gain plot
         if infogain_per_turn:
@@ -374,6 +433,28 @@ class HTMLGenerator:
             title = f"{sample_name} - Global (Self-Tracking)"
             self_tracking_plot = create_cogmap_metrics_plot(self_tracking_data, title)
 
+        if isinstance(confidence_match_per_turn, list):
+            confidence_match_plot = create_scalar_metric_plot(
+                confidence_match_per_turn,
+                title=f"Confidence Match per Turn - {sample_name}",
+                y_label="Match",
+                ylim=(0.0, 1.0),
+            )
+        if isinstance(confidence_ratio_per_turn, list):
+            confidence_ratio_plot = create_scalar_metric_plot(
+                confidence_ratio_per_turn,
+                title=f"Confidence High-Ratio per Turn - {sample_name}",
+                y_label="High ratio",
+                ylim=(0.0, 1.0),
+            )
+        if isinstance(unexplored_f1_per_turn, list):
+            unexplored_f1_plot = create_scalar_metric_plot(
+                unexplored_f1_per_turn,
+                title=f"Unexplored F1 per Turn - {sample_name}",
+                y_label="F1",
+                ylim=(0.0, 1.0),
+            )
+
         # Display all plots in horizontal layout (up to 4 plots for samples)
         available_plots = []
         if infogain_plot:
@@ -384,6 +465,12 @@ class HTMLGenerator:
             available_plots.append(("Cognitive Map (Full)", full_plot, "Global Full Metrics"))
         if self_tracking_plot:
             available_plots.append(("Cognitive Map (Self-Tracking)", self_tracking_plot, "Global Self-Tracking Metrics"))
+        if confidence_match_plot:
+            available_plots.append(("Confidence Match", confidence_match_plot, "Confidence Match per Turn"))
+        if confidence_ratio_plot:
+            available_plots.append(("Confidence Ratio", confidence_ratio_plot, "Confidence Ratio per Turn"))
+        if unexplored_f1_plot:
+            available_plots.append(("Unexplored F1", unexplored_f1_plot, "Unexplored F1 per Turn"))
 
         if available_plots:
             f.write("<div class='cognitive-map-charts'>\n")
@@ -497,8 +584,8 @@ class HTMLGenerator:
         cogmap_types = [
             ('global', '🗺️ Global Cognitive Map Response'),
             ('local', '🗺️ Local Cognitive Map Response'),
-            ('relations', '🗺️ Relations Cognitive Map Response'),
-            ('rooms', '🗺️ Rooms Cognitive Map Response'),
+            # ('relations', '🗺️ Relations Cognitive Map Response'),
+            # ('rooms', '🗺️ Rooms Cognitive Map Response'),
             ('unexplored', '🔍 Unexplored Areas Response'),
             ('false_belief', '🧭 False Belief Cognitive Map Response')
         ]
@@ -625,11 +712,11 @@ class HTMLGenerator:
                         f.write("</div>\n")  # End json-container
 
                 elif map_type == 'unexplored':
-                    # For unexplored, display pred_json and gt_json in two columns
-                    pred_json = data.get('pred_json', {})
-                    gt_json = data.get('gt_json', {})
+                    all_candidate_points = data.get('all_candidate_points', [])
+                    pred_points = data.get('pred_points', [])
+                    correct_points = data.get('correct_points', [])
 
-                    if pred_json or gt_json:
+                    if all_candidate_points or pred_points or correct_points:
                         f.write("<div class='json-container unexplored'>\n")
                         f.write("<div class='json-header'>")
                         f.write("<strong>🔍 Unexplored Areas JSONs</strong>")
@@ -637,26 +724,28 @@ class HTMLGenerator:
                         f.write("<div class='json-content'>\n")
                         f.write("<div class='json-compare unexplored'>\n")
 
-                        # Left - pred_json
+                        # Left - all candidates
                         f.write("<div class='json-box left predicted'>\n")
-                        f.write("<strong>🤖 Predicted</strong>\n")
-                        if pred_json:
-                            f.write("<div class='json-content-inner'>\n")
-                            f.write(f"<pre>{escape(json.dumps(pred_json, indent=2))}</pre>\n")
-                            f.write("</div>\n")
-                        else:
-                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("<strong>📍 Candidates</strong>\n")
+                        f.write("<div class='json-content-inner'>\n")
+                        f.write(f"<pre>{escape(json.dumps(all_candidate_points, indent=2))}</pre>\n")
+                        f.write("</div>\n")
                         f.write("</div>\n")
 
-                        # Right - gt_json
+                        # Middle - predicted
+                        f.write("<div class='json-box middle gt-observed'>\n")
+                        f.write("<strong>🤖 Predicted</strong>\n")
+                        f.write("<div class='json-content-inner'>\n")
+                        f.write(f"<pre>{escape(json.dumps(pred_points, indent=2))}</pre>\n")
+                        f.write("</div>\n")
+                        f.write("</div>\n")
+
+                        # Right - correct
                         f.write("<div class='json-box right gt'>\n")
                         f.write("<strong>🎯 Ground Truth</strong>\n")
-                        if gt_json:
-                            f.write("<div class='json-content-inner'>\n")
-                            f.write(f"<pre>{escape(json.dumps(gt_json, indent=2))}</pre>\n")
-                            f.write("</div>\n")
-                        else:
-                            f.write("<div class='empty-json'>(no data)</div>\n")
+                        f.write("<div class='json-content-inner'>\n")
+                        f.write(f"<pre>{escape(json.dumps(correct_points, indent=2))}</pre>\n")
+                        f.write("</div>\n")
                         f.write("</div>\n")
 
                         f.write("</div>\n")  # End json-compare
@@ -671,16 +760,16 @@ class HTMLGenerator:
         # Extract metrics
         global_log = cogmap_log.get("global", {})
         local_log = cogmap_log.get("local", {})
-        rooms_log = cogmap_log.get("rooms", {})
-        relations_log = cogmap_log.get("relations", {})
+        # rooms_log = cogmap_log.get("rooms", {})
+        # relations_log = cogmap_log.get("relations", {})
         unexplored_log = cogmap_log.get("unexplored", {})
 
         metrics_block = {
             "Global": global_log.get("metrics", {}) if global_log else {},
             "Global (Full)": global_log.get("metrics_full", {}) if global_log else {},
             "Local": local_log.get("metrics", {}) if local_log else {},
-            "Rooms": rooms_log.get("metrics", {}) if rooms_log else {},
-            "Relations": relations_log.get("metrics", {}) if relations_log else {},
+            # "Rooms": rooms_log.get("metrics", {}) if rooms_log else {},
+            # "Relations": relations_log.get("metrics", {}) if relations_log else {},
             "Unexplored": unexplored_log.get("metrics", {}) if unexplored_log else {}
         }
 

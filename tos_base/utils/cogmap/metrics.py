@@ -37,7 +37,8 @@ def compute_facing_sim(pred_room: BaseRoom, gt_room: BaseRoom) -> float:
     tot = cor = 0.0
     for name in names:
         g = gt[name]
-        if not g.has_orientation or "door" in g.name:
+        name_l = str(g.name).lower()
+        if (not g.has_orientation) or isinstance(g, Gate) or ("door" in name_l):
             continue
         p = pred.get(name)
         tot += 1.0

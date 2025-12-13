@@ -324,7 +324,7 @@ def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 5,
                 prev_dist = np.linalg.norm(np.array(pred_prev_dict[name].pos) - np.array(gt_prev_dict[name].pos))
                 curr_dist = np.linalg.norm(np.array(pred_curr_dict[name].pos) - np.array(gt_curr_dict[name].pos))
                 # Object is updating towards GT if current distance is smaller
-                update_scores.append(curr_dist < prev_dist)
+                update_scores.append(curr_dist <= prev_dist)
 
         # Average of boolean values (True=1, False=0)
         update_metric = float(np.mean(update_scores)) if update_scores else 0.0
@@ -337,7 +337,7 @@ def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 5,
 
         selected: set[str] = set()
         for name, prev_pts in prev_pp.items():
-            if name in curr_pp and abs(len(prev_pts) - len(curr_pp[name])) < int(threshold):
+            if abs(len(prev_pts) - len(curr_pp[name])) < int(threshold):
                 selected.add(name)
 
         if not selected:

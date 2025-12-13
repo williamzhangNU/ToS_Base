@@ -592,6 +592,12 @@ class ExplorationManager:
         """
         all_candidate_coords: List[Tuple[int, int]] = []
         all_correct_coords: List[Tuple[int, int]] = []
+
+        # Convert to global frame where origin is the agent's initial position (0, 0).
+        ox, oy = int(self.init_pos[0]), int(self.init_pos[1])
+
+        def _shift(p: Tuple[int, int]) -> Tuple[int, int]:
+            return (int(p[0]) - ox, int(p[1]) - oy)
         
         for rid_str, unexplored_list in unexplored_positions_by_room.items():
             if not unexplored_list:
@@ -606,8 +612,8 @@ class ExplorationManager:
             if k <= 0:
                 continue
 
-            unexplored_samples = self._rng.sample(list(unexplored_set), k)
-            explored_samples = self._rng.sample(list(explored_set), k)
+            unexplored_samples = [_shift(p) for p in self._rng.sample(list(unexplored_set), k)]
+            explored_samples = [_shift(p) for p in self._rng.sample(list(explored_set), k)]
 
             all_correct_coords.extend(unexplored_samples)
             all_candidate_coords.extend(unexplored_samples)

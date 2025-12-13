@@ -13,13 +13,12 @@ BASE_COGMAP_PROMPT = """\
 Represent the scene as a JSON map. 
 
 ### Schema (shared)
-- position: [x, y] integers (or integer-like)
+- position: [x, y] integers
 - facing: "north|south|east|west" (global) or "+x|-x|+y|-y" (local/rooms)
 
 ### General rules (shared)
 - Include only observed objects.
-- Approximate positions to nearest integer.
-- MUST include facing key if the object has facing direction according to the label image that has two copies.
+- MUST include facing key if the object has facing direction.
 """
 
 from ..utils.utils import THINK_LABEL, ANSWER_LABEL
@@ -41,13 +40,13 @@ def _cogmap_format_rules(enable_think: bool) -> str:
 
 # Global-only specifics
 COGMAP_INSTRUCTION_GLOBAL_ONLY = """\
-## Cognitive Map — Global (specifics)
+## Global Cognitive Map 
 
 - Grid: concise global map on an N×M grid.
 - Frame: origin [0,0] is your initial position; your initial facing direction is north.
 - Content: include all observed objects and gates; include the agent
 - Facing: use "north|south|east|west".
-- Confidence: use "high" if you are certain about the position prediction, "low" if uncertain.
+- Confidence: use "high" if you are certain about the position prediction, "low" if uncertain. Cross-checking observations from multiple viewpoints can reduce ambiguity.
 
 Example:
 ```json
@@ -60,12 +59,12 @@ Example:
 
 # Local-only specifics
 COGMAP_INSTRUCTION_LOCAL_ONLY = """\
-## Cognitive Map — Local (specifics)
+## Local Cognitive Map
 
 - Structure: include an "objects" dict; each object's position and facing are relative to the agent at time of writing.
 - Frame: must include "origin":"agent". Always keep in mind that the origin is the agent's current position and orientation.
   - +y: facing forward
-  - +x: right when facing +y; -x: left; -y: back toward door
+  - when facing +y: +x -> right, -x -> left, -y -> backward
   - All positions/facings relative to this frame.
 - Content: "objects" dict; include all objects and doors in your current field of view; exclude agent.
 - Facing: use "+x|-x|+y|-y" (local axes).
@@ -83,13 +82,13 @@ Example:
 
 # Rooms-only specifics
 COGMAP_INSTRUCTION_ROOMS_ONLY = """\
-## Cognitive Map — Rooms (specifics)
+## Rooms Cognitive Map
 
 - Structure: rooms keyed by room id.
 - Frame per room: include "origin":"<door_name>|initial".
   - origin is the first entry door; for starting room use "initial" (starting position)
   - +y: into room (direction of walking through the door); north for starting room
-  - +x: right when facing +y; -x: left; -y: back toward door
+  - when facing +y: +x -> right, -x -> left, -y -> backward
   - All positions/facings relative to this frame.
 - Content: room's "objects" dict; exclude agent and entry door.
 - Facing: "+x|-x|+y|-y".
@@ -134,17 +133,15 @@ def get_cogmap_prompt(map_type: str, enable_think: bool = True, all_candidate_co
 
 # --- Unexplored Areas Prompt ---
 UNEXPLORED_INSTRUCTION = """\
-### Task
+### Unexplored Areas
 Select ALL coordinates that correspond to points in unexplored regions.
 {candidate_coords_str}
 ### Rules
-- Coordinates are in GLOBAL coordinates (relative to your initial position and orientation)
+- Coordinates are in GLOBAL coordinates (relative to your starting position ([0,0]) and orientation (north))
 - Output only the selected coordinates in the same format
-- Separate multiple coordinates with semicolons
-- If all areas are explored, output "none"
+- Separate with semicolons
 
-### Output Format
-Just the coordinates separated by semicolons:
+Example:
 ```json
 {{
     "unexplored": "(5, 3); (2, 1); (10, 2)"

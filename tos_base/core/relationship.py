@@ -103,15 +103,15 @@ class EgoFrontBins:
     @classmethod
     def prompt(cls) -> str:
         lines = [
-            "Egocentric angle bins (0° is front):",
-            "\t-[-45°,-22.5°)→front-left",
-            "\t-[-22.5°,0°)→front-slight-left",
-            "\t-0°→front",
-            "\t-(0°,22.5°]→front-slight-right",
-            "\t-(22.5°,45°]→front-right",
-            "\t-otherwise→beyond-fov",
+            "Egocentric angle bins (0° is front): ",
+            "[-45°,-22.5°)→front-left, ",
+            "[-22.5°,0°)→front-slight-left, ",
+            "0°→front, ",
+            "(0°,22.5°]→front-slight-right, ",
+            "(22.5°,45°]→front-right, ",
+            "otherwise→beyond-fov.",
         ]
-        return "\n".join(lines)
+        return "".join(lines)
 
 
 class _CardinalBinsBase:
@@ -131,10 +131,10 @@ class _CardinalBinsBase:
 
     @classmethod
     def prompt(cls) -> str:
-        lines = ["Cardinal angle bins (45° each):"]
+        lines = ["Cardinal angle bins (45° each): "]
         for i, (lo, hi) in enumerate(cls.BINS):
-            lines.append(f"\t-({lo}°,{hi}°]→{cls.LABELS[i]}")
-        return "\n".join(lines)
+            lines.append(f"({lo}°,{hi}°]→{cls.LABELS[i]}, ")
+        return "".join(lines)
 
 
 class CardinalBinsAllo(_CardinalBinsBase):
@@ -180,16 +180,16 @@ class StandardDistanceBins:
     @classmethod
     def prompt(cls) -> str:
         lines = [
-            "Distance bins:",
-            "\t-=0→same distance",
-            "\t-(0,2]→near",
-            "\t-(2,4]→mid distance",
-            "\t-(4,8]→slightly far",
-            "\t-(8,16]→far",
-            "\t-(16,32]→very far",
-            "\t->32→extremely far",
+            "Distance bins: ",
+            "=0→same distance, ",
+            "(0,2]→near, ",
+            "(2,4]→mid distance, ",
+            "(4,8]→slightly far, ",
+            "(8,16]→far, ",
+            "(16,32]→very far, ",
+            "32→extremely far.",
         ]
-        return "\n".join(lines)
+        return "".join(lines)
 
 
 class Dir(Enum):
@@ -558,7 +558,7 @@ class ProximityRelationship:
     
     @classmethod
     def prompt(cls, bin_system: BinSystem = None, distance_bin_system: DistanceBinSystem = None) -> str:
-        return f"Proximity: relations between close objects (≤{cls.PROXIMITY_THRESHOLD}m). Use cardinal directions (facing=north) and standard distance bins."
+        return f"Proximity: relations between close objects (≤{cls.PROXIMITY_THRESHOLD}m). Use cardinal directions and standard distance bins."
     
     def to_string(self, a_name: str, b_name: str) -> str:
         rel_str = self.pairwise_rel.to_string()

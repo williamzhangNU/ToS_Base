@@ -201,24 +201,21 @@ class UnexploredMetrics(BaseCogMetrics):
     Attributes:
         precision: Fraction of predicted points that are in unexplored areas
         recall: Fraction of unexplored regions that are covered by predictions
-        region_diversity: Whether predicted points represent different regions
         overall: Combined score (harmonic mean of precision and recall)
     """
     precision: float = 0.0
     recall: float = 0.0
-    region_diversity: float = 0.0
 
     def to_dict(self) -> Dict[str, float]:
         return {
             "precision": float(self.precision),
             "recall": float(self.recall),
-            "region_diversity": float(self.region_diversity),
             "overall": float(self.overall),
         }
 
     @classmethod
     def invalid(cls) -> 'UnexploredMetrics':
-        return cls(precision=0.0, recall=0.0, region_diversity=0.0, overall=0.0, valid=False)
+        return cls(precision=0.0, recall=0.0, overall=0.0, valid=False)
 
     @staticmethod
     def from_dict(d: Dict[str, float]) -> 'UnexploredMetrics':
@@ -227,7 +224,6 @@ class UnexploredMetrics(BaseCogMetrics):
         return UnexploredMetrics(
             precision=float(d.get('precision', 0.0)),
             recall=float(d.get('recall', 0.0)),
-            region_diversity=float(d.get('region_diversity', 0.0)),
             overall=float(d.get('overall', 0.0)),
             valid=True,
         )
@@ -240,7 +236,6 @@ class UnexploredMetrics(BaseCogMetrics):
         return UnexploredMetrics(
             precision=float(np.mean([i.precision for i in valid_items])),
             recall=float(np.mean([i.recall for i in valid_items])),
-            region_diversity=float(np.mean([i.region_diversity for i in valid_items])),
             overall=float(np.mean([i.overall for i in valid_items])),
             valid=True,
         )

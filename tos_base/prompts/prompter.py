@@ -28,23 +28,6 @@ class PromptManager:
 
     def task_finished_message(self) -> str:
         return "Task finished"
-    # Dynamic, reusable format blocks
-    def _build_format_rules(self, is_exploration: bool) -> str:
-        if self.enable_think:
-            think = "[Your thoughts on next step actions]" if is_exploration else "[Your thoughts on the question]"
-            answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
-            fmt = f"{THINK_LABEL}\n{think}\n{ANSWER_LABEL}\n{answer}"
-        else:
-            answer = "Actions: [ ... ]" if is_exploration else "[your answer]"
-            fmt = f"{ANSWER_LABEL}\n{answer}"
-        return (
-            "!!! IMPORTANT OUTPUT RULES !!!\n"
-            "1. You must always output in this format (labels followed by a newline):\n"
-            f"   {fmt}\n"
-            f"2. Inside {ANSWER_LABEL}, include ONLY the required answer. No extra text, notes, or formatting.\n"
-            "   - No bullet points, prose, boxes, calculations, or explanations.\n"
-            "3. Any deviation is invalid."
-        )
 
     def get_format_footer(self, is_exploration: bool) -> str:
         # Decide answer hint
@@ -98,12 +81,10 @@ class PromptManager:
         if not is_vision:
             observation_instructions += f"\n{ProximityRelationship.prompt()}"
 
-        if is_active:
-            exp_instructions = f"Action Instructions:\n{ActionSequence.get_usage_instructions(is_vision)}"
-            exp_instructions += f"\n\nYou have a maximum of {self.config.max_exp_steps} exploration steps."
-        else:
-            exp_history_str = f"Action Instructions:\n{ActionSequence.get_usage_instructions(is_vision)}"
-            exp_history_str += f"## Exploration History\n{exp_history['obs_str']}" 
+        action_instructions = f"Action Instructions:\n{ActionSequence.get_usage_instructions(is_vision)}"
+        exp_history_str = ""
+        if not is_active:
+            exp_history_str = f"## Exploration History\n{exp_history['obs_str']}"
         images_path = []
         if is_vision:
             images = [self.image_handler.get_image('instruction'), self.image_handler.get_image('label')]
@@ -123,14 +104,17 @@ class PromptManager:
                 'Goal: **Minimize total COST** while building a complete and accurate map of the environment.'
                 if is_active else ''
             ),
-            'format_rules': self._build_format_rules(is_active),
             'observation_instructions': observation_instructions,
-            'exp_instructions': exp_instructions if is_active else '',
+            'action_instructions': action_instructions,
             'room_info': room_desc,
+            'steps_left': (
+                f"\n\nYou have a maximum of {self.config.max_exp_steps} exploration steps."
+                if is_active else ''
+            ),
             'multiroom_rules': SHARED_MULTIROOM_RULES,
             'active_rules_extra': ACTIVE_RULES_EXTRA if is_active else '',
             'rules_common': SHARED_RULES_COMMON,
-            'exp_history': exp_history_str if not is_active else '',
+            'exp_history': exp_history_str,
             'vision_example': (VISION_EXAMPLE.format(image_placeholder=self.config.image_placeholder) if is_vision else ''),
         }
 

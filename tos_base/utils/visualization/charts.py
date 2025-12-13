@@ -29,6 +29,31 @@ def create_infogain_plot(infogain_per_turn: List[float], title: str) -> str:
     return _fig_to_data_uri(fig)
 
 
+def create_scalar_metric_plot(
+    values: List[Optional[float]],
+    title: str,
+    y_label: str,
+    ylim: Optional[tuple[float, float]] = (0.0, 1.0),
+) -> Optional[str]:
+    if not isinstance(values, list) or len(values) <= 1:
+        return None
+    y = [np.nan if not isinstance(v, (int, float)) else float(v) for v in values]
+    if not any(isinstance(v, (int, float)) for v in values):
+        return None
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    turns = list(range(1, len(y) + 1))
+    ax.plot(turns, y, marker='o', linewidth=2, markersize=4)
+    ax.set_xlabel('Turn')
+    ax.set_ylabel(y_label)
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim(0.5, len(turns) + 0.5)
+    if ylim is not None:
+        ax.set_ylim(float(ylim[0]), float(ylim[1]))
+    return _fig_to_data_uri(fig)
+
+
 def create_cogmap_metrics_plot(
     series: Dict[str, List[Optional[float]]],
     title: str,

@@ -22,10 +22,8 @@ When you are at a door, you can see objects from both connected rooms (within FO
 Available Actions:
 {actions}
 
-
 Action Grammar (HARD CONSTRAINT):
-Your {answer_label} must match this grammar (label followed by newline):
-{answer_label}\nActions: [ <M>* <F> ]
+Actions: [ <M>* <F> ]
 <M> = "JumpTo(OBJ)" | "Rotate(DEG)"
 <F> = "Observe()" | "Query(OBJ)" | "Term()"
 Constraints:
@@ -37,8 +35,6 @@ Constraints:
 
 Examples:
 {examples}
-
-
 Rules:
 - Observe action only reports from your current position and facing direction. If you jump multiple times, the final Observe() action gives the view only from your last position.
 - Actions execute in order. Field of view: {field_of_view}°.
@@ -517,16 +513,15 @@ class ActionSequence:
         final_actions = [cls for cls in ACTION_CLASSES if cls.is_final()]
 
         action_desc = (
-            "Movement Actions:\n" +
+            "Movement (<M>):\n" +
             "\n".join(f"- {cls.format_desc}: {_desc(cls)}" for cls in motion_actions) +
-            "\n\n" +
-            "Final Actions:\n" +
+            "\n" +
+            "Final (<F>):\n" +
             "\n".join(f"- {cls.format_desc}: {_desc(cls)}" for cls in final_actions)
         )
         examples = (
             f"Valid: Actions: [JumpTo(red door), Rotate(90), JumpTo(table), Observe()]\n" +
-            f"Valid: Actions: [Observe()]\n" +
-            f"Valid: Actions: [Query(table)]\n" +
+            f"Valid: Actions: [Observe()] | Query(table)\n" +
             f"Invalid (no final action): Actions: [JumpTo(table)]\n" +
             f"Invalid (more than one final action): Actions: [Observe(), Rotate(90), Observe()]\n" +
             f"Invalid (termination with other actions): Actions: [JumpTo(table), Term()]\n\n"
@@ -537,5 +532,4 @@ class ActionSequence:
             examples=examples,
             field_of_view=BaseAction.get_field_of_view(),
             costs="\n".join(f"- {cls.format_desc}: {cls.cost}" for cls in [ObserveAction, QueryAction]),
-            answer_label=ANSWER_LABEL
         )

@@ -45,15 +45,14 @@ INSTRUCTION_TEMPLATE_TEXT = """\
 Relationship instructions:
 {observation_instructions}
 
-{exp_instructions}
-
-{format_rules}
+{action_instructions}
 
 Rules:
 {active_rules_extra}{rules_common}
 
 Room Layout and initial state:
 {room_info}
+{steps_left}
 
 {exp_history}
 """
@@ -74,15 +73,14 @@ INSTRUCTION_TEMPLATE_VISION = """\
 Relationship instructions:
 {observation_instructions}
 
-{exp_instructions}
-
-{format_rules}
+{action_instructions}
 
 Rules:
 {active_rules_extra}{rules_common}
 
 Room Layout and initial state:
 {room_info}
+{steps_left}
 
 {vision_example}
 

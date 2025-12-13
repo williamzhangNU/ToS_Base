@@ -121,7 +121,7 @@ def evaluate_unexplored_predictions(
 ) -> UnexploredMetrics:
     """Evaluate predicted unexplored coordinates against ground truth.
     
-    Scoring formula: (correct answers / total correct) - (wrong answers / total correct)
+    Overall score: F1 of precision/recall.
     
     Args:
         predicted_coords: List of (x, y) coordinates predicted as unexplored
@@ -130,18 +130,11 @@ def evaluate_unexplored_predictions(
     Returns:
         UnexploredMetrics with precision, recall, and overall scores
     """
-    if not correct_coords:
-        # No unexplored regions exist
-        if not predicted_coords:
-            # Correctly predicted empty
-            return UnexploredMetrics(precision=1.0, recall=1.0, region_diversity=1.0, overall=1.0, valid=True)
-        else:
-            # Predicted coords when there are none
-            return UnexploredMetrics(precision=0.0, recall=1.0, region_diversity=0.0, overall=0.0, valid=True)
+    assert correct_coords, "No correct coordinates provided"
     
     if not predicted_coords:
         # No predictions when there are unexplored regions
-        return UnexploredMetrics(precision=0.0, recall=0.0, region_diversity=0.0, overall=0.0, valid=True)
+        return UnexploredMetrics(precision=0.0, recall=0.0, overall=0.0, valid=True)
     
     correct_set = set(correct_coords)
     predicted_set = set(predicted_coords)
@@ -155,64 +148,41 @@ def evaluate_unexplored_predictions(
     precision = correct_predictions / len(predicted_set) if predicted_set else 0.0
     recall = correct_predictions / total_correct if total_correct else 0.0
     
-    # Overall score: (correct / total_correct) - (wrong / total_correct)
-    overall = (correct_predictions / total_correct) - (wrong_predictions / total_correct)
-    
-    # Region diversity (always 1.0 for coordinate format)
-    region_diversity = 1.0
-    
+    # Overall score: F1
+    overall = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+
     return UnexploredMetrics(
         precision=precision,
         recall=recall,
-        region_diversity=region_diversity,
         overall=overall,
         valid=True,
     )
 
 
-def parse_unexplored_response(text: str) -> Optional[List[Tuple[int, int]]]:
-    """Parse unexplored coordinates from LLM JSON response.
-    
-    Expected JSON format:
-    {
-        "unexplored": "(5, 3); (2, 1); (10, 2)"
-    }
-    
-    Or:
-    {
-        "unexplored": "none"
-    }
-    
-    Or:
-    {
-        "unexplored": "unknown"
-    }
-    
-    Args:
-        text: JSON response from LLM
-        
-    Returns:
-        List of (x, y) coordinate tuples, or None if "unknown", or empty list if "none"
+def parse_unexplored_response(text: str) -> List[Tuple[int, int]]:
+    """Parse predicted coordinates from an LLM response.
+
+    The input is expected to follow the unexplored prompt output format, i.e. a JSON object:
+    {"unexplored": "(5, 3); (2, 1); (10, 2)"}.
+    This parser is intentionally more permissive to handle common formatting variations.
+
+    Supported forms include:
+    - JSON: {"unexplored": "(1,2); (3,4)"} or {"unexplored": [[1,2],[3,4]]}
+    - Plain text: "(1,2), (3,4)" / "[1, 2]; [3, 4]" / mixed separators
+
+    Returns: list[(x, y)] (possibly empty).
     """
-    import re
     import json
-    
-    if not isinstance(text, str):
-        return []
-    
-    text = text.strip()
-    
-    # Try to extract JSON from the text
-    json_dict = None
-    
-    # Try fenced blocks first
-    fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
-    candidates = fenced if fenced else []
-    
-    # Fallback: scan for outermost balanced braces
-    if not candidates:
+    import re
+
+    def _extract_json_candidates(s: str) -> List[str]:
+        fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", s, flags=re.DOTALL | re.IGNORECASE)
+        candidates = list(fenced) if fenced else []
+        if candidates:
+            return candidates
+        # Fallback: scan for outermost balanced braces
         stack, start = [], None
-        for i, ch in enumerate(text):
+        for i, ch in enumerate(s):
             if ch == '{':
                 if not stack:
                     start = i
@@ -220,54 +190,83 @@ def parse_unexplored_response(text: str) -> Optional[List[Tuple[int, int]]]:
             elif ch == '}' and stack:
                 stack.pop()
                 if not stack and start is not None:
-                    candidates.append(text[start:i+1])
+                    candidates.append(s[start:i + 1])
                     start = None
-    
-    # Try to parse JSON
-    for cand in candidates:
+        return candidates
+
+    def _parse_pairs_from_string(s: str) -> List[Tuple[int, int]]:
+        # (1,2) or [1,2] or {1,2} with optional spaces; allow negative ints
+        pair_pat = r"[\(\[\{]\s*(-?\d+)\s*,\s*(-?\d+)\s*[\)\]\}]"
+        out: List[Tuple[int, int]] = []
+        for x_str, y_str in re.findall(pair_pat, s):
+            try:
+                out.append((int(x_str), int(y_str)))
+            except Exception:
+                continue
+        # Also allow bare "1,2" pairs if nothing else matched
+        if not out:
+            bare_pat = r"(-?\d+)\s*,\s*(-?\d+)"
+            for x_str, y_str in re.findall(bare_pat, s):
+                try:
+                    out.append((int(x_str), int(y_str)))
+                except Exception:
+                    continue
+        # De-dup while keeping order
+        seen = set()
+        uniq: List[Tuple[int, int]] = []
+        for p in out:
+            if p in seen:
+                continue
+            seen.add(p)
+            uniq.append(p)
+        return uniq
+
+    def _parse_value(v) -> List[Tuple[int, int]]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return _parse_pairs_from_string(v)
+        if isinstance(v, (list, tuple)):
+            coords: List[Tuple[int, int]] = []
+            for it in v:
+                if isinstance(it, (list, tuple)) and len(it) == 2:
+                    try:
+                        coords.append((int(it[0]), int(it[1])))
+                    except Exception:
+                        continue
+                elif isinstance(it, str):
+                    coords.extend(_parse_pairs_from_string(it))
+            # De-dup while keeping order
+            seen = set()
+            uniq: List[Tuple[int, int]] = []
+            for p in coords:
+                if p in seen:
+                    continue
+                seen.add(p)
+                uniq.append(p)
+            return uniq
+        if isinstance(v, dict):
+            # Sometimes nested, e.g. {"coords": "..."}; best-effort: search within JSON text
+            return _parse_pairs_from_string(json.dumps(v, ensure_ascii=False))
+        return []
+
+    if not isinstance(text, str):
+        return []
+    raw = text.strip()
+
+    # Try JSON first
+    json_dict = None
+    for cand in _extract_json_candidates(raw):
         try:
             json_dict = json.loads(cand)
             break
         except json.JSONDecodeError:
             continue
-    
-    if not json_dict or not isinstance(json_dict, dict):
-        # Fallback: try to parse as plain text
-        text_lower = text.lower()
-        if "unknown" in text_lower:
-            return None
-        if "none" in text_lower:
-            return []
-        return []
-    
-    # Extract the "unexplored" field
-    unexplored_value = json_dict.get("unexplored", "")
-    
-    if not isinstance(unexplored_value, str):
-        return []
-    
-    unexplored_str = unexplored_value.strip().lower()
-    
-    # Handle special values
-    if unexplored_str == "unknown":
-        return None
-    
-    if unexplored_str == "none" or not unexplored_str:
-        return []
-    
-    # Parse coordinates in format (x, y); (x, y); ...
-    coords: List[Tuple[int, int]] = []
-    pattern = r'\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)'
-    matches = re.findall(pattern, unexplored_value)
-    
-    for match in matches:
-        try:
-            x, y = int(match[0]), int(match[1])
-            coords.append((x, y))
-        except ValueError:
-            continue
-    
-    return coords
+    if isinstance(json_dict, dict):
+        return _parse_value(json_dict.get("unexplored"))
+
+    # Fallback: plain text parsing
+    return _parse_value(raw)
 
 
 __all__ = [
