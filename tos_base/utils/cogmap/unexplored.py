@@ -130,18 +130,11 @@ def evaluate_unexplored_predictions(
     Returns:
         UnexploredMetrics with precision, recall, and overall scores
     """
-    if not correct_coords:
-        # No unexplored regions exist
-        if not predicted_coords:
-            # Correctly predicted empty
-            return UnexploredMetrics(overall=1.0, valid=True)
-        else:
-            # Predicted coords when there are none
-            return UnexploredMetrics(overall=0.0, valid=True)
+    assert correct_coords, "No correct coordinates provided"
     
     if not predicted_coords:
         # No predictions when there are unexplored regions
-        return UnexploredMetrics(overall=0.0, valid=True)
+        return UnexploredMetrics(precision=0.0, recall=0.0, overall=0.0, valid=True)
     
     correct_set = set(correct_coords)
     predicted_set = set(predicted_coords)
@@ -151,10 +144,16 @@ def evaluate_unexplored_predictions(
     wrong_predictions = len(predicted_set - correct_set)
     total_correct = len(correct_set)
     
-    # Overall score: (correct / total_correct) - (wrong / total_correct)
-    overall = max((correct_predictions / total_correct) - (wrong_predictions / total_correct), 0.0)
+    # Calculate precision and recall
+    precision = correct_predictions / len(predicted_set) if predicted_set else 0.0
+    recall = correct_predictions / total_correct if total_correct else 0.0
     
+    # Overall score: F1
+    overall = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+
     return UnexploredMetrics(
+        precision=precision,
+        recall=recall,
         overall=overall,
         valid=True,
     )
