@@ -100,9 +100,9 @@ class ImageHandler:
         
         # Handle tuple (dx, dz) format
         dx, dz = direction
-        if dz < 0:
+        if dz > 0:
             return 'north'
-        elif dz > 0:
+        elif dz < 0:
             return 'south'
         elif dx > 0:
             return 'east'
@@ -161,7 +161,7 @@ class ImageHandler:
         else:
             direction_str = self._normalize_direction(direction)
             # Try to resolve name to cam_id
-            cam_id = self.name_2_cam_id[name] if name in self.name_2_cam_id else name[0]+'_'+name[1]
+            cam_id = self.name_2_cam_id[name] if name in self.name_2_cam_id else str(name[0]) + '_' + str(name[1])
             key = f"{cam_id}_facing_{direction_str}"
         
         if key not in self._image_path_map:
