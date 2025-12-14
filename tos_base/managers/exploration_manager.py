@@ -227,6 +227,8 @@ class ExplorationManager:
             'avg_action_fail_ratio': _avg_key('action_fail_ratio'),
             'avg_valid_action_ratio': _avg_key('valid_action_ratio'),
             'avg_final_information_gain': _avg_key('final_information_gain'),
+            'avg_false_belief_steps': _avg_key('false_belief_steps'),
+            'avg_false_belief_f1': _avg_key('false_belief_f1'),
             'infogain_per_turn': ExplorationManager._avg_lists_carry_forward([p.get('information_gain_per_turn') or [] for p in pre]),
         }
 
@@ -373,6 +375,16 @@ class ExplorationManager:
         action_fail_ratio = action_fail_count / total_turns if total_turns > 0 else 0.0
         valid_action_ratio = valid_action_count / total_turns if total_turns > 0 else 0.0
 
+        # False belief phase summary (separate from main exploration steps).
+        fb_turn_logs = env_data.get('false_belief_turn_logs') or []
+        fb_steps = len(fb_turn_logs)
+        fb_f1 = None
+        for t in reversed(fb_turn_logs):
+            v = (t.get('false_belief_log') or {}).get('correctly_identified_changes')
+            if isinstance(v, (int, float)):
+                fb_f1 = float(v)
+                break
+
         return {
             'last_node_coverage': node_cov,
             'last_edge_coverage': edge_cov,
@@ -383,6 +395,8 @@ class ExplorationManager:
             'final_information_gain': final_infogain,
             'action_fail_ratio': action_fail_ratio,
             'valid_action_ratio': valid_action_ratio,
+            'false_belief_steps': int(fb_steps),
+            'false_belief_f1': float(fb_f1) if isinstance(fb_f1, (int, float)) else 0.0,
         }
     
     # No passive history generation here; proxies produce text histories directly.
@@ -619,6 +633,8 @@ class ExplorationManager:
             all_candidate_coords.extend(unexplored_samples)
             all_candidate_coords.extend(explored_samples)
         
+        # Randomize candidate order so prompts don't leak structure (keep correct coords unchanged).
+        self._rng.shuffle(all_candidate_coords)
         return all_candidate_coords, all_correct_coords
 
     def _full_grid_cell_count(self) -> int:

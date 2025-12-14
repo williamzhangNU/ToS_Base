@@ -840,6 +840,7 @@ class HTMLGenerator:
         def render_logs(logs, title_prefix="Turn"):
             for t_idx, env_log in enumerate(logs):
                 turn_num = env_log.get('turn_number', t_idx)
+                safe_prefix = ''.join(c if str(c).isalnum() else '_' for c in str(title_prefix))
                 f.write("<div class='turn-split'>\n")
                 f.write(f"<h3>🔄 {title_prefix} {turn_num}</h3>\n")
                 f.write("<div class='turn-content'>\n")
@@ -850,12 +851,12 @@ class HTMLGenerator:
                 # Display user message (environment observation)
                 if env_log.get('user_message'):
                     # Use unique ID based on log content hash or index to avoid collisions
-                    obs_id = f"obs_{page_idx}_{title_prefix}_{t_idx}"
+                    obs_id = f"obs_{page_idx}_{safe_prefix}_{t_idx}"
                     self._render_expandable_block(f, env_log['user_message'], obs_id, "👤 Environment Observation")
 
                 # Display assistant thinking and action
                 if env_log.get('assistant_think_message'):
-                    think_id = f"think_{page_idx}_{title_prefix}_{t_idx}"
+                    think_id = f"think_{page_idx}_{safe_prefix}_{t_idx}"
                     self._render_expandable_block(f, env_log['assistant_think_message'], think_id, "🤔 Assistant Thinking", "think")
                 self._render_simple_block(f, env_log.get('assistant_parsed_message', ''), "💬 Assistant Action", "answer")
 

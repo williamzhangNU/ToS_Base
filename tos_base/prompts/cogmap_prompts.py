@@ -134,7 +134,7 @@ def get_cogmap_prompt(map_type: str, enable_think: bool = True, all_candidate_co
 # --- Unexplored Areas Prompt ---
 UNEXPLORED_INSTRUCTION = """\
 ### Unexplored Areas
-Select ALL coordinates that correspond to points in unexplored regions.
+Select ALL coordinates that correspond to points in **unexplored/unobserved** regions.
 {candidate_coords_str}
 ### Rules
 - Coordinates are in GLOBAL coordinates (relative to your starting position ([0,0]) and orientation (north))

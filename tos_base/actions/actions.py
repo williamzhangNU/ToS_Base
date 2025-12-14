@@ -5,7 +5,7 @@ import numpy as np
 from .base import BaseAction, ActionResult
 from ..core.object import Gate
 from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, RelationTriple, OrientationRel, DegreeRel
-from vagen.env.spatial.room_modifier import ChangedObject
+from vagen.env.spatial.Base.tos_base.utils.room_modifier import ChangedObject
 
 """
 Specific action implementations for spatial exploration.

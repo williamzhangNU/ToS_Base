@@ -28,6 +28,8 @@ def transform_ori(ori_world: np.ndarray, anchor_ori: np.ndarray) -> np.ndarray:
 
 
 def transform_baseroom(room: BaseRoom, anchor_pos: np.ndarray, anchor_ori: np.ndarray) -> BaseRoom:
+    # NOTE: Only transform positions. Facing/orientation is evaluated in absolute frame
+    # (and local/rooms predicted facings are already normalized upstream).
     for obj in room.objects:
         p = transform_point(obj.pos, anchor_pos, anchor_ori)
         obj.pos = p

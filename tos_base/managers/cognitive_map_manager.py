@@ -683,11 +683,27 @@ class CognitiveMapManager:
         # Per-turn global metrics (list)
         per_turn_update, per_turn_full, per_turn_self_tracking = CognitiveMapManager.compute_per_turn_global_metrics(cog_logs)
         conf_match, conf_ratio = calculate_confidence_metrics(env_data)
-        # Unexplored per-turn (F1)
-        unexp_f1_per_turn: List[float] = []
+        # Unexplored: keep per-turn F1 for plotting, but aggregate by points (not turn-average).
+        unexp_f1_per_turn: List[Optional[float]] = []
+        tp = fp = fn = 0  # micro counts across valid turns
         for d in cog_logs:
-            um = UnexploredMetrics.from_dict(((d.get('unexplored') or {}).get('metrics') or {}))
+            un = (d.get('unexplored') or {})
+            um = UnexploredMetrics.from_dict((un.get('metrics') or {}))
             unexp_f1_per_turn.append(float(um.overall) if um.valid else None)
+
+            # Skip empty/invalid turns for all cogmap metrics (unexplored included).
+            if not um.valid:
+                continue
+            if not (un.get('all_candidate_points') and un.get('correct_points')):
+                continue
+            try:
+                pred = {tuple(map(int, p)) for p in (un.get('pred_points') or []) if isinstance(p, (list, tuple)) and len(p) == 2}
+                corr = {tuple(map(int, p)) for p in (un.get('correct_points') or []) if isinstance(p, (list, tuple)) and len(p) == 2}
+            except Exception:
+                continue
+            tp += len(pred & corr)
+            fp += len(pred - corr)
+            fn += len(corr - pred)
 
         def _avg_list(vals: List[Optional[float]]) -> float:
             xs = [float(v) for v in (vals or []) if isinstance(v, (int, float))]
@@ -695,7 +711,9 @@ class CognitiveMapManager:
 
         conf_match_avg = _avg_list(conf_match)
         conf_ratio_avg = _avg_list(conf_ratio)
-        unexp_f1_avg = _avg_list(unexp_f1_per_turn)
+        unexp_p = (tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+        unexp_r = (tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+        unexp_f1_avg = (2.0 * unexp_p * unexp_r / (unexp_p + unexp_r)) if (unexp_p + unexp_r) > 0 else 0.0
 
         false_belief_acc = BaseCogMetrics.average([BaseCogMetrics.from_dict(m) for m in false_belief_metrics]).to_dict() if false_belief_metrics else None
         if exp_type == 'passive':

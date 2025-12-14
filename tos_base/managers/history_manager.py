@@ -50,6 +50,9 @@ class HistoryManager:
         ))
         self.room_dict = room_dict
         self.agent_dict = agent_dict
+        # Agent initial pose must exist; it must NOT be derived from possibly-final pos/ori.
+        if "init_pos" not in self.agent_dict or "init_ori" not in self.agent_dict:
+            raise ValueError("agent_dict must include init_pos/init_ori (initial state).")
         self.image_dir = image_dir
         self.observation_config = observation_config
         if observation_config['exp_type'] == 'passive':
@@ -88,10 +91,11 @@ class HistoryManager:
         return 0 <= index < len(self.exploration_turn_logs)
 
     def _generate_room_key(self, room_dict, agent_dict):
-        agent_dict.pop("pos",None)
-        agent_dict.pop("ori",None)
-        room_str = json.dumps({**room_dict, **agent_dict}, sort_keys=True)
-
+        # Do NOT mutate the input dict: we still need pos/ori for saving state.
+        a = dict(agent_dict or {})
+        a.pop("pos", None)
+        a.pop("ori", None)
+        room_str = json.dumps({**room_dict, **a}, sort_keys=True)
         return hash(room_str)
         
     def _load(self):
@@ -429,6 +433,19 @@ class HistoryManager:
             with open(metrics_file, 'r') as f:
                 sample_data["metrics"] = json.load(f)
 
+        # Ensure exploration metrics are derived from logs (incl. false-belief stats).
+        try:
+            env_data = {
+                "env_turn_logs": sample_data.get("env_turn_logs") or [],
+                "false_belief_turn_logs": sample_data.get("false_belief_turn_logs") or [],
+                "evaluation_tasks": sample_data.get("evaluation_tasks") or {},
+            }
+            if not isinstance(sample_data.get("metrics"), dict):
+                sample_data["metrics"] = {}
+            sample_data["metrics"]["exploration"] = ExplorationManager.aggregate_per_sample(env_data)
+        except Exception:
+            pass
+
         # Process image paths if save_images is enabled
         if save_images:
             # Process exploration turn logs
@@ -451,6 +468,7 @@ class HistoryManager:
     def _compute_sample_metrics(self) -> Dict:
         env_data = {
             "env_turn_logs": self.exploration_turn_logs,
+            "false_belief_turn_logs": self.false_belief_turn_logs,
             "evaluation_tasks": self.evaluation_turn_logs,
         }
         return {

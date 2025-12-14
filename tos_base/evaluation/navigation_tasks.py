@@ -40,16 +40,16 @@ VIEW_2_ACTION_TEMPLATE = (
     "Then you have executed an action sequence and changed to a new location and facing direction.\n"
     "You observe the following:\n"
     "{final_obs}\n\n"
-    "What action sequence led to this final view? The action sequence must be valid.\n\n"
-    "Answer format: <action sequence>\n"
+    "What action sequence led to this final view? The action sequence must be valid and only contain move actions.\n\n"
+    "Answer format: <sequence of move actions>\n"
     "Example: JumpTo(lamp), Rotate(90)\n"
 )
 
 VIEW_2_ACTION_REV_TEMPLATE = (
     "You are currently at the termination location.\n"
-    "What action sequence will navigate you back to your starting position? The action sequence must be valid.\n\n"
+    "What action sequence will navigate you back to your starting position? The action sequence must be valid and only contain move actions.\n\n"
     "You must end with a JumpTo(initial_pos) action.\n"
-    "Answer format: <action sequence>\n"
+    "Answer format: <sequence of move actions>\n"
     "Example: JumpTo(lamp), Rotate(90), JumpTo(initial_pos)\n"
 )
 
@@ -415,7 +415,7 @@ class View2ActionTextEvaluationTask(BaseView2ActionEvaluationTask):
         for v in visible:
             txt = f"{v['name']} is at {v['direction']}, {v['distance']}"
             if v.get('orientation'):
-                txt += f", facing {v['orientation']}"
+                txt += f", {v['orientation']}"
             obs_parts.append(txt)
         return "; ".join(obs_parts)
 
@@ -489,8 +489,8 @@ if __name__ == "__main__":
     # 3. Delimiters: Comma vs semicolon vs newline for action sequences.
     # 4. Action abbreviations: "Rotate" vs "Rot" (if supported).
 
-    task_names = ['fwd_fov', 'bwd_nav_text', 'bwd_nav_vision']
-    # task_names = ['fwd_fov']
+    # task_names = ['fwd_fov', 'bwd_nav_text', 'bwd_nav_vision']
+    task_names = ['bwd_nav_text']
 
     for task_name in task_names:
         print(f"\nTesting task: {task_name}")

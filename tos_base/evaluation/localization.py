@@ -20,16 +20,16 @@ Task Overview:
 """
 
 LOC_2_ACTION_TEMPLATE = (
-    "You move to a new location and your current facing direction is {orientation}.\n"
+    "You move to a new location and face {orientation}.\n"
     "{observations}\n"
-    "Treat {origin_name} as the new origin (0, 0).\n"
-    "What is your current 2D coordinate (x, y)?\n\n"
+    "{origin_instruction}"
+    "What is your new 2D coordinate (x, y)?\n\n"
     "Answer format: (x, y)\n"
     "Example: (2, -1)\n"
 )
 
 ACTION_2_LOC_TEMPLATE = (
-    "Treat {origin_name} as the new origin (0, 0).\n"
+    "{origin_instruction}"
     "You move to {loc} and face {direction}.\n"
     "What is the egocentric relation of {target}?\n\n"
     "Answer format: <direction>, <distance>\n"
@@ -122,6 +122,11 @@ class BaseLocation2ActionEvaluationTask(BaseLocEvaluationTask):
         self.agent.pos, self.agent.ori, self.agent.room_id = pos, ori, rid
         
         origin_pos, origin_name = self._get_origin()
+        origin_instruction = (
+            "Still treat your initial position as origin (0, 0)\n"
+            if origin_name == "your starting position"
+            else f"Treat {origin_name} as the new 'origin' (0, 0).\n"
+        )
         obs_text = self._format_observations_custom(observations)
 
         correct_coord = (
@@ -133,7 +138,7 @@ class BaseLocation2ActionEvaluationTask(BaseLocEvaluationTask):
         self.eval_data.question = self.QUESTION_TEMPLATE.format(
             orientation=correct_orientation,
             observations=obs_text,
-            origin_name=origin_name
+            origin_instruction=origin_instruction,
         )
         
         # Collect object info
@@ -190,7 +195,7 @@ class Location2ActionTextEvaluationTask(BaseLocation2ActionEvaluationTask):
         for v in observations:
             txt = f"{v['name']} is at {v['direction']}, {v['distance']}"
             if v.get('orientation'):
-                txt += f", facing {v['orientation']}"
+                txt += f", {v['orientation']}"
             obs_parts.append(txt)
         return "You observe: " + "; ".join(obs_parts)
 
@@ -213,6 +218,11 @@ class Action2LocationEvaluationTask(BaseLocEvaluationTask):
         self.agent.pos, self.agent.ori, self.agent.room_id = pos, ori, rid
         
         origin_pos, origin_name = self._get_origin()
+        origin_instruction = (
+            "Still treat your initial position as origin (0, 0)\n"
+            if origin_name == "your starting position"
+            else f"Treat {origin_name} as the new 'origin' (0, 0).\n"
+        )
 
         # question fields
         loc_rel = (int(self.agent.pos[0]) - origin_pos[0], int(self.agent.pos[1]) - origin_pos[1])
@@ -228,7 +238,7 @@ class Action2LocationEvaluationTask(BaseLocEvaluationTask):
         distance = first['distance']
 
         self.eval_data.question = self.QUESTION_TEMPLATE.format(
-            origin_name=origin_name,
+            origin_instruction=origin_instruction,
             loc=f"({int(loc_rel[0])}, {int(loc_rel[1])})",
             direction=dir_name,
             target=target_name,

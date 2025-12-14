@@ -72,7 +72,13 @@ def _visible_relations(room, anchor, rng) -> Iterable[Tuple[object, PairwiseRela
     candidates: List = [obj for obj in room.objects if obj is not anchor]
     rng.shuffle(candidates)
     for obj in candidates:
-        if not _is_visible_from(tuple(anchor.pos), tuple(anchor.ori), tuple(obj.pos)):
+        if not _is_visible_from(
+            anchor.pos,
+            anchor.ori,
+            obj.pos,
+            agent_room_id=anchor.room_id,
+            target_room_id=obj.room_id,
+        ):
             continue
         rel = PairwiseRelationshipDiscrete.relationship(
             tuple(obj.pos),
@@ -254,7 +260,7 @@ if __name__ == "__main__":
     # 4. Partial matching: Verify strict vs loose matching requirements.
 
     # task_names = ['dir', 'pov', 'bwd_pov_text', 'bwd_pov_vision', 'dir_anchor']
-    task_names = ['dir_anchor'] # Uncomment to run only one
+    task_names = ['bwd_pov_text'] # Uncomment to run only one
 
     room, agent, np_random = create_and_plot_room(seed=3)
     # scanner = room.get_object_by_name('scanner')

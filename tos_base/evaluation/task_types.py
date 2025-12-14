@@ -124,6 +124,14 @@ class EvalTaskType(Enum):
         task_map = cls.get_task_map()
         if task_name in task_map:
             task_class = task_map[task_name]
-            return task_class(np_random, room, agent, config or {}, history_manager)
+            # By default, evaluation questions assume the agent returns to the *initial* state.
+            # Only View2ActionRevEvaluationTask ("bwd_nav_rev") starts from the *final* pose.
+            a = agent.copy()
+            if task_name != cls.BWD_NAV_REV.short_name:
+                a.pos = a.init_pos.copy()
+                a.ori = a.init_ori.copy()
+                if a.init_room_id is not None:
+                    a.room_id = a.init_room_id
+            return task_class(np_random, room, a, config or {}, history_manager)
         else:
             raise ValueError(f"Unknown evaluation task: {task_name}")

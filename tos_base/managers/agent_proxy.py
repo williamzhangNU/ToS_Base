@@ -340,7 +340,7 @@ class AgentProxy:
     def to_text(self, image_placeholder = None) -> str:
         lines: List[str] = []
         for i, t in enumerate(self.turns, 1):
-            lines.append(f"{i}. {action_results_to_text(t.actions, image_placeholder)}")
+            lines.append(f"{i}. {action_results_to_text(t.actions, image_placeholder, include_action_sequence=True)}")
         return "\n".join(lines)
     
 class OracleAgentProxy(AgentProxy):

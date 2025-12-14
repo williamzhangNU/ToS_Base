@@ -6,6 +6,7 @@ import math
 import re
 import numpy as np
 
+from ..actions.base import BaseAction
 from ..core.relationship import PairwiseRelationshipDiscrete, OrientationRel
 
 if TYPE_CHECKING:
@@ -335,26 +336,25 @@ def _is_visible_from(
     agent_ori: Tuple[int, int],
     target_pos: Tuple[float, float],
     fov: int = 90,
+    agent_room_id: Any = None,
+    target_room_id: Any = None,
 ) -> bool:
     """Check if target is visible from agent position and orientation."""
-    a_pos = np.array(agent_pos, dtype=float)
-    t_pos = np.array(target_pos, dtype=float)
-    
-    if np.allclose(a_pos, t_pos):
-        return False
-    
-    direction_vec = t_pos - a_pos
-    direction_norm = (direction_vec) / np.linalg.norm(direction_vec)
-    
-    ori_vec = np.array(agent_ori, dtype=float)
-    if np.allclose(ori_vec, 0):
-        raise ValueError("Invalid orientation")
-        # return False
-        
-    ori_norm = ori_vec / np.linalg.norm(ori_vec)
-    
-    threshold = (0.707 - 1e-3) if fov == 90 else (0.0 - 1e-3)
-    return np.dot(direction_norm, ori_norm) >= threshold
+    def _norm_room_id(v: Any) -> Any:
+        if isinstance(v, np.ndarray):
+            return v.tolist()
+        return list(v) if isinstance(v, (list, tuple)) else v
+
+    from_obj = SimpleNamespace(
+        pos=np.asarray(agent_pos, dtype=float),
+        ori=np.asarray(agent_ori, dtype=float),
+        room_id=_norm_room_id(agent_room_id),
+    )
+    to_obj = SimpleNamespace(
+        pos=np.asarray(target_pos, dtype=float),
+        room_id=_norm_room_id(target_room_id),
+    )
+    return BaseAction._is_visible(from_obj, to_obj, field_of_view=fov)
 
 
 # ========== Navigation Simulation ==========
@@ -534,7 +534,13 @@ def check_fov_consistency(agent_pos: Tuple[float, float], agent_ori: Tuple[int, 
         target_pos = object_positions.get(obj_name)
         
         # Check if object exists and is visible
-        if target_pos is None or not _is_visible_from(agent_pos, agent_ori, target_pos):
+        if target_pos is None or not _is_visible_from(
+            agent_pos,
+            agent_ori,
+            target_pos,
+            agent_room_id=agent_room_ids,
+            target_room_id=answer.get('object_rooms', {}).get(obj_name),
+        ):
             return False
         
         # Check relations (Direction, Distance)

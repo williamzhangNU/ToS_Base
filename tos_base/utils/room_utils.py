@@ -1477,7 +1477,7 @@ def get_room_description(room: Room, agent: Agent) -> str:
     # objects = [o.name for o in sorted([o for o in room.all_objects if not isinstance(o, Gate)], key=lambda x: x.label) ]
     gates = [o.name for o in room.all_objects if isinstance(o, Gate)]
 
-    desc = f"Imagine {room_type}: {', '.join(room_names)}. You are currently in room {agent.room_id}. You face north."
+    desc = f"Imagine {room_type}: {', '.join(room_names)}. You current (initial) position is in room {agent.room_id} and you face north. Unless otherwise specified, treat your initial position as the origin (0, 0), and north is +y."
     desc += f"\nObjects: {', '.join(objects)}" if objects else ""
 
     if gates:
