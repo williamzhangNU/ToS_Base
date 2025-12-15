@@ -51,7 +51,7 @@ BACKWARD_POV_EVAL_TEMPLATE = (
 )
 
 DIRECTION_POV_TEMPLATE = (
-    "Assume the {anchor_name}'s facing defines local north.\n"
+    "Assume the {anchor_name}'s facing defines 'north' (not true north).\n"
     "Where is {obj_name} relative to {anchor_name}?\n"
     "Answer format: <cardinal direction>, <distance>\n"
     "Example: north-west, near\n"

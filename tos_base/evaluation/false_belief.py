@@ -15,7 +15,7 @@ Task Overview:
 
 FALSE_BELIEF_TEMPLATE = (
     "Facing north in one room, you note some objects' orientation:\n{observations}\n\n"
-    "Assume the {anchor_name}'s facing defines local north.\n"
+    "Assume the {anchor_name}'s facing defines 'north' (not true north).\n"
     "Where is {obj_name} relative to {anchor_name}?\n\n"
     "Answer format: <cardinal direction>, <distance>\n"
     "Example: north-west, near\n"
