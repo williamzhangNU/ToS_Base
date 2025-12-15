@@ -6,7 +6,7 @@ from html import escape
 from typing import List, Dict, Optional
 from .html_templates import HTML_TEMPLATE, CSS_STYLES, JAVASCRIPT_CODE
 
-from ..utils import parse_llm_response
+from ..utils import parse_llm_response, hash as stable_hash
 from .charts import create_infogain_plot, create_cogmap_metrics_plot, create_correlation_plot, create_scalar_metric_plot
 
 
@@ -86,6 +86,69 @@ class HTMLGenerator:
 
         # Extract available combinations from sample data keys
         self.combinations = self._extract_combinations_from_samples()
+
+    def _is_passive_combo(self, entry: Dict) -> bool:
+        cfg = (entry or {}).get("config") or {}
+        obs_cfg = cfg.get("observation_config") or {}
+        return str(obs_cfg.get("exp_type", "")).lower() == "passive"
+
+    def _is_vision_eval_task(self, task_type: str) -> bool:
+        return "vision" in str(task_type or "").lower()
+
+    def _to_rel_if_abs(self, p: str) -> str:
+        if not isinstance(p, str) or not p:
+            return p
+        ap = p if os.path.isabs(p) else os.path.abspath(p)
+        if os.path.exists(ap):
+            return os.path.relpath(ap, self.out_dir)
+        return p
+
+    def _load_passive_prompt_context(self, entry: Dict) -> Optional[Dict[str, object]]:
+        """Load (system/user) prompt and attached images before evaluation questions for passive runs.
+
+        We reconstruct the combo directory from history_state.json stored in entry["config"].
+        """
+        if not self._is_passive_combo(entry):
+            return None
+        cfg = (entry or {}).get("config") or {}
+        obs_cfg = cfg.get("observation_config") or {}
+        room_dict = cfg.get("room_dict") or {}
+        agent_dict = cfg.get("agent_dict") or {}
+        if not room_dict or not agent_dict:
+            return None
+
+        a = dict(agent_dict)
+        a.pop("pos", None)
+        a.pop("ori", None)
+        room_key = stable_hash(json.dumps({**room_dict, **a}, sort_keys=True))
+
+        render_mode = str(obs_cfg.get("render_mode", ""))
+        think_str = "think" if bool((obs_cfg.get("prompt_config") or {}).get("enable_think", False)) else "nothink"
+        proxy_agent = str(obs_cfg.get("proxy_agent") or "")
+        combo_dir = os.path.join(self.out_dir, room_key, render_mode, "passive", think_str, proxy_agent)
+        msg_path = os.path.join(combo_dir, "messages.json")
+        if not os.path.exists(msg_path):
+            return None
+
+        try:
+            with open(msg_path, "r") as f:
+                messages = json.load(f) or []
+        except Exception:
+            return None
+
+        sys_prompt = ""
+        user_prompt = ""
+        images: List[str] = []
+        if messages and isinstance(messages[0], dict) and messages[0].get("role") == "system":
+            sys_prompt = messages[0].get("content") or ""
+        # First user message is the initial prompt (before evaluation questions are appended).
+        for m in messages:
+            if isinstance(m, dict) and m.get("role") == "user":
+                user_prompt = m.get("content") or ""
+                images = list(m.get("images") or [])
+                break
+        images = [self._to_rel_if_abs(p) for p in images if isinstance(p, str)]
+        return {"system": sys_prompt, "user": user_prompt, "images": images}
 
     def _extract_combinations_from_samples(self) -> List[str]:
         """Extract unique combination keys from all samples"""
@@ -551,6 +614,27 @@ class HTMLGenerator:
             img_name = entry["initial_room_image"]
             output.write(f"<img src='{img_name}' class='room' alt='Initial room state'>\n")
 
+        # For passive runs, show prompt+images ONCE (do not repeat per question).
+        passive_ctx = self._load_passive_prompt_context(entry)
+        if passive_ctx:
+            output.write("<div class='section-header'><h3>🧾 Passive Exploration Context</h3></div>\n")
+            sys_p = passive_ctx.get("system", "") if isinstance(passive_ctx, dict) else ""
+            user_p = passive_ctx.get("user", "") if isinstance(passive_ctx, dict) else ""
+            imgs = passive_ctx.get("images", []) if isinstance(passive_ctx, dict) else []
+            if sys_p:
+                self._render_expandable_block(output, sys_p, f"passive_sys_{page_idx}_{combo}", "🧩 System Prompt")
+            if user_p:
+                self._render_expandable_block(output, user_p, f"passive_user_{page_idx}_{combo}", "📝 Prompt (before evaluation question)")
+            if self.show_images and imgs:
+                output.write("<div class='question-right'>\n")
+                for i, p in enumerate(imgs):
+                    if isinstance(p, str):
+                        output.write(
+                            f"<figure><img src='{p}' class='room-plot' alt='Passive context image {i + 1}'>"
+                            f"<figcaption>Context Image {i + 1}</figcaption></figure>\n"
+                        )
+                output.write("</div>\n")
+
         # Environment config
         # cfg = entry["env_info"]["config"]
         # output.write("<div class='metrics'><strong>🔧 Environment Configuration</strong>")
@@ -831,6 +915,7 @@ class HTMLGenerator:
         env_turn_logs = entry.get("env_turn_logs", [])
         false_belief_turn_logs = entry.get("false_belief_turn_logs", [])
         evaluation_tasks = entry.get("evaluation_tasks", {})
+        is_passive = self._is_passive_combo(entry)
 
         if not env_turn_logs and not evaluation_tasks and not false_belief_turn_logs:
             f.write("<div class='metrics'><strong>⚠️ No turns available</strong></div>\n")
@@ -920,10 +1005,15 @@ class HTMLGenerator:
                     f.write("<div class='question-content'>\n")
                     f.write("<div class='question-left'>\n")
 
-                    # Display evaluation question using helper function
-                    if eval_log.get('user_message'):
+                    # Display evaluation question (prefer stored user_message; fallback to evaluation_data.question)
+                    q_text = eval_log.get("user_message") or ""
+                    if not q_text:
+                        q_text = ((eval_log.get("evaluation_log") or {}).get("evaluation_data") or {}).get("question") or ""
+                    if is_passive and q_text and "## Evaluation Question" in q_text:
+                        q_text = "## Evaluation Question\n" + q_text.split("## Evaluation Question", 1)[1].strip()
+                    if q_text:
                         obs_id = f"obs_{page_idx}_{t_idx}_{question_idx}"
-                        self._render_expandable_block(f, eval_log['user_message'], obs_id, "❓ Evaluation Question")
+                        self._render_expandable_block(f, q_text, obs_id, "❓ Evaluation Question")
                     # Display assistant thinking and action
                     if eval_log.get('assistant_raw_message'):
                         think_id = f"think_{page_idx}_{t_idx}_{question_idx}"
@@ -955,9 +1045,16 @@ class HTMLGenerator:
                             img_name = eval_log["room_image"]
                             f.write(f"<figure><img src='{img_name}' class='room-plot' alt='Evaluation state'><figcaption>Q{question_idx + 1}: {escape(task_type)}</figcaption></figure>\n")
 
-                        # Display message images if available
-                        if 'message_images' in eval_log:
-                            for img_idx, img_path in enumerate(eval_log['message_images']):
+                        # For passive exploration runs: do NOT repeat exploration-history images per question.
+                        # Only show the question-specific image for vision tasks (builder appends it last).
+                        msg_imgs = eval_log.get("message_images") or []
+                        if is_passive:
+                            if self._is_vision_eval_task(task_type) and msg_imgs:
+                                img_path = msg_imgs[-1]
+                                if isinstance(img_path, str):
+                                    f.write(f"<figure><img src='{img_path}' class='room-plot' alt='Question image'><figcaption>Question Image</figcaption></figure>\n")
+                        else:
+                            for img_idx, img_path in enumerate(msg_imgs):
                                 if isinstance(img_path, str):
                                     f.write(f"<figure><img src='{img_path}' class='room-plot' alt='Evaluation image {img_idx + 1}'><figcaption>Q{question_idx + 1} Image {img_idx + 1}</figcaption></figure>\n")
 
