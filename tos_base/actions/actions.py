@@ -426,22 +426,17 @@ ACTION_CLASSES = [
 ]
 
 def configure_actions(mode: str = 'exploration'):
-    """Configure available actions based on mode."""
-    global ACTION_CLASSES
+    """Return the available action classes for a given mode.
+
+    IMPORTANT: This must be pure (no global mutation). Multiple environments can
+    run in the same Python process (e.g., service batch mode), so mutating a
+    module-level registry will cause non-deterministic parsing across envs.
+    """
     if mode == 'exploration':
-        if FalseBeliefTermAction in ACTION_CLASSES:
-            idx = ACTION_CLASSES.index(FalseBeliefTermAction)
-            ACTION_CLASSES[idx] = TermAction
-        elif TermAction not in ACTION_CLASSES:
-            ACTION_CLASSES.append(TermAction)
-    elif mode == 'false_belief':
-        if TermAction in ACTION_CLASSES:
-            idx = ACTION_CLASSES.index(TermAction)
-            ACTION_CLASSES[idx] = FalseBeliefTermAction
-        elif FalseBeliefTermAction not in ACTION_CLASSES:
-            ACTION_CLASSES.append(FalseBeliefTermAction)
-    else:
-        raise ValueError(f"Unknown mode: {mode}")
+        return [MoveAction, RotateAction, ObserveAction, QueryAction, TermAction]
+    if mode == 'false_belief':
+        return [MoveAction, RotateAction, ObserveAction, QueryAction, FalseBeliefTermAction]
+    raise ValueError(f"Unknown mode: {mode}")
 
 
 class ActionSequence:
@@ -456,7 +451,11 @@ class ActionSequence:
         return f"ActionSequence(motions=[{motions}], final={self.final_action})"
 
     @classmethod
-    def parse(cls, action_str: str) -> Optional['ActionSequence']:
+    def parse(
+        cls,
+        action_str: str,
+        action_classes: Optional[List[type[BaseAction]]] = None,
+    ) -> Optional['ActionSequence']:
         m = re.search(r'\[(.*)\]', action_str.strip())
         if not m:
             return None
@@ -468,7 +467,7 @@ class ActionSequence:
         # Parse all actions
         parsed_actions = []
         for act_s in action_strs:
-            act = cls._parse_single_action(act_s.strip())
+            act = cls._parse_single_action(act_s.strip(), action_classes=action_classes)
             if not act:
                 return None
             parsed_actions.append(act)
@@ -490,9 +489,12 @@ class ActionSequence:
         return cls(motions, final_action)
     
     @staticmethod
-    def _parse_single_action(action_str: str) -> Optional[BaseAction]:
+    def _parse_single_action(
+        action_str: str,
+        action_classes: Optional[List[type[BaseAction]]] = None,
+    ) -> Optional[BaseAction]:
         """Parse a single action string using registered action classes"""
-        for action_class in ACTION_CLASSES:
+        for action_class in (action_classes or ACTION_CLASSES):
             if action := action_class.parse(action_str):
                 return action
         return None
