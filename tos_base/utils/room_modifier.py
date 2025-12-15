@@ -70,10 +70,11 @@ class ObjectModifier(RoomModifier):
 
     _ROTATIONS = (np.array([0, 1]), np.array([1, 0]), np.array([0, -1]), np.array([-1, 0]))
 
-    def __init__(self, seed: int, n_changes: int = 1, modification_type: Optional[str] = None):
+    def __init__(self, seed: int, n_changes: int = 1, modification_type: Optional[str] = None, agent_pos: Optional[np.ndarray] = None):
         self.rng = np.random.default_rng(seed)
         self.n_changes = int(max(0, n_changes))
         self.modification_type = (modification_type or "").strip().lower() or None  # move|rotate|None
+        self.agent_pos = tuple(map(int, agent_pos)) if agent_pos is not None else None
 
     def modify(self, room: Room) -> Tuple[Room, List[ChangedObject]]:
         r = room.copy()
@@ -120,7 +121,10 @@ class ObjectModifier(RoomModifier):
             return False
 
         cur = (int(obj.pos[0]), int(obj.pos[1]))
-        occupied = {(int(o.pos[0]), int(o.pos[1])) for o in room.all_objects if o.name != obj.name}
+        occupied = {(int(o.pos[0]), int(o.pos[1])) for o in room.all_objects }
+        # Also exclude agent position
+        if self.agent_pos is not None:
+            occupied.add(self.agent_pos)
         candidates = [tuple(map(int, p)) for p in valid if tuple(map(int, p)) not in occupied and tuple(map(int, p)) != cur]
         if not candidates:
             return False
