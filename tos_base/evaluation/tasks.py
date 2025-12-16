@@ -251,9 +251,12 @@ class BaseEvaluationTask(ABC):
         
         # Apply limit to observations
         final_obs = best_obs_full
-        if max_obs is not None and len(final_obs) > max_obs:
+        force_shuffle = bool(getattr(self, "_force_shuffle_final_obs", False))
+        if force_shuffle:
+            self._force_shuffle_final_obs = False
+        if force_shuffle or (max_obs is not None and len(final_obs) > max_obs):
             self.np_random.shuffle(final_obs)
-            final_obs = final_obs[:max_obs]
+        final_obs = final_obs[:max_obs]
             
         return best_cand, final_obs, best_oris
 
