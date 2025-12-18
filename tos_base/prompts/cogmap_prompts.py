@@ -46,7 +46,7 @@ COGMAP_INSTRUCTION_GLOBAL_ONLY = """\
 - Frame: origin [0,0] is your initial position; your initial facing direction is north.
 - Content: include all observed objects and gates; include the agent
 - Facing: use "north|south|east|west".
-- Confidence: use "high" if you are certain about the position prediction, "low" if uncertain. Cross-checking observations from multiple viewpoints can reduce ambiguity.
+- Confidence: use "high" if you are certain that the object has only one candidate position, "low" if there are multiple candidates. Cross-checking observations from multiple viewpoints can reduce ambiguity.
 
 Example:
 ```json
