@@ -58,17 +58,24 @@ class ImageHandler:
             
         return image_dir, json_data
 
-    def _load_images(self) -> Dict[str, Union[Image.Image, str]]:
+    def _load_images(self, false_belief = False) -> Dict[str, Union[Image.Image, str]]:
         """Load images or paths based on preload setting."""
         image_map = {}
         image_path_map = {}
-        for entry in self.json_data.get('images', []):
-            key = f"{entry['cam_id']}_facing_{entry['direction']}"
-            path = os.path.join(self.image_dir, entry['file'])
-            assert os.path.exists(path)
-            image_path_map[key] = path
-            if self.preload_images:
-                image_map[key] = Image.open(path).resize(self.image_size, Image.LANCZOS)
+        
+        # Construct mapping directly from self.objects and agent
+        directions = ['north', 'south', 'east', 'west']
+        cam_ids = list(self.objects.keys()) + ['agent']
+        
+        for cam_id in cam_ids:
+            for direction in directions:
+                key = f"{cam_id}_facing_{direction}"
+                suffix = '_fbexp.png' if false_belief else '.png'
+                path = os.path.join(self.image_dir, f"{key}{suffix}")
+                assert os.path.exists(path)
+                image_path_map[key] = path
+                if self.preload_images:
+                    image_map[key] = Image.open(path).resize(self.image_size, Image.LANCZOS)
         
         instruction_path = os.path.join(self.base_dir, 'instruction.png')
         assert os.path.exists(instruction_path)
@@ -172,3 +179,7 @@ class ImageHandler:
             raise KeyError(f"Image path not found for name '{name}' facing '{direction}'")
         
         return self._image_path_map[key]
+    
+    def transition_to_false_belief(self):
+        """Transition the image handler to use false belief images."""
+        self._image_map, self._image_path_map = self._load_images(false_belief=True)
