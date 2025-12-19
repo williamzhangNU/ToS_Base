@@ -10,6 +10,7 @@ import random
 from ..core.object import Agent
 from ..core.room import Room
 from .spatial_solver import SpatialSolver
+from ..utils.cogmap.unexplored import distances_to_explored
 
 if TYPE_CHECKING:
     from ..actions import ActionSequence
@@ -33,6 +34,7 @@ class ExplorationTurnLog:
     unexplored_positions_by_room: Optional[Dict[str, List[List[int]]]] = None  # Unexplored positions per room (room_id -> [[x,y], ...])
     all_candidate_coords: Optional[List[Tuple[int, int]]] = None  # All candidate coordinates (unexplored + distractors)
     all_correct_coords: Optional[List[Tuple[int, int]]] = None  # All correct unexplored coordinates
+    all_candidate_dists: Optional[List[float]] = None  # Distance of each candidate coord to explored region
 
     def to_dict(self):
         return {
@@ -50,6 +52,7 @@ class ExplorationTurnLog:
             "unexplored_positions_by_room": self.unexplored_positions_by_room or {},
             "all_candidate_coords": [[int(x), int(y)] for x, y in (self.all_candidate_coords or [])],
             "all_correct_coords": [[int(x), int(y)] for x, y in (self.all_correct_coords or [])],
+            "all_candidate_dists": [float(d) for d in (self.all_candidate_dists or [])],
         }
 
 class ExplorationManager:
@@ -115,6 +118,11 @@ class ExplorationManager:
         self.spatial_solver = SpatialSolver(self.node_names + ['initial_pos'], self.grid_size)
         self.spatial_solver.set_initial_position('initial_pos', (0, 0))
         
+    def _shift_to_initial(self, p: Tuple[int, int]) -> Tuple[int, int]:
+        """Shift absolute grid coords to global frame where init_pos is (0,0)."""
+        ox, oy = int(self.init_pos[0]), int(self.init_pos[1])
+        return (int(p[0]) - ox, int(p[1]) - oy)
+
     def _execute_and_update(self, action: BaseAction, **kwargs) -> ActionResult:
         """Execute action and update exploration state."""
         # Enforce "observed-before-move"
@@ -215,9 +223,9 @@ class ExplorationManager:
 
         pre = [((s.get('metrics') or {}).get('exploration') or {}) for s in env_data_list]
 
-        def _avg_key(k: str) -> float:
+        def _avg_key(k: str) -> float | None:
             vals = [p.get(k) for p in pre if isinstance(p.get(k), (int, float))]
-            return (sum(vals) / len(vals)) if vals else 0.0
+            return (sum(vals) / len(vals)) if vals else None
 
         result = {
             'avg_node_coverage': _avg_key('last_node_coverage'),
@@ -234,11 +242,15 @@ class ExplorationManager:
 
         # Average action counts
         agg_counts: Dict[str, float] = {}
-        n = len(pre)
+        n = 0
         for p in pre:
-            for a, c in (p.get('action_counts') or {}).items():
+            ac = p.get('action_counts')
+            if not isinstance(ac, dict) or not ac:
+                continue
+            n += 1
+            for a, c in ac.items():
                 agg_counts[a] = agg_counts.get(a, 0.0) + float(c)
-        if agg_counts:
+        if agg_counts and n:
             for a in list(agg_counts.keys()):
                 agg_counts[a] /= n
             result['avg_action_counts'] = agg_counts
@@ -279,6 +291,7 @@ class ExplorationManager:
 
     @staticmethod
     def _avg_lists_carry_forward(list_of_lists: List[List[float]]) -> List[float]:
+        list_of_lists = [lst for lst in (list_of_lists or []) if isinstance(lst, list) and lst]
         if not list_of_lists:
             return []
         max_len = max((len(lst) for lst in list_of_lists), default=0)
@@ -286,9 +299,6 @@ class ExplorationManager:
             return []
         padded: List[List[float]] = []
         for lst in list_of_lists:
-            if not lst:
-                padded.append([0.0] * max_len)
-                continue
             last = lst[-1]
             if len(lst) < max_len:
                 lst = lst + [last] * (max_len - len(lst))
@@ -315,17 +325,20 @@ class ExplorationManager:
             if t.get('is_exploration_phase', False) and t.get('exploration_log'):
                 last_exp = t['exploration_log']
                 break
-        node_cov = last_exp.get('node_coverage', 0.0) if last_exp else 0.0
-        edge_cov = last_exp.get('edge_coverage', 0.0) if last_exp else 0.0
-        steps = last_exp.get('step', 0) if last_exp else 0
+        has_exp = bool(last_exp)
+        node_cov = float(last_exp.get('node_coverage')) if has_exp and isinstance(last_exp.get('node_coverage'), (int, float)) else None
+        edge_cov = float(last_exp.get('edge_coverage')) if has_exp and isinstance(last_exp.get('edge_coverage'), (int, float)) else None
+        steps = int(last_exp.get('step')) if has_exp and isinstance(last_exp.get('step'), (int, float)) else None
         # Approximate action counts and cost: derive from last turn summary fields if present
-        default_counts = ExplorationManager.DEFAULT_ACTION_COUNTS.copy()
-        action_counts = (last_exp.get('action_counts') if last_exp and ('action_counts' in last_exp) else {}) or {}
-        # ensure default keys exist
-        for k in default_counts:
-            action_counts[k] = int(action_counts.get(k, 0))
+        action_counts = None
+        if has_exp:
+            default_counts = ExplorationManager.DEFAULT_ACTION_COUNTS.copy()
+            action_counts = (last_exp.get('action_counts') if ('action_counts' in last_exp) else {}) or {}
+            # ensure default keys exist
+            for k in default_counts:
+                action_counts[k] = int(action_counts.get(k, 0))
         # Compute action cost if not present using known costs
-        action_cost = last_exp.get('action_cost') if last_exp and ('action_cost' in last_exp) else None
+        action_cost = last_exp.get('action_cost') if has_exp and ('action_cost' in last_exp) else None
         if action_cost is None and action_counts:
             # default costs aligned with action classes
             default_costs = {
@@ -344,9 +357,9 @@ class ExplorationManager:
                     action_cost += int(v) * int(c)
                 except Exception:
                     continue
-        if action_cost is None:
+        if action_cost is None and has_exp:
             action_cost = 0
-        info_gain_list = last_exp.get('info_gain_list') if last_exp else None
+        info_gain_list = last_exp.get('info_gain_list') if has_exp else None
         if info_gain_list is None:
             # rebuild from per-turn logs
             info_gain_list = []
@@ -355,7 +368,7 @@ class ExplorationManager:
                     ig = (t.get('exploration_log') or {}).get('information_gain')
                     if ig is not None:
                         info_gain_list.append(ig)
-        final_infogain = (info_gain_list[-1] if info_gain_list else 0.0)
+        final_infogain = (float(info_gain_list[-1]) if info_gain_list else None)
 
         # Calculate proportions of is_action_fail and is_valid_action across all turns
         total_turns = len(env_turn_logs)
@@ -372,12 +385,12 @@ class ExplorationManager:
             if t.get('info', {}).get('is_valid_action', True):  # Default to True if not present
                 valid_action_count += 1
 
-        action_fail_ratio = action_fail_count / total_turns if total_turns > 0 else 0.0
-        valid_action_ratio = valid_action_count / total_turns if total_turns > 0 else 0.0
+        action_fail_ratio = (action_fail_count / total_turns) if total_turns > 0 else None
+        valid_action_ratio = (valid_action_count / total_turns) if total_turns > 0 else None
 
         # False belief phase summary (separate from main exploration steps).
         fb_turn_logs = env_data.get('false_belief_turn_logs') or []
-        fb_steps = len(fb_turn_logs)
+        fb_steps = len(fb_turn_logs) or None
         fb_f1 = None
         for t in reversed(fb_turn_logs):
             v = (t.get('false_belief_log') or {}).get('correctly_identified_changes')
@@ -395,8 +408,8 @@ class ExplorationManager:
             'final_information_gain': final_infogain,
             'action_fail_ratio': action_fail_ratio,
             'valid_action_ratio': valid_action_ratio,
-            'false_belief_steps': int(fb_steps),
-            'false_belief_f1': float(fb_f1) if isinstance(fb_f1, (int, float)) else 0.0,
+            'false_belief_steps': fb_steps,
+            'false_belief_f1': fb_f1,
         }
     
     # No passive history generation here; proxies produce text histories directly.
@@ -459,6 +472,15 @@ class ExplorationManager:
         unexplored_positions_by_room = self._compute_unexplored_positions_by_room()
         # Generate all candidate and correct coordinates for unexplored areas
         all_candidate_coords, all_correct_coords = self._generate_all_correct_coords(unexplored_positions_by_room)
+
+        # Distance-to-explored for each candidate coord (global frame)
+        explored_global: Set[Tuple[int, int]] = set()
+        for rid, pts in (self._explored_by_room or {}).items():
+            if rid not in self._visited_rooms:
+                continue
+            for p in (pts or set()):
+                explored_global.add(self._shift_to_initial(p))
+        all_candidate_dists = distances_to_explored(all_candidate_coords, explored_global)
         
         step_idx = len(self.turn_logs) + 1
         turn_log = ExplorationTurnLog(
@@ -476,6 +498,7 @@ class ExplorationManager:
             unexplored_positions_by_room=unexplored_positions_by_room,
             all_candidate_coords=all_candidate_coords,
             all_correct_coords=all_correct_coords,
+            all_candidate_dists=all_candidate_dists,
         )
         self.turn_logs.append(turn_log)
     
@@ -606,12 +629,6 @@ class ExplorationManager:
         """
         all_candidate_coords: List[Tuple[int, int]] = []
         all_correct_coords: List[Tuple[int, int]] = []
-
-        # Convert to global frame where origin is the agent's initial position (0, 0).
-        ox, oy = int(self.init_pos[0]), int(self.init_pos[1])
-
-        def _shift(p: Tuple[int, int]) -> Tuple[int, int]:
-            return (int(p[0]) - ox, int(p[1]) - oy)
         
         for rid_str, unexplored_list in unexplored_positions_by_room.items():
             if not unexplored_list:
@@ -626,8 +643,8 @@ class ExplorationManager:
             if k <= 0:
                 continue
 
-            unexplored_samples = [_shift(p) for p in self._rng.sample(list(unexplored_set), k)]
-            explored_samples = [_shift(p) for p in self._rng.sample(list(explored_set), k)]
+            unexplored_samples = [self._shift_to_initial(p) for p in self._rng.sample(list(unexplored_set), k)]
+            explored_samples = [self._shift_to_initial(p) for p in self._rng.sample(list(explored_set), k)]
 
             all_correct_coords.extend(unexplored_samples)
             all_candidate_coords.extend(unexplored_samples)

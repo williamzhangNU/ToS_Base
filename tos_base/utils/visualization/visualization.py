@@ -181,8 +181,8 @@ class HTMLGenerator:
             cogmap_update_plot = None
             cogmap_full_plot = None
             cogmap_self_tracking_plot = None
-            confidence_match_plot = None
-            confidence_ratio_plot = None
+            other_candidates_f1_plot = None
+            other_candidates_count_plot = None
             unexplored_f1_plot = None
 
             # Exploration infogain plot
@@ -199,8 +199,8 @@ class HTMLGenerator:
                 update_data = per_turn.get("cogmap_update_per_turn", cogmap_group.pop("cogmap_update_per_turn", {}))
                 full_data = per_turn.get("cogmap_full_per_turn", cogmap_group.pop("cogmap_full_per_turn", {}))
                 self_tracking_data = per_turn.get("self_tracking_per_turn", cogmap_group.pop("self_tracking_per_turn", {}))
-                conf_match = per_turn.get("confidence_match_per_turn", cogmap_group.pop("confidence_match_per_turn", []))
-                conf_ratio = per_turn.get("confidence_ratio_per_turn", cogmap_group.pop("confidence_ratio_per_turn", []))
+                other_f1 = per_turn.get("other_candidates_f1_per_turn", cogmap_group.pop("other_candidates_f1_per_turn", []))
+                other_count = per_turn.get("other_candidates_count_per_turn", cogmap_group.pop("other_candidates_count_per_turn", []))
                 unexplored_f1 = per_turn.get("unexplored_f1_per_turn", cogmap_group.pop("unexplored_f1_per_turn", []))
 
                 # Only accept new shape (metric -> list)
@@ -221,18 +221,18 @@ class HTMLGenerator:
                     title = f"{gname} - Global (Self-Tracking)"
                     cogmap_self_tracking_plot = create_cogmap_metrics_plot(global_self_tracking, title)
 
-                if isinstance(conf_match, list):
-                    confidence_match_plot = create_scalar_metric_plot(
-                        conf_match,
-                        title=f"Confidence Match per Turn - {gname}",
-                        y_label="Match",
+                if isinstance(other_f1, list):
+                    other_candidates_f1_plot = create_scalar_metric_plot(
+                        other_f1,
+                        title=f"Other-Candidates F1 per Turn - {gname}",
+                        y_label="F1",
                         ylim=(0.0, 1.0),
                     )
-                if isinstance(conf_ratio, list):
-                    confidence_ratio_plot = create_scalar_metric_plot(
-                        conf_ratio,
-                        title=f"Confidence High-Ratio per Turn - {gname}",
-                        y_label="High ratio",
+                if isinstance(other_count, list):
+                    other_candidates_count_plot = create_scalar_metric_plot(
+                        other_count,
+                        title=f"Other-Candidates Count Score per Turn - {gname}",
+                        y_label="Count score",
                         ylim=(0.0, 1.0),
                     )
                 if isinstance(unexplored_f1, list):
@@ -300,8 +300,8 @@ class HTMLGenerator:
                 # Display main cognitive map metrics (exclude per_turn data)
                 main_metrics = {k: v for k, v in cogmap_group.items()
                                if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn", "self_tracking_per_turn",
-                                            "confidence_match_per_turn", "confidence_ratio_per_turn", "unexplored_f1_per_turn",
-                                            "per_turn_metrics"]}
+                                            "other_candidates_f1_per_turn", "other_candidates_count_per_turn",
+                                            "unexplored_f1_per_turn", "per_turn_metrics"]}
                 if main_metrics:
                     f.write("<div class='metrics-box cogmap'>\n")
                     f.write("<h4>🧠 Cognitive Map</h4>\n")
@@ -333,10 +333,10 @@ class HTMLGenerator:
                 available_plots.append(("Cognitive Map (Full)", cogmap_full_plot, "Cognitive Map Full Turn Averages"))
             if cogmap_self_tracking_plot:
                 available_plots.append(("Cognitive Map (Self-Tracking)", cogmap_self_tracking_plot, "Cognitive Map Self-Tracking Turn Averages"))
-            if confidence_match_plot:
-                available_plots.append(("Confidence Match", confidence_match_plot, "Confidence Match per Turn"))
-            if confidence_ratio_plot:
-                available_plots.append(("Confidence Ratio", confidence_ratio_plot, "Confidence Ratio per Turn"))
+            if other_candidates_f1_plot:
+                available_plots.append(("Other-Candidates F1", other_candidates_f1_plot, "Other-Candidates F1 per Turn"))
+            if other_candidates_count_plot:
+                available_plots.append(("Other-Candidates Count", other_candidates_count_plot, "Other-Candidates Count Score per Turn"))
             if unexplored_f1_plot:
                 available_plots.append(("Unexplored F1", unexplored_f1_plot, "Unexplored F1 per Turn"))
 
@@ -452,8 +452,8 @@ class HTMLGenerator:
         cogmap_update_data = per_turn_metrics.get('cogmap_update_per_turn', None)
         cogmap_full_data = per_turn_metrics.get('cogmap_full_per_turn', None)
         self_tracking_data = per_turn_metrics.get('self_tracking_per_turn', None)
-        confidence_match_per_turn = per_turn_metrics.get('confidence_match_per_turn', None)
-        confidence_ratio_per_turn = per_turn_metrics.get('confidence_ratio_per_turn', None)
+        other_candidates_f1_per_turn = per_turn_metrics.get('other_candidates_f1_per_turn', None)
+        other_candidates_count_per_turn = per_turn_metrics.get('other_candidates_count_per_turn', None)
         unexplored_f1_per_turn = per_turn_metrics.get('unexplored_f1_per_turn', None)
 
         # Backward compatibility (older metric shape)
@@ -463,10 +463,10 @@ class HTMLGenerator:
             cogmap_full_data = entry['metrics'].get('cogmap', {}).pop('cogmap_full_per_turn', {})
         if self_tracking_data is None:
             self_tracking_data = entry['metrics'].get('cogmap', {}).pop('self_tracking_per_turn', {})
-        if confidence_match_per_turn is None:
-            confidence_match_per_turn = entry['metrics'].get('cogmap', {}).pop('confidence_match_per_turn', [])
-        if confidence_ratio_per_turn is None:
-            confidence_ratio_per_turn = entry['metrics'].get('cogmap', {}).pop('confidence_ratio_per_turn', [])
+        if other_candidates_f1_per_turn is None:
+            other_candidates_f1_per_turn = entry['metrics'].get('cogmap', {}).pop('other_candidates_f1_per_turn', None)
+        if other_candidates_count_per_turn is None:
+            other_candidates_count_per_turn = entry['metrics'].get('cogmap', {}).pop('other_candidates_count_per_turn', None)
         if unexplored_f1_per_turn is None:
             unexplored_f1_per_turn = entry['metrics'].get('cogmap', {}).pop('unexplored_f1_per_turn', [])
 
@@ -475,8 +475,8 @@ class HTMLGenerator:
         update_plot = None
         full_plot = None
         self_tracking_plot = None
-        confidence_match_plot = None
-        confidence_ratio_plot = None
+        other_candidates_f1_plot = None
+        other_candidates_count_plot = None
         unexplored_f1_plot = None
 
         # Information gain plot
@@ -496,18 +496,18 @@ class HTMLGenerator:
             title = f"{sample_name} - Global (Self-Tracking)"
             self_tracking_plot = create_cogmap_metrics_plot(self_tracking_data, title)
 
-        if isinstance(confidence_match_per_turn, list):
-            confidence_match_plot = create_scalar_metric_plot(
-                confidence_match_per_turn,
-                title=f"Confidence Match per Turn - {sample_name}",
-                y_label="Match",
+        if isinstance(other_candidates_f1_per_turn, list):
+            other_candidates_f1_plot = create_scalar_metric_plot(
+                other_candidates_f1_per_turn,
+                title=f"Other-Candidates F1 per Turn - {sample_name}",
+                y_label="F1",
                 ylim=(0.0, 1.0),
             )
-        if isinstance(confidence_ratio_per_turn, list):
-            confidence_ratio_plot = create_scalar_metric_plot(
-                confidence_ratio_per_turn,
-                title=f"Confidence High-Ratio per Turn - {sample_name}",
-                y_label="High ratio",
+        if isinstance(other_candidates_count_per_turn, list):
+            other_candidates_count_plot = create_scalar_metric_plot(
+                other_candidates_count_per_turn,
+                title=f"Other-Candidates Count Score per Turn - {sample_name}",
+                y_label="Count score",
                 ylim=(0.0, 1.0),
             )
         if isinstance(unexplored_f1_per_turn, list):
@@ -528,10 +528,10 @@ class HTMLGenerator:
             available_plots.append(("Cognitive Map (Full)", full_plot, "Global Full Metrics"))
         if self_tracking_plot:
             available_plots.append(("Cognitive Map (Self-Tracking)", self_tracking_plot, "Global Self-Tracking Metrics"))
-        if confidence_match_plot:
-            available_plots.append(("Confidence Match", confidence_match_plot, "Confidence Match per Turn"))
-        if confidence_ratio_plot:
-            available_plots.append(("Confidence Ratio", confidence_ratio_plot, "Confidence Ratio per Turn"))
+        if other_candidates_f1_plot:
+            available_plots.append(("Other-Candidates F1", other_candidates_f1_plot, "Other-Candidates F1 per Turn"))
+        if other_candidates_count_plot:
+            available_plots.append(("Other-Candidates Count", other_candidates_count_plot, "Other-Candidates Count Score per Turn"))
         if unexplored_f1_plot:
             available_plots.append(("Unexplored F1", unexplored_f1_plot, "Unexplored F1 per Turn"))
 

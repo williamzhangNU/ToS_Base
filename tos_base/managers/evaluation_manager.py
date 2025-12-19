@@ -159,18 +159,21 @@ class EvaluationManager:
         tasks = env_data.get('evaluation_tasks') or {}
         per_task = {}
         for task_type, questions in tasks.items():
+            if not questions:
+                continue
             n_total = len(questions)
             task_score = sum(float(q.get('evaluation_log', {}).get('score', 0)) for q in questions.values())
             per_task[task_type] = {
                 'n_total': n_total,
                 'task_score': task_score,
-                'avg_accuracy': (task_score / n_total) if n_total else 0.0,
+                'avg_accuracy': (task_score / n_total) if n_total else None,
             }
 
-        total = sum(v['n_total'] for v in per_task.values())
-        total_score = sum(v['task_score'] for v in per_task.values())
+        excluded = EvalTaskType.excluded_from_average()
+        total = sum(v['n_total'] for k, v in per_task.items() if k not in excluded)
+        total_score = sum(v['task_score'] for k, v in per_task.items() if k not in excluded)
         return {
-            'overall': {'n_total': total, 'total_score': total_score, 'avg_accuracy': (total_score / total) if total else 0.0},
+            'overall': {'n_total': total, 'total_score': total_score, 'avg_accuracy': (total_score / total) if total else None},
             'per_task': per_task,
         }
 
@@ -180,7 +183,7 @@ class EvaluationManager:
         if not env_data_list:
             return {'avg_accuracy': 0.0, 'task_metrics': {}}
 
-        per_samples = [((s.get('metrics') or {}).get('evaluation') or {}) for s in env_data_list]
+        per_samples = [EvaluationManager.aggregate_per_sample(s) for s in env_data_list]
         total_count = sum(int(m.get('overall',{}).get('n_total', 0)) for m in per_samples)
         total_score = sum(float(m.get('overall',{}).get('total_score', 0)) for m in per_samples)
         agg_task: Dict[str, Dict[str, int]] = {}

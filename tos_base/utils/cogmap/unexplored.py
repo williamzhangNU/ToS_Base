@@ -9,6 +9,7 @@ from typing import List, Tuple, Set, Dict, Any, Optional
 import numpy as np
 import random
 from collections import deque
+import math
 
 from .types import UnexploredMetrics
 
@@ -268,11 +269,104 @@ def parse_unexplored_response(text: str) -> List[Tuple[int, int]]:
     # Fallback: plain text parsing
     return _parse_value(raw)
 
+def distances_to_explored(
+    points: List[Tuple[int, int]],
+    explored_points: Set[Tuple[int, int]],
+) -> List[float]:
+    """Distance to explored region (closest observed point) for each point.
+
+    Uses Euclidean distance on grid coordinates.
+    """
+    if not points:
+        return []
+    if not explored_points:
+        return [float("inf")] * len(points)
+    explored = list(explored_points)
+    out: List[float] = []
+    for x, y in points:
+        best_d2: Optional[int] = None
+        for ex, ey in explored:
+            d2 = int(x - ex) ** 2 + int(y - ey) ** 2
+            if best_d2 is None or d2 < best_d2:
+                best_d2 = d2
+        out.append(float(math.sqrt(best_d2)) if best_d2 is not None else float("inf"))
+    return out
+
+
+def aggregate_unexplored_metrics(
+    cog_logs: List[Dict[str, Any]],
+    exp_logs: List[Dict[str, Any]],
+) -> Tuple[List[Optional[float]], Optional[float], Optional[float]]:
+    """Aggregate unexplored metrics across turns.
+
+    Returns:
+        - per-turn F1 list (None for invalid turns)
+        - micro-F1 over points across valid turns
+        - correlation between distance-to-explored and hit (1=selected correct point)
+    """
+    unexp_f1_per_turn: List[Optional[float]] = []
+    tp = fp = fn = 0
+    dist_vals: List[float] = []
+    hit_vals: List[float] = []
+
+    for d, exp in zip(cog_logs, exp_logs):
+        un = (d.get('unexplored') or {})
+        um = UnexploredMetrics.from_dict((un.get('metrics') or {}))
+        unexp_f1_per_turn.append(float(um.overall) if um.valid else None)
+
+        if not um.valid:
+            continue
+        if not (un.get('all_candidate_points') and un.get('correct_points')):
+            continue
+        try:
+            pred = {tuple(map(int, p)) for p in (un.get('pred_points') or []) if isinstance(p, (list, tuple)) and len(p) == 2}
+            corr = {tuple(map(int, p)) for p in (un.get('correct_points') or []) if isinstance(p, (list, tuple)) and len(p) == 2}
+        except Exception:
+            continue
+
+        tp += len(pred & corr)
+        fp += len(pred - corr)
+        fn += len(corr - pred)
+
+        cand = exp.get('all_candidate_coords') or []
+        dists = exp.get('all_candidate_dists') or []
+        if isinstance(cand, list) and isinstance(dists, list) and len(cand) == len(dists) and cand:
+            dist_by_pt: Dict[Tuple[int, int], float] = {}
+            for pt, di in zip(cand, dists):
+                if isinstance(pt, (list, tuple)) and len(pt) == 2 and isinstance(di, (int, float)):
+                    dist_by_pt[(int(pt[0]), int(pt[1]))] = float(di)
+            for pt in corr:
+                di = dist_by_pt.get(pt)
+                if di is None:
+                    continue
+                dist_vals.append(float(di))
+                hit_vals.append(1.0 if pt in pred else 0.0)
+
+    unexp_f1_avg = None
+    if (tp + fp + fn) > 0:
+        unexp_p = (tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+        unexp_r = (tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+        unexp_f1_avg = (2.0 * unexp_p * unexp_r / (unexp_p + unexp_r)) if (unexp_p + unexp_r) > 0 else 0.0
+
+    unexp_distance_hit_corr = None
+    if len(dist_vals) >= 2 and len(hit_vals) == len(dist_vals):
+        try:
+            D = np.asarray(dist_vals, dtype=float)
+            H = np.asarray(hit_vals, dtype=float)
+            if float(np.std(D)) > 0.0 and float(np.std(H)) > 0.0:
+                unexp_distance_hit_corr = float(np.corrcoef(D, H)[0, 1])
+        except Exception:
+            unexp_distance_hit_corr = None
+
+    return unexp_f1_per_turn, unexp_f1_avg, unexp_distance_hit_corr
+
 
 __all__ = [
     'compute_unexplored_regions',
     'generate_labeled_points',
     'evaluate_unexplored_predictions',
     'parse_unexplored_response',
+    'distances_to_explored',
+    'aggregate_unexplored_metrics',
     'UnexploredMetrics',
 ]

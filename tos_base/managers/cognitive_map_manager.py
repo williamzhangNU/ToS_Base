@@ -36,16 +36,17 @@ from ..utils.cogmap.consistency import (
     relations_consistency,
     stability,
 )
-from ..utils.cogmap.types import BaseCogMetrics, MapCogMetrics, RelationMetrics, ConsistencySummary, AccuracyMetrics, UnexploredMetrics
+from ..utils.cogmap.types import BaseCogMetrics, MapCogMetrics, RelationMetrics, ConsistencySummary, AccuracyMetrics
 from ..utils.cogmap.analysis import (
     get_last_exploration_cogmap,
     get_false_belief_metrics,
     avg_nested_dicts,
 )
-from ..utils.cogmap.confidence import calculate_confidence_metrics
+from ..utils.cogmap.candidates import calculate_other_candidates_metrics
 from ..utils.cogmap.unexplored import (
     evaluate_unexplored_predictions,
     parse_unexplored_response,
+    aggregate_unexplored_metrics,
 )
 
 
@@ -584,16 +585,16 @@ class CognitiveMapManager:
             update_turn = avg_nested_dicts([{'cogmap_update_per_turn': d.get('cogmap_update_per_turn') or {}} for d in per_turn_list]).get('cogmap_update_per_turn', {})
             full_turn = avg_nested_dicts([{'cogmap_full_per_turn': d.get('cogmap_full_per_turn') or {}} for d in per_turn_list]).get('cogmap_full_per_turn', {})
             self_tracking_turn = avg_nested_dicts([{'self_tracking_per_turn': d.get('self_tracking_per_turn') or {}} for d in per_turn_list]).get('self_tracking_per_turn', {})
-            confidence_match_turn = avg_nested_dicts([{'confidence_match_per_turn': d.get('confidence_match_per_turn') or []} for d in per_turn_list]).get('confidence_match_per_turn', [])
-            confidence_ratio_turn = avg_nested_dicts([{'confidence_ratio_per_turn': d.get('confidence_ratio_per_turn') or []} for d in per_turn_list]).get('confidence_ratio_per_turn', [])
+            other_candidates_f1_turn = avg_nested_dicts([{'other_candidates_f1_per_turn': d.get('other_candidates_f1_per_turn') or []} for d in per_turn_list]).get('other_candidates_f1_per_turn', [])
+            other_candidates_count_turn = avg_nested_dicts([{'other_candidates_count_per_turn': d.get('other_candidates_count_per_turn') or []} for d in per_turn_list]).get('other_candidates_count_per_turn', [])
             unexplored_f1_turn = avg_nested_dicts([{'unexplored_f1_per_turn': d.get('unexplored_f1_per_turn') or []} for d in per_turn_list]).get('unexplored_f1_per_turn', [])
 
             per_turn_metrics = {
                 'cogmap_update_per_turn': update_turn,
                 'cogmap_full_per_turn': full_turn,
                 'self_tracking_per_turn': self_tracking_turn,
-                'confidence_match_per_turn': confidence_match_turn,
-                'confidence_ratio_per_turn': confidence_ratio_turn,
+                'other_candidates_f1_per_turn': other_candidates_f1_turn,
+                'other_candidates_count_per_turn': other_candidates_count_turn,
                 'unexplored_f1_per_turn': unexplored_f1_turn,
             }
             return {
@@ -616,9 +617,11 @@ class CognitiveMapManager:
         # Helper: get exploration turns' cogmap logs
         turn_logs = env_data.get('env_turn_logs') or []
         cog_logs = []
+        exp_logs = []
         for t in turn_logs:
             if t.get('is_exploration_phase', False) and t.get('cogmap_log'):
                 cog_logs.append(t['cogmap_log'])
+                exp_logs.append(t.get('exploration_log') or {})
         if not cog_logs:
             return {}
         # Use shared helper to find last exploration cogmap
@@ -643,10 +646,13 @@ class CognitiveMapManager:
                         mats.append(m)
             return MapCogMetrics.average(mats) if mats else MapCogMetrics.invalid()
 
+        def _d(m: MapCogMetrics) -> Dict[str, float]:
+            return m.to_dict() if m.valid else {}
+
         error = {
-            'local_vs_gt_local_avg': _avg_maps(cog_logs, ['local', 'metrics']).to_dict(),
-            'global_vs_gt_global_avg': _avg_maps(cog_logs, ['global', 'metrics']).to_dict(),
-            'agent_vs_gt_agent_avg': _avg_maps(cog_logs, ['global', 'metric_agent']).to_dict(),
+            'local_vs_gt_local_avg': _d(_avg_maps(cog_logs, ['local', 'metrics'])),
+            'global_vs_gt_global_avg': _d(_avg_maps(cog_logs, ['global', 'metrics'])),
+            'agent_vs_gt_agent_avg': _d(_avg_maps(cog_logs, ['global', 'metric_agent'])),
         }
 
         # Correctness: last global_full and relations_full
@@ -672,9 +678,9 @@ class CognitiveMapManager:
         update_metrics, stability_check_metrics = stability(env_data)
 
         consistency = {
-            'local_vs_global_avg': _avg_consistency_lvsg(cog_logs).to_dict(),
-            'update_avg': float(np.mean(update_metrics)) if update_metrics else 0.0,
-            'stability_avg': MapCogMetrics.average(stability_check_metrics).to_dict(),
+            'local_vs_global_avg': _d(_avg_consistency_lvsg(cog_logs)),
+            'update_avg': float(np.mean(update_metrics)) if update_metrics else None,
+            'stability_avg': _d(MapCogMetrics.average(stability_check_metrics)),
             # 'rooms_vs_global_last': MapCogMetrics.from_dict(((cons_last.get('rooms_vs_global') or {}).get('average') or {})).to_dict(),
             # 'map_vs_relations_last': (float(cons_last.get('map_vs_relations')) if isinstance(cons_last.get('map_vs_relations'), (int, float)) else None),
             # 'relations_consistency_last': (float(cons_last.get('relations_consistency')) if isinstance(cons_last.get('relations_consistency'), (int, float)) else None),
@@ -682,40 +688,22 @@ class CognitiveMapManager:
 
         # Per-turn global metrics (list)
         per_turn_update, per_turn_full, per_turn_self_tracking = CognitiveMapManager.compute_per_turn_global_metrics(cog_logs)
-        conf_match, conf_ratio = calculate_confidence_metrics(env_data)
+        other_f1, other_count = calculate_other_candidates_metrics(env_data)
         # Unexplored: keep per-turn F1 for plotting, but aggregate by points (not turn-average).
-        unexp_f1_per_turn: List[Optional[float]] = []
-        tp = fp = fn = 0  # micro counts across valid turns
-        for d in cog_logs:
-            un = (d.get('unexplored') or {})
-            um = UnexploredMetrics.from_dict((un.get('metrics') or {}))
-            unexp_f1_per_turn.append(float(um.overall) if um.valid else None)
+        unexp_f1_per_turn, unexp_f1_avg, unexp_distance_hit_corr = aggregate_unexplored_metrics(cog_logs, exp_logs)
 
-            # Skip empty/invalid turns for all cogmap metrics (unexplored included).
-            if not um.valid:
-                continue
-            if not (un.get('all_candidate_points') and un.get('correct_points')):
-                continue
-            try:
-                pred = {tuple(map(int, p)) for p in (un.get('pred_points') or []) if isinstance(p, (list, tuple)) and len(p) == 2}
-                corr = {tuple(map(int, p)) for p in (un.get('correct_points') or []) if isinstance(p, (list, tuple)) and len(p) == 2}
-            except Exception:
-                continue
-            tp += len(pred & corr)
-            fp += len(pred - corr)
-            fn += len(corr - pred)
-
-        def _avg_list(vals: List[Optional[float]]) -> float:
+        def _avg_list(vals: List[Optional[float]]) -> float | None:
             xs = [float(v) for v in (vals or []) if isinstance(v, (int, float))]
-            return float(np.mean(xs)) if xs else 0.0
+            return float(np.mean(xs)) if xs else None
 
-        conf_match_avg = _avg_list(conf_match)
-        conf_ratio_avg = _avg_list(conf_ratio)
-        unexp_p = (tp / (tp + fp)) if (tp + fp) > 0 else 0.0
-        unexp_r = (tp / (tp + fn)) if (tp + fn) > 0 else 0.0
-        unexp_f1_avg = (2.0 * unexp_p * unexp_r / (unexp_p + unexp_r)) if (unexp_p + unexp_r) > 0 else 0.0
+        other_f1_avg = _avg_list(other_f1)
+        other_count_avg = _avg_list(other_count)
+        
 
-        false_belief_acc = BaseCogMetrics.average([BaseCogMetrics.from_dict(m) for m in false_belief_metrics]).to_dict() if false_belief_metrics else None
+        false_belief_acc = None
+        if false_belief_metrics:
+            fb_m = BaseCogMetrics.average([BaseCogMetrics.from_dict(m) for m in false_belief_metrics])
+            false_belief_acc = fb_m.to_dict() if fb_m.valid else None
         if exp_type == 'passive':
             return {
                 'exploration': {
@@ -729,8 +717,8 @@ class CognitiveMapManager:
             'cogmap_update_per_turn': per_turn_update,
             'cogmap_full_per_turn': per_turn_full,
             'self_tracking_per_turn': per_turn_self_tracking,
-            'confidence_match_per_turn': conf_match,
-            'confidence_ratio_per_turn': conf_ratio,
+            'other_candidates_f1_per_turn': other_f1,
+            'other_candidates_count_per_turn': other_count,
             'unexplored_f1_per_turn': unexp_f1_per_turn,
         }
 
@@ -739,12 +727,13 @@ class CognitiveMapManager:
                 'error': error,
                 'correctness': correctness,
                 'consistency': consistency,
-                'confidence': {
-                    'match_avg': conf_match_avg,
-                    'ratio_avg': conf_ratio_avg,
+                'other_candidates': {
+                    'f1_avg': other_f1_avg,
+                    'count_score_avg': other_count_avg,
                 },
                 'unexplored': {
                     'f1_avg': unexp_f1_avg,
+                    'distance_hit_corr': unexp_distance_hit_corr,
                 },
             },
             'evaluation': {
@@ -1020,7 +1009,29 @@ class CognitiveMapManager:
                 return s
             return mapping.get(s, s)
 
-        def _norm_map(obj_map: Dict[str, Any], keep: set = None, anchor_ori = None) -> Dict[str, Any]:
+        def _norm_face_global(f):
+            """Best-effort: normalize common variants (incl. ego terms) to cardinal directions."""
+            if not isinstance(f, str):
+                return f
+            s = f.strip().lower()
+            mapping = {
+                # canonical
+                "north": "north", "n": "north",
+                "south": "south", "s": "south",
+                "east": "east", "e": "east",
+                "west": "west", "w": "west",
+                # local axis variants (treat as global frame where north=+y, east=+x)
+                "+y": "north", "-y": "south",
+                "+x": "east", "-x": "west",
+                # ego variants (robustness; assume global frame uses initial-facing-as-north)
+                "forward": "north", "front": "north", "ahead": "north",
+                "back": "south", "backward": "south", "behind": "south",
+                "right": "east",
+                "left": "west",
+            }
+            return mapping.get(s, s)
+
+        def _norm_map(obj_map: Dict[str, Any], keep: set = None, anchor_ori = None, face_fn=None) -> Dict[str, Any]:
             out = {}
             for name, info in (obj_map or {}).items():
                 if not isinstance(info, dict):
@@ -1032,8 +1043,11 @@ class CognitiveMapManager:
                         continue
                     name = preferred_key
                 # normalize facing
-                if anchor_ori is not None and "facing" in info:
-                    info["facing"] = _norm_face_local(info["facing"], anchor_ori)
+                if "facing" in info:
+                    if face_fn is not None:
+                        info["facing"] = face_fn(info["facing"])
+                    elif anchor_ori is not None:
+                        info["facing"] = _norm_face_local(info["facing"], anchor_ori)
                 out[name] = info
             return out
 
@@ -1104,14 +1118,14 @@ class CognitiveMapManager:
             # Flatten {"objects":[...], "gates":[...]} into {name: {position, facing, ...}}
             jd = _flatten_nested_json(jd)
             keep = set(observed) | gate_names | {"agent"}
-            jd = _norm_map(jd, keep)
+            jd = _norm_map(jd, keep, face_fn=_norm_face_global)
             return self._parse_section_to_baseroom(jd, "pred_global") or BaseRoom(objects=[], name="pred_global")
 
         if map_type == "false_belief":
             # Handle nested format same as global
             jd = _flatten_nested_json(jd)
             # keep all objects
-            jd = _norm_map(jd, observed)
+            jd = _norm_map(jd, observed, face_fn=_norm_face_global)
             return self._parse_section_to_baseroom(jd, "pred_false_belief") or BaseRoom(objects=[], name="pred_false_belief")
         # --- Local: drop origin + keep only visible objects ---
         if map_type == "local":

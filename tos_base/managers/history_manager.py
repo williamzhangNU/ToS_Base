@@ -433,16 +433,25 @@ class HistoryManager:
             with open(metrics_file, 'r') as f:
                 sample_data["metrics"] = json.load(f)
 
-        # Ensure exploration metrics are derived from logs (incl. false-belief stats).
+        # Ensure key metrics are derived from logs (incl. false-belief stats).
+        env_data = {
+            "env_turn_logs": sample_data.get("env_turn_logs") or [],
+            "false_belief_turn_logs": sample_data.get("false_belief_turn_logs") or [],
+            "evaluation_tasks": sample_data.get("evaluation_tasks") or {},
+        }
+        if not isinstance(sample_data.get("metrics"), dict):
+            sample_data["metrics"] = {}
         try:
-            env_data = {
-                "env_turn_logs": sample_data.get("env_turn_logs") or [],
-                "false_belief_turn_logs": sample_data.get("false_belief_turn_logs") or [],
-                "evaluation_tasks": sample_data.get("evaluation_tasks") or {},
-            }
-            if not isinstance(sample_data.get("metrics"), dict):
-                sample_data["metrics"] = {}
             sample_data["metrics"]["exploration"] = ExplorationManager.aggregate_per_sample(env_data)
+        except Exception:
+            pass
+        try:
+            sample_data["metrics"]["evaluation"] = EvaluationManager.aggregate_per_sample(env_data)
+        except Exception:
+            pass
+        try:
+            exp_type = ((sample_data.get("config") or {}).get("observation_config") or {}).get("exp_type")
+            sample_data["metrics"]["cogmap"] = CognitiveMapManager.aggregate_per_sample(env_data, exp_type=exp_type)
         except Exception:
             pass
 

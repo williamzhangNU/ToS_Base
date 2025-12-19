@@ -45,14 +45,17 @@ COGMAP_INSTRUCTION_GLOBAL_ONLY = """\
 - Grid: concise global map on an N×M grid.
 - Frame: origin [0,0] is your initial position; your initial facing direction is north.
 - Content: include all observed objects and gates; include the agent
-- Facing: use "north|south|east|west".
-- Confidence: use "high" if you are certain that the object has only one candidate position, "low" if there are multiple candidates. Cross-checking observations from multiple viewpoints can reduce ambiguity.
+- Facing: use "north|south|east|west" (cardinal direction only).
+- Other candidates: a JSON list of up to 3 alternative positions, e.g. [[x1,y1],[x2,y2]].
+  - MUST be valid positions for the object. Exclude position in `position`.
+  - If the position is unique (no ambiguity), output [].
 
 Example:
 ```json
 {
-    "agent": {"position": [2, 3], "facing": "east", "confidence": "high"},
-    "chair": {"position": [2, 4], "facing": "north", "confidence": "low"},
+    "agent": {"position": [2, 3], "facing": "east", "other_candidates": []},
+    "chair": {"position": [2, 4], "facing": "north", "other_candidates": []},
+    "sofa": {"position": [5, 1], "facing": "west", "other_candidates": [[4, 1], [5, 2]]}
 }
 ```
 """

@@ -42,6 +42,12 @@ class EvalTaskType(Enum):
     def get_class_names(cls) -> list[str]:
         """Get all class names for task types."""
         return [task.class_name for task in cls]
+
+    @classmethod
+    def excluded_from_average(cls) -> set[str]:
+        """Task identifiers (short or class name) excluded from overall evaluation averages."""
+        excluded = (cls.ROT_DUAL, cls.BWD_POV_VISION, cls.BWD_NAV_VISION, cls.BWD_LOC_VISION)
+        return {t.short_name for t in excluded} | {t.class_name for t in excluded}
     
     @classmethod
     def get_task_map(cls) -> Dict[str, 'Type[BaseEvaluationTask]']:
