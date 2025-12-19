@@ -14,7 +14,6 @@ class EvalTaskType(Enum):
     # Task type definitions: (short_name, class_name)
     DIR = ("dir", "DirectionEvaluationTask")
     ROT = ("rot", "RotEvaluationTask")
-    ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
     POV = ("pov", "PovEvaluationTask")
     BWD_POV_TEXT = ("bwd_pov_text", "BackwardPovTextEvaluationTask")
     BWD_POV_VISION = ("bwd_pov_vision", "BackwardPovVisionEvaluationTask")
@@ -54,7 +53,7 @@ class EvalTaskType(Enum):
         """Get mapping from short names to task classes."""
         # Import here to avoid circular imports
         from .direction import DirectionEvaluationTask, PovEvaluationTask, BackwardPovTextEvaluationTask, BackwardPovVisionEvaluationTask, DirectionPov
-        from .rotation import RotEvaluationTask, RotDualEvaluationTask
+        from .rotation import RotEvaluationTask
         from .e2a import AlloMappingEvaluationTask
         from .localization import Location2ViewEvaluationTask, View2LocationTextEvaluationTask, View2LocationVisionEvaluationTask
         from .false_belief import FalseBeliefDirectionPov
@@ -63,7 +62,6 @@ class EvalTaskType(Enum):
         task_map = {
             cls.DIR.short_name: DirectionEvaluationTask,
             cls.ROT.short_name: RotEvaluationTask,
-            cls.ROT_DUAL.short_name: RotDualEvaluationTask,
             cls.POV.short_name: PovEvaluationTask,
             cls.DIR_ANCHOR.short_name: DirectionPov,
             cls.E2A.short_name: AlloMappingEvaluationTask,
