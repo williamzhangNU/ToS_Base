@@ -33,7 +33,6 @@ from ..utils.cogmap.consistency import (
 from ..utils.cogmap.types import BaseCogMetrics, MapCogMetrics, ConsistencySummary, AccuracyMetrics
 from ..utils.cogmap.analysis import (
     get_last_exploration_cogmap,
-    get_false_belief_metrics,
     avg_nested_dicts,
 )
 from ..utils.cogmap.candidates import calculate_other_candidates_metrics
@@ -120,7 +119,6 @@ class CognitiveMapTurnLog:
     """Aggregate per-type logs for one turn."""
     global_log: Optional[GlobalCogMapTurnLog] = None
     local_log: Optional[LocalCogMapTurnLog] = None
-    false_belief_log: Optional[BaseCogMapTurnLog] = None
     unexplored_log: Optional[UnexploredCogMapTurnLog] = None
     consistency: Optional[ConsistencySummary] = None
 
@@ -130,8 +128,6 @@ class CognitiveMapTurnLog:
             out["global"] = self.global_log.to_dict()
         if self.local_log:
             out["local"] = self.local_log.to_dict()
-        if self.false_belief_log:
-            out["false_belief"] = self.false_belief_log.to_dict()
         if self.unexplored_log:
             out["unexplored"] = self.unexplored_log.to_dict()
         if self.consistency:
@@ -160,11 +156,7 @@ class CognitiveMapManager:
         t = (map_type or "global").lower()
         json_dict = self._extract_json_from_text(assistant_response)
         if json_dict is None or gt_room is None:
-            # Mark extraction failure as invalid metric of the appropriate type
-            if t == "false_belief":
-                m = AccuracyMetrics.invalid()
-            else:
-                m = MapCogMetrics.invalid()
+            m = MapCogMetrics.invalid()
             return BaseCogMapTurnLog(type=t, extraction_success=False, original_response=assistant_response, metrics=m)
         all_item_names = {o.name for o in gt_room.all_objects}
         observed_set: set[str] = set(all_item_names if observed_items is None else [str(x).replace('_', ' ') for x in observed_items])
@@ -178,11 +170,6 @@ class CognitiveMapManager:
             self._ensure_pos_norm_L(gt_room, gt_agent)
             return self._eval_global(pred_global_br, gt_global_br, full_global, agent_br, assistant_response, json_dict)
         
-        if t == "false_belief":
-            pred_global_br = self._preprocess_predicted(json_dict, observed_set, visible_names, gt_room, gt_agent, map_type)
-            gt_global_br = self._build_gt_global_baseroom(gt_room, gt_agent, observed_set)
-            return self._eval_false_belief(pred_global_br, gt_global_br, assistant_response, json_dict)
-
         if t == "local":
             pred_local_br = self._preprocess_predicted(json_dict, observed_set, visible_names, gt_room, gt_agent, map_type)
             gt_local_br = self._build_gt_local_baseroom(gt_room, gt_agent)
@@ -258,31 +245,6 @@ class CognitiveMapManager:
             gt_json_full=gt_json_full,
             metrics_full=metrics_full,
             metric_agent=metric_agent,
-        )
-
-    def _eval_false_belief(self, pred_global_br: BaseRoom, gt_global_br: BaseRoom, assistant_response: str, pred_json: Dict) -> BaseCogMapTurnLog:
-        """Evaluate false belief task - check if one object in observed_items has correct orientation."""
-        # Create name-to-object mappings for comparison
-        pred_objects = {o.name: o for o in pred_global_br.objects}
-        gt_objects = {o.name: o for o in gt_global_br.objects}
-        metrics = AccuracyMetrics(0.0)
-        for name in gt_objects:
-            gt_obj = gt_objects[name]
-            pred_obj = pred_objects.get(name)
-
-            # Only check objects that have orientation
-            if gt_obj.has_orientation and pred_obj is not None:
-                if np.array_equal(pred_obj.ori, gt_obj.ori):
-                    metrics = AccuracyMetrics(1.0)
-                    break
- 
-        return BaseCogMapTurnLog(
-            type="false_belief",
-            extraction_success=True,
-            original_response=assistant_response,
-            pred_json=pred_json,
-            pred_room_state=pred_global_br,
-            metrics=metrics,
         )
 
     def _eval_local(self, pred_local_br: BaseRoom, gt_local_br: BaseRoom, assistant_response: str, pred_json: Dict) -> LocalCogMapTurnLog:
@@ -421,7 +383,6 @@ class CognitiveMapManager:
         # Use shared helper to find last exploration cogmap
         
         last = get_last_exploration_cogmap(env_data)
-        false_belief_metrics = get_false_belief_metrics(env_data)
         # Average metrics over turns
         def _avg_maps(dicts: List[Dict[str, Any]], path: List[str]) -> MapCogMetrics:
             mats: List[MapCogMetrics] = []
@@ -486,12 +447,7 @@ class CognitiveMapManager:
 
         other_f1_avg = _avg_list(other_f1)
         other_count_avg = _avg_list(other_count)
-        
 
-        false_belief_acc = None
-        if false_belief_metrics:
-            fb_m = BaseCogMetrics.average([BaseCogMetrics.from_dict(m) for m in false_belief_metrics])
-            false_belief_acc = fb_m.to_dict() if fb_m.valid else None
         if exp_type == 'passive':
             return {
                 'exploration': {
@@ -523,9 +479,6 @@ class CognitiveMapManager:
                     'f1_avg': unexp_f1_avg,
                     'distance_hit_corr': unexp_distance_hit_corr,
                 },
-            },
-            'evaluation': {
-                'false_belief_acc': false_belief_acc,
             },
             'per_turn_metrics': per_turn_metrics,
         }
@@ -878,12 +831,6 @@ class CognitiveMapManager:
             jd = _norm_map(jd, keep, face_fn=_norm_face_global)
             return self._parse_section_to_baseroom(jd, "pred_global") or BaseRoom(objects=[], name="pred_global")
 
-        if map_type == "false_belief":
-            # Handle nested format same as global
-            jd = _flatten_nested_json(jd)
-            # keep all objects
-            jd = _norm_map(jd, observed, face_fn=_norm_face_global)
-            return self._parse_section_to_baseroom(jd, "pred_false_belief") or BaseRoom(objects=[], name="pred_false_belief")
         # --- Local: drop origin + keep only visible objects ---
         if map_type == "local":
             # Handle nested format if present
@@ -893,38 +840,6 @@ class CognitiveMapManager:
             jd = _norm_map(jd, visible, gt_agent.ori)
             return self._parse_section_to_baseroom(jd, "pred_local") or BaseRoom(objects=[], name="pred_local")
 
-        if map_type == "rooms":
-            out_rooms = {}
-            for rid, sec in jd.items():
-                if not isinstance(sec, dict):
-                    continue
-                try:
-                    rid = int(rid)
-                except Exception:
-                    print(f"Error parsing room id: {rid}")
-                    continue
-                # Handle nested format within each room section
-                sec = _flatten_nested_json(sec)
-                inner = sec.get("objects", sec)  # sometimes wrapped in {"origin":..., "objects":{...}}
-                keep = {
-                    n
-                    for n in observed
-                    if n in gt_room.room_by_object
-                    and gt_room.room_by_object[n] == int(rid)
-                }
-                # Get gate orientation for this room
-                gate_name = self.entry_gate_by_room.get(int(rid))
-                if gate_name:
-                    gate = next((g for g in gt_room.gates if g.name == gate_name), None)
-                    gate_ori = gate.get_ori_for_room(int(rid))
-                    out_rooms[str(rid)] = self._parse_section_to_baseroom(_norm_map(inner, keep, gate_ori), f"pred_room_{rid}")
-                elif str(rid) == str(self._start_room_id):
-                    # starting room; use agent init_ori
-                    out_rooms[str(rid)] = self._parse_section_to_baseroom(_norm_map(inner, keep, gt_agent.init_ori), f"pred_room_{rid}")
-                else:
-                    # fallback if no entry gate
-                    out_rooms[str(rid)] = self._parse_section_to_baseroom(_norm_map(inner, keep), f"pred_room_{rid}")
-            return  out_rooms
         raise ValueError(f"Invalid map_type: {map_type}")
 
 

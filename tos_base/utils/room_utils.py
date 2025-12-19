@@ -1408,12 +1408,6 @@ def get_room_description(room: Room, agent: Agent) -> str:
     if gates:
         desc += f"\nDoors: {', '.join(gates)}"
 
-    # include topology connection for gates
-    # if gates:
-    #     gate_descriptions = []
-    #     for gate in room.gates:
-    #         gate_descriptions.append(f"{gate.name} connected room {gate.room_id[0]} and room {gate.room_id[1]}")
-    #     desc += f"\nDoors: {', '.join(gate_descriptions)}"
 
     return desc
 

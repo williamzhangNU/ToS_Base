@@ -669,7 +669,6 @@ class HTMLGenerator:
             ('global', '🗺️ Global Cognitive Map Response'),
             ('local', '🗺️ Local Cognitive Map Response'),
             ('unexplored', '🔍 Unexplored Areas Response'),
-            ('false_belief', '🧭 False Belief Cognitive Map Response')
         ]
 
         for map_type, title in cogmap_types:
@@ -763,30 +762,6 @@ class HTMLGenerator:
                             f.write("</div>\n")
                         else:
                             f.write("<div class='empty-json'>(no data)</div>\n")
-                        f.write("</div>\n")
-
-                        f.write("</div>\n")  # End json-compare
-                        f.write("</div>\n")  # End json-content
-                        f.write("</div>\n")  # End json-container
-
-                elif map_type == 'false_belief':
-                    # For false_belief, display only pred_json in single column
-                    pred_json = data.get('pred_json', {})
-
-                    if pred_json:
-                        f.write("<div class='json-container false-belief'>\n")
-                        f.write("<div class='json-header'>")
-                        f.write("<strong>📊 False Belief Prediction JSON</strong>")
-                        f.write("</div>\n")
-                        f.write("<div class='json-content'>\n")
-                        f.write("<div class='json-compare false-belief'>\n")
-
-                        # Single column - pred_json
-                        f.write("<div class='json-box single predicted'>\n")
-                        f.write("<strong>🤖 Predicted</strong>\n")
-                        f.write("<div class='json-content-inner'>\n")
-                        f.write(f"<pre>{escape(json.dumps(pred_json, indent=2))}</pre>\n")
-                        f.write("</div>\n")
                         f.write("</div>\n")
 
                         f.write("</div>\n")  # End json-compare
@@ -911,11 +886,10 @@ class HTMLGenerator:
     def generate_exploration_turns(self, f, entry: Dict, page_idx: int) -> None:
         """Generate exploration turn logs and evaluation tasks"""
         env_turn_logs = entry.get("env_turn_logs", [])
-        false_belief_turn_logs = entry.get("false_belief_turn_logs", [])
         evaluation_tasks = entry.get("evaluation_tasks", {})
         is_passive = self._is_passive_combo(entry)
 
-        if not env_turn_logs and not evaluation_tasks and not false_belief_turn_logs:
+        if not env_turn_logs and not evaluation_tasks:
             f.write("<div class='metrics'><strong>⚠️ No turns available</strong></div>\n")
             return
 
@@ -950,15 +924,6 @@ class HTMLGenerator:
 
                 # Display turn metrics
                 self._render_turn_metrics(f, env_log)
-                
-                # Display false belief metrics if present
-                if env_log.get('false_belief_log'):
-                    fb_log = env_log['false_belief_log']
-                    # print(f'fb_log: {fb_log}')
-                    fb_log.pop('room_state', None); fb_log.pop('agent_state', None)
-                    f.write("<div class='metrics'><strong>🧭 False Belief Metrics</strong>")
-                    f.write(VisualizationHelper.dict_to_html(fb_log))
-                    f.write("</div>\n")
 
                 f.write("</div>\n")  # End turn-left
 
@@ -971,11 +936,6 @@ class HTMLGenerator:
         if env_turn_logs:
             f.write("<div class='section-header'><h3>🌍 Exploration Phase</h3></div>\n")
             render_logs(env_turn_logs)
-
-        # Render false belief turns
-        if false_belief_turn_logs:
-            f.write("<div class='section-header'><h3>🧭 False Belief Exploration</h3></div>\n")
-            render_logs(false_belief_turn_logs, "FB Turn")
 
         # Generate evaluation turns if available
         if evaluation_tasks:

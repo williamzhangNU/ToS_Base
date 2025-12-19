@@ -110,11 +110,7 @@ class BaseLocEvaluationTask(BaseEvaluationTask):
 
 class BaseView2LocationEvaluationTask(BaseLocEvaluationTask):
     """Base class for Location2Action (Backward Localization) tasks."""
-
     QUESTION_TEMPLATE = LOC_2_ACTION_TEMPLATE
-
-    def _get_observations(self) -> str:
-        raise NotImplementedError
 
     @retry_generate_question
     def generate_question(self) -> dict:
@@ -186,10 +182,6 @@ class BaseView2LocationEvaluationTask(BaseLocEvaluationTask):
 
 class View2LocationTextEvaluationTask(BaseView2LocationEvaluationTask):
     """Localize your own coordinate (x, y) and orientation using text observations."""
-    def _get_observations(self) -> str:
-        # This is deprecated by _format_observations_custom in generate_question
-        return "" 
-        
     def _format_observations_custom(self, observations: List[Dict[str, str]]) -> str:
         obs_parts = []
         for v in observations:
@@ -202,9 +194,6 @@ class View2LocationTextEvaluationTask(BaseView2LocationEvaluationTask):
 
 class View2LocationVisionEvaluationTask(BaseView2LocationEvaluationTask):
     """Localize your own coordinate (x, y) and orientation using vision."""
-    def _get_observations(self) -> str:
-        return ""
-        
     def _format_observations_custom(self, observations: List[Dict[str, str]]) -> str:
          return "You observe: <image>"
 

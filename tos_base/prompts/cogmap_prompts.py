@@ -93,8 +93,6 @@ def get_cogmap_prompt(map_type: str, enable_think: bool = True, all_candidate_co
         return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_LOCAL_ONLY}\n\n{fmt}"
     if t == "unexplored":
         return get_unexplored_prompt(enable_think, all_candidate_coords)
-    if t == "false_belief":
-        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
     # default to global
     return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
 
