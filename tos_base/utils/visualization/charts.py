@@ -112,45 +112,6 @@ def create_cogmap_metrics_plot(
     return _fig_to_data_uri(fig)
 
 
-def create_cognitive_map_sample_plots(
-    cogmap_update_data: Dict[str, List[Optional[float]]],
-    cogmap_full_data: Dict[str, List[Optional[float]]],
-    sample_name: str
-) -> Dict[str, Optional[str]]:
-    """
-    Create 2 plots for a single sample: Global metrics for both update and full modes.
-
-    Args:
-        cogmap_update_data: Dict with 'dir', 'facing', 'pos', 'overall' metrics per turn for update mode
-        cogmap_full_data: Similar structure for full cognitive map
-        sample_name: Name of the sample for plot titles
-
-    Returns:
-        Dict with 2 keys: 'global_update', 'global_full'
-        Each value is either a data URI string or None if no data available
-    """
-    results = {}
-
-    # Only process global level now
-    modes = [('update', cogmap_update_data), ('full', cogmap_full_data)]
-
-    for mode_name, data in modes:
-        key = f"global_{mode_name}"
-
-        if not isinstance(data, dict):
-            results[key] = None
-            continue
-
-        # Data should already be in the format expected by create_cogmap_metrics_plot
-        # (direct dict with 'dir', 'facing', 'pos', 'overall' keys)
-        title = f"{sample_name} - Global ({mode_name.title()})"
-        plot_uri = create_cogmap_metrics_plot(data, title)
-        results[key] = plot_uri
-
-    return results
-
-
-
 def create_correlation_scatter_plot(x_values: List[float], y_values: List[float],
                                    x_label: str, y_label: str, title: str,
                                    correlation_info: Dict = None) -> Optional[str]:

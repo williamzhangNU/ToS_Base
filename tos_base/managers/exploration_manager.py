@@ -68,7 +68,6 @@ class ExplorationManager:
         self.base_room = room.copy()
         self.exploration_room = room.copy()
         self.agent = agent.copy()
-        self.keep_object_names = [self.agent.name] + [obj.name for obj in getattr(self.exploration_room, 'all_objects', [])]
         self.seed = seed
         self._rng = random.Random(seed)
 
@@ -147,7 +146,6 @@ class ExplorationManager:
             self._update_coverage_from_observe(result)
         
         return result
-
 
 
     def execute_action(self, action: BaseAction) -> ActionResult:
@@ -256,39 +254,6 @@ class ExplorationManager:
             result['avg_action_counts'] = agg_counts
         return result
     
-    @staticmethod
-    def _calculate_infogain_per_turn(env_data_list: List[Dict]) -> List[float]:
-        """Calculate average information gain for each turn across all samples."""
-        # Collect all turn information gains by turn index
-        turn_infogains = defaultdict(list)  # turn_index -> list of infogain values
-        PAD = None
-        
-        for env_data in env_data_list:
-            env_turn_logs = env_data.get('env_turn_logs', [])
-            for turn_idx, turn_log in enumerate(env_turn_logs):
-                # Only consider exploration phases
-                if turn_log.get('is_exploration_phase', False):
-                    infogain = turn_log.get('exploration_log', {}).get('information_gain')
-                    if infogain is not None:
-                        turn_infogains[turn_idx].append(infogain)
-        
-        # Calculate averages for each turn
-        max_turns = max(turn_infogains.keys()) if turn_infogains else -1
-        avg_infogains = []
-        
-        for turn_idx in range(max_turns + 1):
-            if turn_idx in turn_infogains and turn_infogains[turn_idx]:
-                avg_infogain = sum(turn_infogains[turn_idx]) / len(turn_infogains[turn_idx])
-                avg_infogains.append(avg_infogain)
-            else:
-                # carry forward last average if available, else 0.0
-                if avg_infogains:
-                    avg_infogains.append(avg_infogains[-1])
-                else:
-                    avg_infogains.append(0.0)
-        
-        return avg_infogains
-
     @staticmethod
     def _avg_lists_carry_forward(list_of_lists: List[List[float]]) -> List[float]:
         list_of_lists = [lst for lst in (list_of_lists or []) if isinstance(lst, list) and lst]
@@ -438,19 +403,6 @@ class ExplorationManager:
             if name == anchor:
                 continue
             pair = frozenset({anchor, name})
-            if pair in self.target_edges:
-                self.known_edges.add(pair)
-
-    def _update_coverage_from_query(self, query_result: 'ActionResult') -> None:
-        # Coverage: two nodes + edge between them
-        objs = query_result.data.get('objects') or query_result.data.get('pair') or []
-        if len(objs) == 2:
-            a, b = objs[0], objs[1]
-            if a in self.node_names:
-                self.observed_nodes.add(a)
-            if b in self.node_names:
-                self.observed_nodes.add(b)
-            pair = frozenset({a, b})
             if pair in self.target_edges:
                 self.known_edges.add(pair)
 

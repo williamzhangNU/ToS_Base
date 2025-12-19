@@ -22,7 +22,6 @@ CONFIG_BASENAME = "config.json"
 METRICS_BASENAME = "metrics.json"
 IMAGES_DIRNAME = "images"
 MESSAGES_BASENAME = "messages.json"
-EVAL_TASKS_DIRNAME = "evaluation_tasks"
 STATE_BASENAME = "history_state.json"
 class HistoryManager:
     """Simple conversation history manager, one history manager for one run.
@@ -169,13 +168,6 @@ class HistoryManager:
     def init_messages(self, system_prompt: str) -> None:
         self.messages = [{"role": "system", "content": system_prompt}]
 
-    def append_user_message(self, content: str, image_paths: List[str] = None) -> None:
-        self._check_message_order("user")
-        entry: Dict = {"role": "user", "content": content}
-        if image_paths:
-            entry["images"] = list(image_paths)
-        self.messages.append(entry)
-
     def append_assistant_message(self, assistant_raw: str) -> None:
         self._check_message_order("assistant")
         self.messages.append({"role": "assistant", "content": assistant_raw})
@@ -205,10 +197,6 @@ class HistoryManager:
             turn_log['room_image'] = os.path.relpath(img_path, self.model_path)
         # turn_log.pop('room_state', None)
         # turn_log.pop('agent_state', None)
-
-    def _save_json(self, path: str, data: Dict) -> None:
-        with open(path, "w") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
 
     def update_exp_turn_log(self, turn_log: Dict) -> None:
         assert turn_log['is_exploration_phase']
@@ -287,21 +275,6 @@ class HistoryManager:
     def get_existing_question_ids(self, task_type: str) -> List[str]:
         """Return list of existing question ids for a given task class name."""
         return list((self.evaluation_turn_logs.get(task_type) or {}).keys())
-
-    # @staticmethod
-    # def get_model_dir(output_dir: str, model_config: Dict) -> str:
-    #     """Generate a unique directory name for the model configuration"""
-    #     #TODO may be a minor diff leads to a different hash
-    #     for k in [k for k, v in model_config.items() if v is None]:
-    #         model_config.pop(k)
-    #     model_config.pop("api_key", None) 
-    #     model_config.pop("base_url", None)
-    #     model_config.pop("max_retries", None)
-    #     model_config.pop("timeout", None)
-    #     model_config_str = json.dumps(model_config, sort_keys=True)
-    #     model_name = model_config['model_name'].replace("/", "-") + "_" + hash(model_config_str)
-    #     model_name = model_config['model_name'].replace("/", "-")
-    #     return os.path.join(output_dir, model_name)
 
     @staticmethod
     def get_model_dir(output_dir: str, model_name: str) -> str:

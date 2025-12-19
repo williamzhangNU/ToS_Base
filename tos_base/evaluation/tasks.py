@@ -117,10 +117,6 @@ class BaseEvaluationTask(ABC):
     def choices(self) -> List[str]:
         return self.eval_data.choices
     
-    def format_choices(self, choices: List[str], correct_index: int) -> Tuple[str, str]:
-        """Format choices as lines and return (choices_text, correct_label)."""
-        return "\n".join([f"{chr(65+i)}. {choice}" for i, choice in enumerate(choices)]), chr(65 + correct_index)
-    
     @abstractmethod
     def generate_question(self) -> str:
         """Generate evaluation question based on the current room/agent state."""
@@ -152,22 +148,6 @@ class BaseEvaluationTask(ABC):
         task_types = EvalTaskType.get_class_map()
         task_type = data.get('type', cls.__name__)
         return task_types.get(task_type, cls).from_dict(data)
-
-    
-    def _take_observations(self, neglect_objects: List[str] = None) -> str:
-        obs_result = ObserveAction().execute(self.room, self.agent, neglect_objects=neglect_objects or [], free_position=True)
-        return action_results_to_text([obs_result])
-
-    def _take_full_observations(self, neglect_objects: List[str] = None) -> str:
-        action_results = []
-        # Always take 4 views (90° FOV) covering a full 360° turn
-        room = self.room.copy()
-        agent = self.agent.copy()
-        action_results.append(ObserveAction().execute(room, agent, neglect_objects=neglect_objects or [], free_position=True))
-        for _ in range(3):
-            action_results.append(RotateAction(90).execute(room, agent))
-            action_results.append(ObserveAction().execute(room, agent, neglect_objects=neglect_objects or [], free_position=True))
-        return action_results_to_text(action_results)
 
     def _get_ground_truth_observations(self, agent: Agent, limit: int = None) -> Tuple[List[Dict[str, str]], Dict[str, Tuple[int, int]]]:
         """

@@ -153,7 +153,7 @@ class BaseBackwardPovEvaluationTask(BaseEvaluationTask):
         self.np_random.shuffle(oriented)
         
         # Use shared helper to pick best anchor
-        anchor, observations, answer_ori = self._select_best_candidate(
+        anchor, observations, _ = self._select_best_candidate(
             candidates=oriented,
             get_agent_func=lambda x: x,
             min_visible=1,

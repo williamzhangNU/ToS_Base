@@ -27,9 +27,6 @@ class BaseRoom:
     def add_object(self, obj: Object):
         self._init_objects(self.objects + [obj], self.gates)
 
-    def remove_object(self, obj_name: str):
-        self._init_objects([o for o in self.objects if o.name != obj_name], self.gates)
-
     def get_object_by_name(self, name: str) -> Object:
         for obj in self.all_objects:
             if obj.name == name:
@@ -48,31 +45,6 @@ class BaseRoom:
         min_y_bound = min_y - min(max_y - min_y, 1)
         max_y_bound = max_y + min(max_y - min_y, 1)
         return min_x_bound, max_x_bound, min_y_bound, max_y_bound
-
-    def get_random_point(self, rng: np.random.Generator, n_points: int = 1, room_id: int | None = None) -> np.ndarray:
-        """Sample random point(s).
-        - If mask is not available, sample around object bounding box (room_id ignored).
-        - Returns shape (2,) when n_points==1, else (n_points, 2).
-        """
-        if not self.all_objects:
-            pt = np.array([0, 0], dtype=int)
-            return pt if n_points == 1 else np.tile(pt, (n_points, 1))
-        positions = np.array([obj.pos for obj in self.all_objects])
-        min_x, min_y = np.min(positions, axis=0)
-        max_x, max_y = np.max(positions, axis=0)
-        low_x, high_x = int(np.floor(min_x)) - 1, int(np.ceil(max_x)) + 1
-        low_y, high_y = int(np.floor(min_y)) - 1, int(np.ceil(max_y)) + 1
-        xs = rng.integers(low_x, high_x + 1, size=n_points)
-        ys = rng.integers(low_y, high_y + 1, size=n_points)
-        pts = np.stack([xs, ys], axis=1)
-        return pts[0] if n_points == 1 else pts
-
-    def get_objects_orientation(self):
-        ori_mapping = {(0, 1): "north", (0, -1): "south", (1, 0): "east", (-1, 0): "west"}
-        desc = "Orientation of objects in the room are: \n"
-        for obj in self.objects:
-            desc += f"{obj.name} facing {ori_mapping[tuple(obj.ori)]}\n"
-        return desc
 
     def get_cell_info(self, x: int, y: int) -> Dict[str, Any]:
         info: Dict[str, Any] = {"room_id": None, "object_name": None, "gate_name": None}
@@ -137,18 +109,6 @@ class Room(BaseRoom):
         coords = np.argwhere(self.mask == rid)
         assert coords.size > 0, f"No coordinates found for room_id {room_id}"
         return int(coords[:, 0].min()), int(coords[:, 0].max()), int(coords[:, 1].min()), int(coords[:, 1].max())
-
-    def get_random_point(self, rng: np.random.Generator, n_points: int = 1, room_id: int | None = None) -> np.ndarray:
-        """Random valid mask coordinate(s); filter by room_id if provided.
-        Returns shape (2,) when n_points==1, else (n_points, 2).
-        """
-        if room_id is not None:
-            valid = np.argwhere(self.mask == int(room_id))
-        else:
-            valid = np.argwhere((self.mask >= 1) & (self.mask < 100))
-        rng.shuffle(valid)
-        pts = valid[:n_points]
-        return pts[0] if n_points == 1 else pts
 
     def to_dict(self) -> Dict[str, Any]:
         data = {

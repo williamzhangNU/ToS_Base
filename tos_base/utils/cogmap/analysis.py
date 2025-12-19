@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Callable, Optional
-from .types import MapCogMetrics, RelationMetrics
+from .types import MapCogMetrics
 
 
 def _avg(values: List[float]) -> float:
@@ -74,25 +74,6 @@ def calculate_cogmap_per_turn(env_data_list: List[Dict[str, Any]], mode: str = "
         'pos': [float(m.pos) if m.valid else None for m in per_turn_avg],
         'overall': [float(m.overall) if m.valid else None for m in per_turn_avg],
     }
-
-
-# ---- Dataclass-based aggregation helpers ----
-def _avg_map_dicts(dicts: List[Dict[str, float]]) -> Dict[str, float]:
-    mats: List[MapCogMetrics] = []
-    for d in dicts:
-        m = MapCogMetrics.from_dict(d)
-        if m.valid:
-            mats.append(m)
-    return MapCogMetrics.average(mats).to_dict() if mats else MapCogMetrics.invalid().to_dict()
-
-
-def _avg_rel_dicts(dicts: List[Dict[str, float]]) -> Dict[str, float]:
-    rms: List[RelationMetrics] = []
-    for d in dicts:
-        r = RelationMetrics.from_dict(d)
-        if r.valid:
-            rms.append(r)
-    return RelationMetrics.average(rms).to_dict() if rms else RelationMetrics.invalid().to_dict()
 
 
 def _avg_map_over_turns(env_data: Dict[str, Any], section: str, field: str) -> MapCogMetrics:
@@ -174,13 +155,6 @@ def get_false_belief_metrics(env_data: Dict[str, Any]) -> List[Dict[str, Any]]:
             if cogmap_log:
                 false_belief_metrics.append(cogmap_log['false_belief']['metrics'])
     return false_belief_metrics
-
-
-
-
-
-
-
 
 
 __all__ = [

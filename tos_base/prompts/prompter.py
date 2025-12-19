@@ -20,9 +20,6 @@ class PromptManager:
     def invalid_action_message(self) -> str:
         return "Invalid action. You should provide only one final action"
 
-    def invalid_format_message(self) -> str:
-        return "Invalid output format."
-
     def steps_left_message(self, remaining_steps: int) -> str:
         return f"You have a maximum of {remaining_steps} exploration steps left."
 
@@ -124,11 +121,3 @@ class PromptManager:
         else:
             obs['obs_str'] = obs_str
         return obs, images_path
-        
-            
-
-    def get_evaluation_prompt(self, eval_manager: EvaluationManager) -> str:
-        """Generate the evaluation prompt."""
-        eval_question = eval_manager.get_current_question()
-        assert eval_question, "No question found after exploration phase"
-        return EVALUATION_INSTRUCTION.format(eval_question=f"## Evaluation Question\n{eval_question}")

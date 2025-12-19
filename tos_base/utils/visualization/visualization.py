@@ -668,8 +668,6 @@ class HTMLGenerator:
         cogmap_types = [
             ('global', '🗺️ Global Cognitive Map Response'),
             ('local', '🗺️ Local Cognitive Map Response'),
-            # ('relations', '🗺️ Relations Cognitive Map Response'),
-            # ('rooms', '🗺️ Rooms Cognitive Map Response'),
             ('unexplored', '🔍 Unexplored Areas Response'),
             ('false_belief', '🧭 False Belief Cognitive Map Response')
         ]

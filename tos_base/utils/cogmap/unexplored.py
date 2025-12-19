@@ -110,12 +110,6 @@ def compute_unexplored_regions(
     
     return regions
 
-
-def point_in_region(point: Tuple[int, int], region: Set[Tuple[int, int]]) -> bool:
-    """Check if a point is within a region."""
-    return point in region
-
-
 def evaluate_unexplored_predictions(
     predicted_coords: List[Tuple[int, int]],
     correct_coords: List[Tuple[int, int]],
@@ -142,7 +136,6 @@ def evaluate_unexplored_predictions(
     
     # Calculate correct and wrong predictions
     correct_predictions = len(predicted_set & correct_set)
-    wrong_predictions = len(predicted_set - correct_set)
     total_correct = len(correct_set)
     
     # Calculate precision and recall

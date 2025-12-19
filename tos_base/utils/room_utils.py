@@ -184,7 +184,6 @@ class RoomGenerator:
                 
                 if proportional_to_area and not fix_object_n:
                     # Calculate proportional distribution
-                    total_area = np.sum((mask >= 1) & (mask < 100))
                     room_areas = []
                     num_rooms = level + 1
                     for room_id in range(1, num_rooms + 1):
@@ -1148,43 +1147,6 @@ class RoomGenerator:
         return False
 
     @staticmethod
-    def generate_base_room(
-        room_size: Tuple[int, int],
-        n_objects: int,
-        np_random: np.random.Generator,
-        room_name: str = 'room',
-        candidate_objects: List[ObjectInfo] = CANDIDATE_OBJECTS,
-    ) -> Tuple[BaseRoom, Agent]:
-        """Generate a BaseRoom: no mask, no gates; set all room_id to 1."""
-        # create a dummy mask just for sampling object positions within a bounding box
-        x_size, y_size = int(room_size[0]), int(room_size[1])
-        mask = RoomGenerator._default_mask((x_size, y_size))
-        objects = RoomGenerator._gen_objects(
-            n=n_objects,
-            random_generator=np_random,
-            room_size=[x_size, y_size],
-            perspective_taking=True,
-            candidate_list=candidate_objects,
-            mask=mask,
-        )
-        # assign room_id=1 to all objects
-        for o in objects:
-            o.room_id = 1
-        base = BaseRoom(objects=objects, name=room_name)
-        # sample agent not colliding with objects
-        def _rand_pt():
-            xs = np_random.integers(0, x_size + 1)
-            ys = np_random.integers(0, y_size + 1)
-            return np.array([int(xs), int(ys)], dtype=int)
-        agent_pos = _rand_pt()
-        while any(np.allclose(agent_pos, obj.pos) for obj in objects):
-            agent_pos = _rand_pt()
-        agent = Agent(name='agent', pos=agent_pos)
-        agent.room_id = 1
-        agent.init_room_id = 1
-        return base, agent
-    
-    @staticmethod
     def _gen_objects(
         n: int,
         random_generator: np.random.Generator,
@@ -1419,43 +1381,6 @@ class RoomPlotter:
         plt.close(fig)
         buf.seek(0)
         return imageio.v2.imread(buf)
-
-def get_observed_room_id(room: Room, agent_state: Dict[str, Any]) -> Union[int, List[int], None]:
-    """Determine the observed room ID based on agent position, orientation and gates.
-    
-    If the agent is at a gate position, check which room the agent's orientation is pointing towards
-    using gate.ori_by_room. Otherwise, return the room ID from the mask at the agent's position.
-    
-    Args:
-        room: Room object with gates and mask information
-        agent_state: Agent state dict containing 'pos' and 'ori' keys
-    
-    Returns:
-        The observed room ID (int), or list of room IDs if at gate, or None if cannot determine
-    """
-    agent_pos = np.array(agent_state.get("pos", [0, 0]))
-    agent_ori = np.array(agent_state.get("ori", [0, 1]))
-    # Check if agent is at a gate position
-    for gate in room.gates:
-        if np.allclose(agent_pos, gate.pos):
-            # Agent is at this gate - determine which room they're looking into
-            if hasattr(gate, 'ori_by_room') and gate.ori_by_room:
-                # Find the room whose entry orientation matches the agent's orientation
-                # ori_by_room maps room_id -> orientation vector pointing into that room
-                for rid, ori_vec in gate.ori_by_room.items():
-                    ori_array = np.array(ori_vec) if not isinstance(ori_vec, np.ndarray) else ori_vec
-                    if np.allclose(agent_ori, ori_array):
-                        return int(rid)
-                # If no exact match, return both connected rooms
-                if hasattr(gate, 'room_id') and isinstance(gate.room_id, list):
-                    return gate.room_id
-            elif hasattr(gate, 'room_id') and isinstance(gate.room_id, list):
-                # Fallback: return both connected rooms
-                return gate.room_id
-            return None
-    # Not at a gate - get room ID from mask
-    return agent_state.get("room_id", None)
-
 
 def get_room_description(room: Room, agent: Agent) -> str:
     # Get room information

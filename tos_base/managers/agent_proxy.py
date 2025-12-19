@@ -174,10 +174,6 @@ class AgentProxy:
             self._observe(acts + self._rotate_to_ori(desired_ori))
         self.anchor = None
 
-    def _room_object_names(self) -> List[str]:
-        rid = self._current_room()
-        return sorted(self.object_nodes_by_room.get(rid, set()))
-
     def _room_node_names(self) -> List[str]:
         rid = self._current_room()
         return sorted(self.nodes_by_room.get(rid, set()))

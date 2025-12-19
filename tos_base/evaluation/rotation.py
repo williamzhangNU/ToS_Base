@@ -28,17 +28,6 @@ ROT_EVAL_TEMPLATE = (
     "Example: mug, sofa, plant\n"
 )
 
-ROT_DUAL_EVAL_TEMPLATE = (
-    "You return to your starting position and face north.\n"
-    "You performed a complete 360° rotation in place.\n"
-    "Assume all walls are removed (you can see through walls), so every object is visible.\n"
-    "During the rotation, these objects appeared directly in front of you in this order:\n"
-    "{object_sequence}\n\n"
-    "Based on this sequence, in which direction did you rotate?\n\n"
-    "Answer format: clockwise or counterclockwise\n"
-    "Example: clockwise\n"
-)
-
 class RotEvaluationTask(BaseEvaluationTask):
     """Ask the sequence of objects appearing when rotating in place."""
 
@@ -108,28 +97,6 @@ class RotEvaluationTask(BaseEvaluationTask):
         return f"{self.__class__.__name__}({self.turn_direction})"
 
 
-class RotDualEvaluationTask(RotEvaluationTask):
-    """Given the appearing sequence, ask the rotation direction. TODO: different sequences in each option"""
-
-    QUESTION_TEMPLATE = ROT_DUAL_EVAL_TEMPLATE
-
-    @retry_generate_question
-    def generate_question(self) -> str:
-        self.turn_direction = self.np_random.choice(["clockwise", "counterclockwise"])
-        self.angle_eps = float(self.config.get("angle_eps", 30.0))
-
-        correct_seq = self._gen_valid_sequence(self.turn_direction, self.angle_eps)
-        object_sequence = ", ".join(correct_seq)
-
-        self.eval_data.question = self.QUESTION_TEMPLATE.format(
-            object_sequence=object_sequence
-        )
-        self.eval_data.answer = self.turn_direction
-        self.eval_data.choices = []
-        self.eval_data.id = hash(self.eval_data.question)
-        return self.eval_data.question
-
-
 if __name__ == "__main__":
     from ..utils.eval_utilities import create_and_plot_room, manual_test_loop
     from .task_types import EvalTaskType
@@ -140,9 +107,8 @@ if __name__ == "__main__":
     # 3. Synonym matching: "CW" for "clockwise", "CCW" for "counterclockwise".
     # 4. Starting point shift: (A, B, C) might be equivalent to (B, C, A) depending on task definition (usually not for this task).
 
-    task_names = ['rot', 'rot_dual']
-    # task_names = ['rot']
-
+    task_names = ['rot']
+    
     for task_name in task_names:
         print(f"\nTesting task: {task_name}")
         try:

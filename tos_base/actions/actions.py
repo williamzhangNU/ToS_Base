@@ -140,8 +140,6 @@ class ObserveBase(BaseAction):
     example = "Observe()"
     format_pattern = r"^Observe\(\)$"
     cost = 1
-    directional_template = "{obj_name}: {dir_str}"
-    orientation_template = "{obj_name} facing {orientation}"
     
     def __init__(self):
         super().__init__()
@@ -338,35 +336,6 @@ class QueryAction(QueryBase):
             'orientation': ans_ori,
             'relation_triples': [RelationTriple(subject=self.obj, anchor='initial_pos', relation=rel, orientation=tuple(agent.init_ori))]
         })
-
-class QueryRelAction(QueryBase):
-    """Legacy: query accurate relationship from current agent pose."""
-    format_desc = "QueryRel(obj)"
-    description = "Return accurate spatial relationship from current agent pose. You can only query objects that you have previously observed."
-    example = "QueryRel(table)"
-    format_pattern = r"^QueryRel\(([A-Za-z0-9_ -]+)\)$"
-    def success_message(self, **kwargs) -> str:
-        return f"You query {self.obj}: {kwargs.get('answer','unknown')}"
-    def __repr__(self): return f"QueryRel({self.obj})"
-    def execute(self, room, agent, **kwargs) -> ActionResult:
-        if self.obj != 'initial_pos' and (not room.has_object(self.obj)):
-            return ActionResult(False, self.get_feedback(False, "object not found"), str(self), 'query', {})
-        observed_items = set(kwargs.get('observed_items', []))
-        if observed_items is not None and self.obj != 'initial_pos' and self.obj not in observed_items:
-            return ActionResult(False, self.get_feedback(False, "object not observed yet"), str(self), 'query', {})
-        obj_pos = room.get_object_by_name(self.obj).pos if self.obj != 'initial_pos' else agent.init_pos
-        rel = PairwiseRelationship.relationship(tuple(obj_pos), tuple(agent.pos), anchor_ori=tuple(agent.ori), full=True)
-        ans = rel.to_string()
-        return ActionResult(True, self.get_feedback(True, answer=ans), str(self), 'query', {
-            'answer': ans,
-            'object': self.obj,
-            'relation_triples': [RelationTriple(subject=self.obj, anchor=self.get_anchor_name(room, agent), relation=rel, orientation=tuple(agent.ori))]
-        })
-
-
-
-
-
 
 
 class FalseBeliefTermAction(TermAction):

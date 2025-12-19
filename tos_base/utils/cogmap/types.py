@@ -120,61 +120,6 @@ class AccuracyMetrics(BaseCogMetrics):
         return AccuracyMetrics(overall=float(val), valid=True)
 
 @dataclass
-class RelationMetrics(BaseCogMetrics):
-    dir: float = 0.0
-    dist: float = 0.0
-
-    def to_dict(self) -> Dict[str, float]:
-        return {"dir": float(self.dir), "dist": float(self.dist), "overall": float(self.overall)}
-
-    @classmethod
-    def invalid(cls) -> 'RelationMetrics':
-        return cls(dir=0.0, dist=0.0, overall=0.0, valid=False)
-
-    @staticmethod
-    def from_dict(d: Dict[str, float]) -> 'RelationMetrics':
-        if not isinstance(d, dict) or not d:
-            return RelationMetrics.invalid()
-        return RelationMetrics(
-            dir=float(d.get('dir', 0.0)),
-            dist=float(d.get('dist', 0.0)),
-            overall=float(d.get('overall', 0.0)),
-            valid=True,
-        )
-
-    @staticmethod
-    def average(items: List['RelationMetrics']) -> 'RelationMetrics':
-        valid_items = [i for i in items if isinstance(i, RelationMetrics) and i.valid]
-        if not valid_items:
-            return RelationMetrics.invalid()
-        import numpy as np
-        return RelationMetrics(
-            dir=float(np.mean([i.dir for i in valid_items])),
-            dist=float(np.mean([i.dist for i in valid_items])),
-            overall=float(np.mean([i.overall for i in valid_items])),
-            valid=True,
-        )
-
-    def __add__(self, other: 'RelationMetrics') -> 'RelationMetrics':
-        return RelationMetrics(
-            dir=self.dir + other.dir,
-            dist=self.dist + other.dist,
-            overall=self.overall + other.overall,
-            valid=self.valid and other.valid,
-        )
-
-    def __truediv__(self, scalar: float) -> 'RelationMetrics':
-        if scalar == 0:
-            return RelationMetrics.invalid()
-        return RelationMetrics(
-            dir=self.dir / scalar,
-            dist=self.dist / scalar,
-            overall=self.overall / scalar,
-            valid=self.valid,
-        )
-
-
-@dataclass
 class ConsistencySummary:
     local_vs_global: Optional[MapCogMetrics] = None
     rooms_vs_global_avg: Optional[MapCogMetrics] = None
@@ -244,7 +189,6 @@ class UnexploredMetrics(BaseCogMetrics):
 __all__ = [
     "BaseCogMetrics",
     "MapCogMetrics",
-    "RelationMetrics",
     "AccuracyMetrics",
     "ConsistencySummary",
     "UnexploredMetrics",
