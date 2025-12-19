@@ -13,9 +13,9 @@ from ..utils.utils import hash
 
 """
 Task Overview:
-1. Location2ActionEvaluationTask (Backward Loc): Infer (x,y) and orientation from observations.
+1. View2LocationEvaluationTask (Backward Loc): Infer (x,y) and orientation from observations.
    - Evaluated by: coordinate similarity (position + orientation) vs ground truth. (TODO: debug for metrics)
-2. Action2LocationEvaluationTask (Forward Loc): Infer ego relation after movement to (x,y).
+2. Location2ViewEvaluationTask (Forward Loc): Infer ego relation after movement to (x,y).
    - Evaluated by: direction and distance match.
 """
 
@@ -108,7 +108,7 @@ class BaseLocEvaluationTask(BaseEvaluationTask):
         return tuple(map(int, init_pos)), "your starting position"
 
 
-class BaseLocation2ActionEvaluationTask(BaseLocEvaluationTask):
+class BaseView2LocationEvaluationTask(BaseLocEvaluationTask):
     """Base class for Location2Action (Backward Localization) tasks."""
 
     QUESTION_TEMPLATE = LOC_2_ACTION_TEMPLATE
@@ -184,7 +184,7 @@ class BaseLocation2ActionEvaluationTask(BaseLocEvaluationTask):
         raise NotImplementedError
 
 
-class Location2ActionTextEvaluationTask(BaseLocation2ActionEvaluationTask):
+class View2LocationTextEvaluationTask(BaseView2LocationEvaluationTask):
     """Localize your own coordinate (x, y) and orientation using text observations."""
     def _get_observations(self) -> str:
         # This is deprecated by _format_observations_custom in generate_question
@@ -200,7 +200,7 @@ class Location2ActionTextEvaluationTask(BaseLocation2ActionEvaluationTask):
         return "You observe: " + "; ".join(obs_parts)
 
 
-class Location2ActionVisionEvaluationTask(BaseLocation2ActionEvaluationTask):
+class View2LocationVisionEvaluationTask(BaseView2LocationEvaluationTask):
     """Localize your own coordinate (x, y) and orientation using vision."""
     def _get_observations(self) -> str:
         return ""
@@ -208,7 +208,7 @@ class Location2ActionVisionEvaluationTask(BaseLocation2ActionEvaluationTask):
     def _format_observations_custom(self, observations: List[Dict[str, str]]) -> str:
          return "You observe: <image>"
 
-class Action2LocationEvaluationTask(BaseLocEvaluationTask):
+class Location2ViewEvaluationTask(BaseLocEvaluationTask):
     
     QUESTION_TEMPLATE = ACTION_2_LOC_TEMPLATE
 

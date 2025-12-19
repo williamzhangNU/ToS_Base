@@ -1064,9 +1064,9 @@ TASK_EVALUATORS: Dict[str, TaskEvaluator] = {
     'View2ActionTextEvaluationTask': _wrap_eval(lambda p, a: _eval_backward_nav(p, a, require_exact_pose=False), pred_cast=str, answer_cast=None),
     'View2ActionVisionEvaluationTask': _wrap_eval(lambda p, a: _eval_backward_nav(p, a, require_exact_pose=True), pred_cast=str, answer_cast=None),
     'View2ActionRevEvaluationTask': _wrap_eval(_eval_backward_nav_rev, pred_cast=str, answer_cast=None),
-    'Action2LocationEvaluationTask': _wrap_eval(_eval_forward_nav),
-    'Location2ActionTextEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
-    'Location2ActionVisionEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
+    'Location2ViewEvaluationTask': _wrap_eval(_eval_forward_nav),
+    'View2LocationTextEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
+    'View2LocationVisionEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
     'FalseBeliefDirectionPov': _wrap_eval(_eval_direction_text),
 }
 
