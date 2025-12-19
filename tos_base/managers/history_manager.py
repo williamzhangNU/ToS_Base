@@ -32,7 +32,7 @@ class HistoryManager:
     """
 
     def __init__(self, observation_config: Dict, model_config: Dict , room_dict: Dict, agent_dict: Dict, output_dir:str, seed: int,
-                 image_dir:str = None, eval_override: bool = False, all_override: bool = False, all_tasks: List = None):
+                 image_dir:str = None, eval_override: bool = False, all_override: bool = False, false_belief_override: bool = False, all_tasks: List = None):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.false_belief_turn_logs: List[Dict] = []
@@ -81,6 +81,10 @@ class HistoryManager:
                 if mapped_task in self.evaluation_turn_logs:
                     self.evaluation_turn_logs[mapped_task] = {}
             self.save_evaluation()
+        if false_belief_override:
+            if os.path.exists(self.false_belief_path):
+                os.remove(self.false_belief_path)
+            self.false_belief_turn_logs = []
             
         os.makedirs(os.path.join(self.output_dir, IMAGES_DIRNAME), exist_ok=True)
         if not os.path.exists(self.model_config_path):
@@ -302,7 +306,7 @@ class HistoryManager:
     @staticmethod
     def get_model_dir(output_dir: str, model_name: str) -> str:
         """Generate a unique directory name for the model configuration"""
-        model_name = model_name.replace("/", "-")
+        model_name = model_name.replace("\\", "/").rstrip("/").split("/")[-1]
         return os.path.join(output_dir, model_name)
     
     @staticmethod
@@ -527,6 +531,7 @@ class HistoryManager:
             seed=s.get("seed", 0),
             image_dir=s.get("image_dir"),
             eval_override=eval_override,
+            false_belief_override=False,
             all_tasks=all_tasks,
         )
         return hm
