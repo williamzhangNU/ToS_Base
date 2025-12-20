@@ -14,6 +14,7 @@ class EvalTaskType(Enum):
     # Task type definitions: (short_name, class_name)
     DIR = ("dir", "DirectionEvaluationTask")
     ROT = ("rot", "RotEvaluationTask")
+    ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
     POV = ("pov", "PovEvaluationTask")
     BWD_POV_TEXT = ("bwd_pov_text", "BackwardPovTextEvaluationTask")
     BWD_POV_VISION = ("bwd_pov_vision", "BackwardPovVisionEvaluationTask")
@@ -25,6 +26,7 @@ class EvalTaskType(Enum):
     BWD_NAV_TEXT = ("bwd_nav_text", "View2ActionTextEvaluationTask")
     BWD_NAV_VISION = ("bwd_nav_vision", "View2ActionVisionEvaluationTask")
     BWD_NAV_REV = ("bwd_nav_rev", "View2ActionRevEvaluationTask")
+    BWD_NAV_VISION_OLD = ("bwd_nav_vision", "Location2ActionVisionEvaluationTask")  # deprecated
     FALSE_BELIEF = ("false_belief", "FalseBeliefDirectionPov")
     DIR_ANCHOR = ("dir_anchor", "DirectionPov")
     
@@ -45,7 +47,7 @@ class EvalTaskType(Enum):
     @classmethod
     def excluded_from_average(cls) -> set[str]:
         """Task identifiers (short or class name) excluded from overall evaluation averages."""
-        excluded = (cls.ROT_DUAL, cls.BWD_POV_VISION, cls.BWD_NAV_VISION, cls.BWD_LOC_VISION)
+        excluded = (cls.ROT_DUAL, cls.BWD_POV_VISION, cls.BWD_NAV_VISION, cls.BWD_LOC_VISION, cls.BWD_NAV_VISION_OLD)
         return {t.short_name for t in excluded} | {t.class_name for t in excluded}
     
     @classmethod

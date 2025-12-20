@@ -122,20 +122,10 @@ class AccuracyMetrics(BaseCogMetrics):
 @dataclass
 class ConsistencySummary:
     local_vs_global: Optional[MapCogMetrics] = None
-    rooms_vs_global_avg: Optional[MapCogMetrics] = None
-    rooms_vs_global_per_room: Dict[str, MapCogMetrics] = field(default_factory=dict)
-    map_vs_relations: Optional[float] = None
-    relations_consistency: Optional[float] = None
 
     def to_dict(self) -> Dict:
         return {
             "local_vs_global": (self.local_vs_global.to_dict() if self.local_vs_global and self.local_vs_global.valid else {}),
-            "rooms_vs_global": {
-                "average": (self.rooms_vs_global_avg.to_dict() if self.rooms_vs_global_avg and self.rooms_vs_global_avg.valid else {}),
-                "per_room": {k: v.to_dict() for k, v in self.rooms_vs_global_per_room.items()},
-            },
-            "map_vs_relations": (float(self.map_vs_relations) if isinstance(self.map_vs_relations, (int, float)) else None),
-            "relations_consistency": (float(self.relations_consistency) if isinstance(self.relations_consistency, (int, float)) else None),
         }
 
 

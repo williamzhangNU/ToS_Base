@@ -198,11 +198,20 @@ class HistoryManager:
         # turn_log.pop('room_state', None)
         # turn_log.pop('agent_state', None)
 
-    def update_exp_turn_log(self, turn_log: Dict) -> None:
+    def update_exp_turn_log(self, turn_log: Dict, replay: bool = False) -> None:
         assert turn_log['is_exploration_phase']
-        assert not self.has_exploration(turn_log['turn_number'] - 1)
-        self._attach_room_image(turn_log, f"room_turn_{turn_log['turn_number']}.png")
-        self.exploration_turn_logs.append(turn_log)
+        turn_idx = turn_log['turn_number'] - 1
+        
+        if replay:
+            # Override mode: replace existing turn log at the given index
+            assert 0 <= turn_idx < len(self.exploration_turn_logs), f"Invalid turn index {turn_idx} for replay (max: {len(self.exploration_turn_logs)-1})"
+            turn_log['cogmap_log'] = self.exploration_turn_logs[turn_idx].get('cogmap_log')
+            self.exploration_turn_logs[turn_idx] = turn_log
+        else:
+            # Append mode: add new turn log
+            assert not self.has_exploration(turn_idx), f"Turn {turn_log['turn_number']} already exists"
+            self._attach_room_image(turn_log, f"room_turn_{turn_log['turn_number']}.png")
+            self.exploration_turn_logs.append(turn_log)
 
     def update_false_belief_turn_log(self, turn_log: Dict) -> None:
         assert not turn_log['is_exploration_phase']
@@ -224,12 +233,12 @@ class HistoryManager:
             self.evaluation_turn_logs[task_type] = {}
         self.evaluation_turn_logs[task_type][question_id] = turn_log
 
-    def update_turn_log(self, turn_log: Dict) -> None:
+    def update_turn_log(self, turn_log: Dict, replay: bool = False) -> None:
         """Dispatch to specific update functions (kept for compatibility)."""
         if turn_log.get('false_belief_log'):
             self.update_false_belief_turn_log(turn_log)
         elif turn_log['is_exploration_phase']:
-            self.update_exp_turn_log(turn_log)
+            self.update_exp_turn_log(turn_log, replay=replay)
         else:
             self.update_eval_turn_log(turn_log)
 

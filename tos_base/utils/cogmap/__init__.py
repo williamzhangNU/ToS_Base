@@ -23,7 +23,6 @@ from .transforms import (
 from .consistency import (
     compare_on_common_subset,
     local_vs_global_consistency,
-    rooms_vs_global_consistency,
 )
 from .analysis import (
     aggregate_per_sample_then_group,
@@ -60,7 +59,6 @@ __all__ = [
     # consistency
     "compare_on_common_subset",
     "local_vs_global_consistency",
-    "rooms_vs_global_consistency",
     # analysis
     "aggregate_per_sample_then_group",
     "aggregate_lists_per_turn",

@@ -43,51 +43,6 @@ def local_vs_global_consistency(pred_local: BaseRoom | None, pred_global: BaseRo
     # Compare directly (local should already be agent-centered)
     return compare_on_common_subset(pred_local, global_agent_centered, allow_scale=allow_scale, pos_norm_L=pos_norm_L)
 
-
-def rooms_vs_global_consistency(pred_rooms: Dict[str, BaseRoom], pred_global: BaseRoom | None, room: Room, agent: Agent, entry_gate_by_room: Dict[int, str], allow_scale: bool, pos_norm_L: float | None) -> Tuple[MapCogMetrics, Dict[str, MapCogMetrics]]:
-    if pred_global is None:
-        return MapCogMetrics.invalid(), {}
-    per_room: Dict[str, MapCogMetrics] = {}
-    vals: List[MapCogMetrics] = []
-    # Iterate over all GT rooms to ensure missing predictions count as 0
-    for rid_int in sorted(room.objects_by_room.keys()):
-        rid = str(rid_int)
-        room_br = pred_rooms.get(rid)
-        gate_name = entry_gate_by_room.get(rid_int)
-        if gate_name:
-            g = next((gg for gg in room.gates if gg.name == gate_name), None)
-            if g is None:
-                m = MapCogMetrics(dir=0.0, facing=0.0, pos=0.0, overall=0.0, valid=True)
-                per_room[rid] = m
-                vals.append(m)
-                continue
-            gate_pos = g.pos
-            gate_ori = g.get_ori_for_room(rid_int)
-        elif rid_int == 1:
-            gate_pos = agent.init_pos
-            gate_ori = agent.init_ori
-        else:
-            # No anchor info; treat as wrong
-            m = MapCogMetrics(dir=0.0, facing=0.0, pos=0.0, overall=0.0, valid=True)
-            per_room[rid] = m
-            vals.append(m)
-            continue
-        if room_br is None:
-            m = MapCogMetrics(dir=0.0, facing=0.0, pos=0.0, overall=0.0, valid=True)
-            per_room[rid] = m
-            vals.append(m)
-            continue
-        room_in_initial = br_from_anchor_to_initial(room_br, gate_pos, gate_ori, agent)
-        m = compare_on_common_subset(room_in_initial, pred_global, allow_scale=allow_scale, pos_norm_L=pos_norm_L)
-        # If invalid comparison (no overlap), count as 0 instead of skipping
-        if not m.valid:
-            m = MapCogMetrics(dir=0.0, facing=0.0, pos=0.0, overall=0.0, valid=True)
-        per_room[rid] = m
-        vals.append(m)
-    avg = MapCogMetrics.average(vals) if vals else MapCogMetrics.invalid()
-    return avg, per_room
-
-
 def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 5,
               allow_scale: bool = False, pos_norm_L: float | None = None) -> Tuple[List[float], List[MapCogMetrics]]:
     """Per-adjacent-turn stability decoupled into update and stability check metrics.
@@ -188,9 +143,6 @@ def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 5,
 __all__ = [
     "compare_on_common_subset",
     "local_vs_global_consistency",
-    "rooms_vs_global_consistency",
-    "map_vs_relations_consistency",
-    "relations_consistency",
     "stability",
 ]
 

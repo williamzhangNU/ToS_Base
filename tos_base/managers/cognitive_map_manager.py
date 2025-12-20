@@ -27,7 +27,6 @@ from ..utils.cogmap.transforms import (
 from ..utils.cogmap.metrics import compute_map_metrics
 from ..utils.cogmap.consistency import (
     local_vs_global_consistency,
-    rooms_vs_global_consistency,
     stability,
 )
 from ..utils.cogmap.types import BaseCogMetrics, MapCogMetrics, ConsistencySummary, AccuracyMetrics
@@ -302,19 +301,6 @@ class CognitiveMapManager:
                 pos_norm_L=self._pos_norm_L,
             )
             summary.local_vs_global = cm
-        # Rooms vs Global (only when both predicted)
-        if out.rooms_log and out.global_log and out.rooms_log.extraction_success and out.global_log.extraction_success:
-            avg, per_room = rooms_vs_global_consistency(
-                out.rooms_log.pred_rooms_state or {},
-                out.global_log.pred_room_state,
-                gt_room,
-                gt_agent,
-                self.entry_gate_by_room,
-                allow_scale=bool(self.config.get('pos_allow_scale', False)),
-                pos_norm_L=self._pos_norm_L,
-            )
-            summary.rooms_vs_global_avg = avg
-            summary.rooms_vs_global_per_room = per_room
         
         out.consistency = summary
         return out

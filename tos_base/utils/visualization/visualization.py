@@ -817,16 +817,12 @@ class HTMLGenerator:
         # Extract metrics
         global_log = cogmap_log.get("global", {})
         local_log = cogmap_log.get("local", {})
-        # rooms_log = cogmap_log.get("rooms", {})
-        # relations_log = cogmap_log.get("relations", {})
         unexplored_log = cogmap_log.get("unexplored", {})
 
         metrics_block = {
             "Global": global_log.get("metrics", {}) if global_log else {},
             "Global (Full)": global_log.get("metrics_full", {}) if global_log else {},
             "Local": local_log.get("metrics", {}) if local_log else {},
-            # "Rooms": rooms_log.get("metrics", {}) if rooms_log else {},
-            # "Relations": relations_log.get("metrics", {}) if relations_log else {},
             "Unexplored": unexplored_log.get("metrics", {}) if unexplored_log else {}
         }
 
