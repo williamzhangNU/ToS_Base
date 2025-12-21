@@ -1,7 +1,6 @@
 import os
 import json
-from typing import Dict, List, Optional, Tuple
-from collections import defaultdict
+from typing import Dict, List, Optional
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field
@@ -11,8 +10,7 @@ from .. import (
     Room,
     ExplorationTurnLog,
     CognitiveMapTurnLog,
-    Agent,
-    RoomPlotter
+    Agent
 )
 from .visualization.visualization import HTMLGenerator
 

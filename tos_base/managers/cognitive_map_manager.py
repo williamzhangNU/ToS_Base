@@ -29,7 +29,7 @@ from ..utils.cogmap.consistency import (
     local_vs_global_consistency,
     stability,
 )
-from ..utils.cogmap.types import BaseCogMetrics, MapCogMetrics, ConsistencySummary, AccuracyMetrics
+from ..utils.cogmap.types import BaseCogMetrics, MapCogMetrics, ConsistencySummary, UnexploredMetrics
 from ..utils.cogmap.analysis import (
     get_last_exploration_cogmap,
     avg_nested_dicts,
@@ -210,7 +210,18 @@ class CognitiveMapManager:
         assert correct_coords and all_candidate_coords, "No correct or candidate coordinates provided"
         # Parse predicted coordinates
         pred_coords = parse_unexplored_response(assistant_response)
-        
+        # if not all_candidate_coords or not correct_coords:
+        #     return UnexploredCogMapTurnLog(
+        #         type="unexplored",
+        #         extraction_success=True,
+        #         original_response=assistant_response,
+        #         pred_json={"parsed_from_text": True, "predicted_coords": [[int(x), int(y)] for x, y in pred_coords]},
+        #         all_candidate_points=all_candidate_coords,
+        #         pred_points=pred_coords,
+        #         correct_points=correct_coords,
+        #         metrics=UnexploredMetrics(overall=1.0, precision=1.0, recall=1.0, valid=True),
+        #     )
+
         # Evaluate predictions
         metrics = evaluate_unexplored_predictions(pred_coords, correct_coords)
         

@@ -4,7 +4,7 @@ import shutil
 import json
 
 from ..utils.cogmap.correlation import compute_correlation_metrics
-from ..utils.utils import hash
+from ..utils.utils import hash, get_model_name
 from ..utils.room_utils import RoomPlotter
 from .. import (
     Agent,
@@ -284,11 +284,11 @@ class HistoryManager:
     def get_existing_question_ids(self, task_type: str) -> List[str]:
         """Return list of existing question ids for a given task class name."""
         return list((self.evaluation_turn_logs.get(task_type) or {}).keys())
-
+    
     @staticmethod
     def get_model_dir(output_dir: str, model_name: str) -> str:
         """Generate a unique directory name for the model configuration"""
-        model_name = model_name.replace("\\", "/").rstrip("/").split("/")[-1]
+        model_name = get_model_name(model_name)
         return os.path.join(output_dir, model_name)
     
     @staticmethod
@@ -502,8 +502,9 @@ class HistoryManager:
         assert os.path.exists(state_file), f"Missing state file: {state_file}"
         with open(state_file, "r") as f:
             s = json.load(f)
-        model_name = s.get("model_config", {}).get("model_name", "").replace("/", "-")
+        model_name = get_model_name(s.get("model_config", {}).get("model_name", ""))
         output_dir = combo_dir.split(model_name)[0]
+        assert model_name and model_name not in output_dir, f"Failed to infer output_dir from combo_dir: {combo_dir}"
         hm = HistoryManager(
             observation_config=s.get("observation_config", {}),
             model_config=s.get("model_config", {}),

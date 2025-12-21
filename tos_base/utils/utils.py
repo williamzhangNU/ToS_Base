@@ -19,6 +19,11 @@ _DEG_TO_VEC = {
 }
 _VEC_TO_DEG = {v: k for k, v in _DEG_TO_VEC.items()}
 
+def get_model_name(model_name: str) -> str:
+    """Generate a unique directory name for the model configuration"""
+    model_name = model_name.replace("\\", "/").rstrip("/").split("/")[-1]
+    return model_name
+
 def numpy_to_python(obj):
     """Convert numpy types to native Python types for JSON serialization."""
     if isinstance(obj, np.integer):
