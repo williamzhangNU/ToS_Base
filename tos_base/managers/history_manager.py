@@ -4,7 +4,7 @@ import shutil
 import json
 
 from ..utils.cogmap.correlation import compute_correlation_metrics
-from ..utils.utils import hash
+from ..utils.utils import hash, get_model_name
 from ..utils.room_utils import RoomPlotter
 from .. import (
     Agent,
@@ -22,7 +22,6 @@ CONFIG_BASENAME = "config.json"
 METRICS_BASENAME = "metrics.json"
 IMAGES_DIRNAME = "images"
 MESSAGES_BASENAME = "messages.json"
-EVAL_TASKS_DIRNAME = "evaluation_tasks"
 STATE_BASENAME = "history_state.json"
 class HistoryManager:
     """Simple conversation history manager, one history manager for one run.
@@ -32,7 +31,7 @@ class HistoryManager:
     """
 
     def __init__(self, observation_config: Dict, model_config: Dict , room_dict: Dict, agent_dict: Dict, output_dir:str, seed: int,
-                 image_dir:str = None, eval_override: bool = False, all_override: bool = False, all_tasks: List = None):
+                 image_dir:str = None, eval_override: bool = False, all_override: bool = False, false_belief_override: bool = False, all_tasks: List = None):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.false_belief_turn_logs: List[Dict] = []
@@ -81,6 +80,10 @@ class HistoryManager:
                 if mapped_task in self.evaluation_turn_logs:
                     self.evaluation_turn_logs[mapped_task] = {}
             self.save_evaluation()
+        if false_belief_override:
+            if os.path.exists(self.false_belief_path):
+                os.remove(self.false_belief_path)
+            self.false_belief_turn_logs = []
             
         os.makedirs(os.path.join(self.output_dir, IMAGES_DIRNAME), exist_ok=True)
         if not os.path.exists(self.model_config_path):
@@ -165,13 +168,6 @@ class HistoryManager:
     def init_messages(self, system_prompt: str) -> None:
         self.messages = [{"role": "system", "content": system_prompt}]
 
-    def append_user_message(self, content: str, image_paths: List[str] = None) -> None:
-        self._check_message_order("user")
-        entry: Dict = {"role": "user", "content": content}
-        if image_paths:
-            entry["images"] = list(image_paths)
-        self.messages.append(entry)
-
     def append_assistant_message(self, assistant_raw: str) -> None:
         self._check_message_order("assistant")
         self.messages.append({"role": "assistant", "content": assistant_raw})
@@ -202,15 +198,20 @@ class HistoryManager:
         # turn_log.pop('room_state', None)
         # turn_log.pop('agent_state', None)
 
-    def _save_json(self, path: str, data: Dict) -> None:
-        with open(path, "w") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-    def update_exp_turn_log(self, turn_log: Dict) -> None:
+    def update_exp_turn_log(self, turn_log: Dict, replay: bool = False) -> None:
         assert turn_log['is_exploration_phase']
-        assert not self.has_exploration(turn_log['turn_number'] - 1)
-        self._attach_room_image(turn_log, f"room_turn_{turn_log['turn_number']}.png")
-        self.exploration_turn_logs.append(turn_log)
+        turn_idx = turn_log['turn_number'] - 1
+        
+        if replay:
+            # Override mode: replace existing turn log at the given index
+            assert 0 <= turn_idx < len(self.exploration_turn_logs), f"Invalid turn index {turn_idx} for replay (max: {len(self.exploration_turn_logs)-1})"
+            turn_log['cogmap_log'] = self.exploration_turn_logs[turn_idx].get('cogmap_log')
+            self.exploration_turn_logs[turn_idx] = turn_log
+        else:
+            # Append mode: add new turn log
+            assert not self.has_exploration(turn_idx), f"Turn {turn_log['turn_number']} already exists"
+            self._attach_room_image(turn_log, f"room_turn_{turn_log['turn_number']}.png")
+            self.exploration_turn_logs.append(turn_log)
 
     def update_false_belief_turn_log(self, turn_log: Dict) -> None:
         assert not turn_log['is_exploration_phase']
@@ -232,12 +233,12 @@ class HistoryManager:
             self.evaluation_turn_logs[task_type] = {}
         self.evaluation_turn_logs[task_type][question_id] = turn_log
 
-    def update_turn_log(self, turn_log: Dict) -> None:
+    def update_turn_log(self, turn_log: Dict, replay: bool = False) -> None:
         """Dispatch to specific update functions (kept for compatibility)."""
         if turn_log.get('false_belief_log'):
             self.update_false_belief_turn_log(turn_log)
         elif turn_log['is_exploration_phase']:
-            self.update_exp_turn_log(turn_log)
+            self.update_exp_turn_log(turn_log, replay=replay)
         else:
             self.update_eval_turn_log(turn_log)
 
@@ -283,26 +284,11 @@ class HistoryManager:
     def get_existing_question_ids(self, task_type: str) -> List[str]:
         """Return list of existing question ids for a given task class name."""
         return list((self.evaluation_turn_logs.get(task_type) or {}).keys())
-
-    # @staticmethod
-    # def get_model_dir(output_dir: str, model_config: Dict) -> str:
-    #     """Generate a unique directory name for the model configuration"""
-    #     #TODO may be a minor diff leads to a different hash
-    #     for k in [k for k, v in model_config.items() if v is None]:
-    #         model_config.pop(k)
-    #     model_config.pop("api_key", None) 
-    #     model_config.pop("base_url", None)
-    #     model_config.pop("max_retries", None)
-    #     model_config.pop("timeout", None)
-    #     model_config_str = json.dumps(model_config, sort_keys=True)
-    #     model_name = model_config['model_name'].replace("/", "-") + "_" + hash(model_config_str)
-    #     model_name = model_config['model_name'].replace("/", "-")
-    #     return os.path.join(output_dir, model_name)
-
+    
     @staticmethod
     def get_model_dir(output_dir: str, model_name: str) -> str:
         """Generate a unique directory name for the model configuration"""
-        model_name = model_name.replace("/", "-")
+        model_name = get_model_name(model_name)
         return os.path.join(output_dir, model_name)
     
     @staticmethod
@@ -516,8 +502,9 @@ class HistoryManager:
         assert os.path.exists(state_file), f"Missing state file: {state_file}"
         with open(state_file, "r") as f:
             s = json.load(f)
-        model_name = s.get("model_config", {}).get("model_name", "").replace("/", "-")
+        model_name = get_model_name(s.get("model_config", {}).get("model_name", ""))
         output_dir = combo_dir.split(model_name)[0]
+        assert model_name and model_name not in output_dir, f"Failed to infer output_dir from combo_dir: {combo_dir}"
         hm = HistoryManager(
             observation_config=s.get("observation_config", {}),
             model_config=s.get("model_config", {}),
@@ -527,6 +514,7 @@ class HistoryManager:
             seed=s.get("seed", 0),
             image_dir=s.get("image_dir"),
             eval_override=eval_override,
+            false_belief_override=False,
             all_tasks=all_tasks,
         )
         return hm

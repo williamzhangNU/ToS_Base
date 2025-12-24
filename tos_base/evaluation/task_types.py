@@ -19,13 +19,14 @@ class EvalTaskType(Enum):
     BWD_POV_TEXT = ("bwd_pov_text", "BackwardPovTextEvaluationTask")
     BWD_POV_VISION = ("bwd_pov_vision", "BackwardPovVisionEvaluationTask")
     E2A = ("e2a", "AlloMappingEvaluationTask")
-    FWD_LOC = ("fwd_loc", "Action2LocationEvaluationTask")
-    BWD_LOC_TEXT = ("bwd_loc_text", "Location2ActionTextEvaluationTask")
-    BWD_LOC_VISION = ("bwd_loc_vision", "Location2ActionVisionEvaluationTask")
+    FWD_LOC = ("fwd_loc", "Location2ViewEvaluationTask")
+    BWD_LOC_TEXT = ("bwd_loc_text", "View2LocationTextEvaluationTask")
+    BWD_LOC_VISION = ("bwd_loc_vision", "View2LocationVisionEvaluationTask")
     FWD_FOV = ("fwd_fov", "Action2ViewEvaluationTask")
     BWD_NAV_TEXT = ("bwd_nav_text", "View2ActionTextEvaluationTask")
     BWD_NAV_VISION = ("bwd_nav_vision", "View2ActionVisionEvaluationTask")
     BWD_NAV_REV = ("bwd_nav_rev", "View2ActionRevEvaluationTask")
+    BWD_NAV_VISION_OLD = ("bwd_nav_vision", "Location2ActionVisionEvaluationTask")  # deprecated
     FALSE_BELIEF = ("false_belief", "FalseBeliefDirectionPov")
     DIR_ANCHOR = ("dir_anchor", "DirectionPov")
     
@@ -46,7 +47,7 @@ class EvalTaskType(Enum):
     @classmethod
     def excluded_from_average(cls) -> set[str]:
         """Task identifiers (short or class name) excluded from overall evaluation averages."""
-        excluded = (cls.ROT_DUAL, cls.BWD_POV_VISION, cls.BWD_NAV_VISION, cls.BWD_LOC_VISION)
+        excluded = (cls.ROT_DUAL, cls.BWD_POV_VISION, cls.BWD_NAV_VISION, cls.BWD_LOC_VISION, cls.BWD_NAV_VISION_OLD)
         return {t.short_name for t in excluded} | {t.class_name for t in excluded}
     
     @classmethod
@@ -54,22 +55,21 @@ class EvalTaskType(Enum):
         """Get mapping from short names to task classes."""
         # Import here to avoid circular imports
         from .direction import DirectionEvaluationTask, PovEvaluationTask, BackwardPovTextEvaluationTask, BackwardPovVisionEvaluationTask, DirectionPov
-        from .rotation import RotEvaluationTask, RotDualEvaluationTask
+        from .rotation import RotEvaluationTask
         from .e2a import AlloMappingEvaluationTask
-        from .localization import Action2LocationEvaluationTask, Location2ActionTextEvaluationTask, Location2ActionVisionEvaluationTask
+        from .localization import Location2ViewEvaluationTask, View2LocationTextEvaluationTask, View2LocationVisionEvaluationTask
         from .false_belief import FalseBeliefDirectionPov
         from .navigation_tasks import Action2ViewEvaluationTask, View2ActionTextEvaluationTask, View2ActionVisionEvaluationTask, View2ActionRevEvaluationTask
         
         task_map = {
             cls.DIR.short_name: DirectionEvaluationTask,
             cls.ROT.short_name: RotEvaluationTask,
-            cls.ROT_DUAL.short_name: RotDualEvaluationTask,
             cls.POV.short_name: PovEvaluationTask,
             cls.DIR_ANCHOR.short_name: DirectionPov,
             cls.E2A.short_name: AlloMappingEvaluationTask,
-            cls.FWD_LOC.short_name: Action2LocationEvaluationTask,
-            cls.BWD_LOC_TEXT.short_name: Location2ActionTextEvaluationTask,
-            cls.BWD_LOC_VISION.short_name: Location2ActionVisionEvaluationTask,
+            cls.FWD_LOC.short_name: Location2ViewEvaluationTask,
+            cls.BWD_LOC_TEXT.short_name: View2LocationTextEvaluationTask,
+            cls.BWD_LOC_VISION.short_name: View2LocationVisionEvaluationTask,
             cls.FALSE_BELIEF.short_name: FalseBeliefDirectionPov,
             cls.FWD_FOV.short_name: Action2ViewEvaluationTask,
             cls.BWD_NAV_TEXT.short_name: View2ActionTextEvaluationTask,

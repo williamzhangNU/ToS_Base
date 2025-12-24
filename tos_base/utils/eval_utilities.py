@@ -245,21 +245,6 @@ def _parse_coord_orientation(text: str) -> Optional[Tuple[Tuple[float, float], s
     
     return coord, orientation
 
-def _parse_object_relations(text: str) -> List[Tuple[str, str, str]]:
-    """Parse object relations in format: 'obj is at direction, distance'."""
-    items: List[Tuple[str, str, str]] = []
-    parts = [p.strip() for p in text.split(';') if p.strip()]
-    
-    for part in parts:
-        match = re.match(r'(.+?)\s+is\s+at\s+(.+?),\s*(.+)', part.strip(), re.IGNORECASE)
-        if match:
-            obj_name = match.group(1).strip()
-            direction = _canonicalize_label(match.group(2).strip())
-            distance = _canonicalize_label(match.group(3).strip())
-            items.append((obj_name.lower(), direction, distance))
-    
-    return items
-
 def _parse_action_sequence(text: str) -> List[Tuple[str, Any]]:
     """Parse navigation actions: 'JumpTo(obj), Rotate(90)'."""
     actions: List[Tuple[str, Any]] = []
@@ -286,10 +271,6 @@ def _coerce_point(pt: Sequence[Any]) -> Tuple[float, float]:
     if not isinstance(pt, (list, tuple, np.ndarray)) or len(pt) < 2:
         raise ValueError("invalid point")
     return float(pt[0]), float(pt[1])
-
-def _points_close(a: Sequence[float], b: Sequence[float], tol: float = _COORD_TOL) -> bool:
-    """Check if two points are within tolerance."""
-    return math.dist(a, b) <= tol
 
 def _coord_norm_from_gt(coords: Sequence[Sequence[float]]) -> float:
     """Calculate RMS norm from ground truth coordinates."""
@@ -401,33 +382,6 @@ def _eval_token_sequence(pred: str, answer: Sequence[str]) -> Tuple[bool, Dict[s
     actual = [_normalize_whitespace(token) for token in tokens]
     return actual == expected, {}
 
-def _eval_rotation_direction(pred: str, answer: str) -> Tuple[bool, Dict[str, Any]]:
-    """Evaluate clockwise/counterclockwise."""
-    options = {
-        'clockwise': {'clockwise', 'cw'},
-        'counterclockwise': {'counterclockwise', 'counter-clockwise', 'anticlockwise', 'anti-clockwise', 'ccw'},
-    }
-    
-    predicted = _normalize_joined(pred)
-    target = _normalize_joined(answer)
-    key = 'counterclockwise' if target in {'counterclockwise', 'anticlockwise', 'ccw'} else 'clockwise'
-    synonyms = {_normalize_joined(item) for item in options[key]}
-    
-    return any(syn in predicted for syn in synonyms), {}
-
-def _eval_multiple_choice(pred: str, answer: str, choices: Optional[List[str]]) -> Tuple[bool, Dict[str, Any]]:
-    """Evaluate multiple choice answer."""
-    guess = _require_text(pred)
-    if not guess:
-        return False, {}
-    
-    if choices:
-        labels = [chr(65 + idx) for idx in range(len(choices))]
-        if guess.upper() in labels:
-            return guess.upper() == str(answer).strip().upper(), {}
-    
-    return _labels_match(guess, answer), {}
-
 def _eval_direction_text(pred: str, answer: Union[str, Sequence[str]]) -> Tuple[bool, Dict[str, Any]]:
     """Evaluate direction and distance pair."""
     parsed = _parse_direction_distance(pred)
@@ -461,19 +415,6 @@ def _eval_direction_text(pred: str, answer: Union[str, Sequence[str]]) -> Tuple[
     
     return max(score_normal, score_swapped), {}
 
-def _eval_coordinate_list(pred: str, answer: Sequence[Tuple[int, int]]) -> Tuple[bool, Dict[str, Any]]:
-    """Evaluate list of coordinates."""
-    coords = _parse_coordinate_list(pred)
-    if coords is None or len(coords) != len(answer):
-        return False, {}
-    
-    try:
-        expected = [_coerce_point(pair) for pair in answer]
-    except ValueError:
-        return False, {}
-    
-    ok = all(_points_close(c, e) for c, e in zip(coords, expected))
-    return ok, {}
 
 def _eval_exact_text(pred: str, answer: Union[str, Sequence[str]]) -> Tuple[bool, Dict[str, Any]]:
     """Evaluate exact text match with label matching."""
@@ -1053,7 +994,6 @@ def _wrap_eval(
 
 TASK_EVALUATORS: Dict[str, TaskEvaluator] = {
     'RotEvaluationTask': _wrap_eval(_eval_token_sequence),
-    'RotDualEvaluationTask': _wrap_eval(_eval_rotation_direction),
     'DirectionEvaluationTask': _wrap_eval(_eval_direction_text),
     'PovEvaluationTask': _wrap_eval(_eval_direction_text),
     'BackwardPovTextEvaluationTask': _wrap_eval(_eval_backward_pov, pred_cast=str, answer_cast=None),
@@ -1064,9 +1004,9 @@ TASK_EVALUATORS: Dict[str, TaskEvaluator] = {
     'View2ActionTextEvaluationTask': _wrap_eval(lambda p, a: _eval_backward_nav(p, a, require_exact_pose=False), pred_cast=str, answer_cast=None),
     'View2ActionVisionEvaluationTask': _wrap_eval(lambda p, a: _eval_backward_nav(p, a, require_exact_pose=True), pred_cast=str, answer_cast=None),
     'View2ActionRevEvaluationTask': _wrap_eval(_eval_backward_nav_rev, pred_cast=str, answer_cast=None),
-    'Action2LocationEvaluationTask': _wrap_eval(_eval_forward_nav),
-    'Location2ActionTextEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
-    'Location2ActionVisionEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
+    'Location2ViewEvaluationTask': _wrap_eval(_eval_forward_nav),
+    'View2LocationTextEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
+    'View2LocationVisionEvaluationTask': _wrap_eval(_eval_backward_loc, pred_cast=str, answer_cast=None),
     'FalseBeliefDirectionPov': _wrap_eval(_eval_direction_text),
 }
 
@@ -1080,11 +1020,6 @@ def evaluate_task_answer(
     evaluator = TASK_EVALUATORS.get(task_type)
     assert evaluator is not None, f"Unknown task evaluator: {task_type}"
     return evaluator(pred, answer, choices)
-    
-    # Fallback to multiple choice evaluation
-    # if choices:
-    #     return _eval_multiple_choice(str(pred), str(answer), choices)
-    # return _eval_multiple_choice(str(pred), str(answer), None)
 
 
 # ========== Exports ==========

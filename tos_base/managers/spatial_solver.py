@@ -83,7 +83,7 @@ class AC3Solver:
         new_constraints = [copy.deepcopy(c) for c in flat]
         return AC3Solver(new_variables, new_constraints)
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self):
         return self.copy()
 
     def propagate(self, changed_arcs: Optional[Set[Tuple[str, str]]] = None) -> bool:

@@ -4,9 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from ..core.relationship import PairwiseRelationship, PairwiseRelationshipDiscrete, ProximityRelationship, EgoFrontBins, StandardDistanceBins, CardinalBinsEgo, CardinalBinsAllo
-from ..core.room import BaseRoom
-from .relation_codes import encode_relation_codes, make_ordered_pair_key
-
 
 def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -> bool:
     """Check if relationship applies to obj1 and obj2 from anchor's perspective."""
@@ -69,38 +66,6 @@ def relationship_applies(obj1, obj2, relationship, anchor_ori: tuple = (0, 1)) -
     raise ValueError(f"Invalid relationship type: {type(relationship)}")
 
 
-
-# ---- BaseRoom → ordered relation codes (A|B means A relative to B) ----
-def room_to_ordered_relations(
-    br,
-    include_names: set[str] | None = None,
-    include_initial_pos: bool = False,
-    bin_system=CardinalBinsAllo(),
-    distance_bin_system=StandardDistanceBins(),
-    agent_init_pos: np.ndarray | tuple | None = None,
-) -> dict[str, str]:
-    assert isinstance(br, BaseRoom), f"br must be BaseRoom, got {type(br)}"
-
-    pos_by_name = {o.name: o.pos for o in br.objects}
-    names = set(pos_by_name.keys())
-    names.discard('agent')
-    if include_names is not None:
-        names &= set(include_names)
-    if include_initial_pos:
-        pos_by_name['initial'] = np.array(agent_init_pos, dtype=float)
-        names.add('initial')
-
-    names_sorted = sorted(names)
-    out: dict[str, str] = {}
-    # Only generate one relation per unique pair (avoid A|B and B|A)
-    for i, a in enumerate(names_sorted):
-        for j in range(i + 1, len(names_sorted)):
-            b = names_sorted[j]
-            rel = PairwiseRelationshipDiscrete.relationship(tuple(pos_by_name[a]), tuple(pos_by_name[b]), anchor_ori=None, bin_system=bin_system, distance_bin_system=distance_bin_system)
-            out[make_ordered_pair_key(a, b)] = encode_relation_codes(rel.direction.bin_label, rel.dist.bin_label)
-    return out
-
-
 # ---- domain generator ----
 def generate_points_for_relationship(
     anchor_pos: tuple,
@@ -151,7 +116,6 @@ def generate_points_for_relationship(
     Rmax2, Rmin2 = float(Rmax * Rmax), float(max(Rmin, 0.0) * max(Rmin, 0.0))
 
     # Precompute for fast discrete checks
-    axf, ayf = float(ax), float(ay)
     aox, aoy = float(anchor_ori[0]), float(anchor_ori[1])
     alen = math.hypot(aox, aoy) or 1.0
     aoxn, aoyn = aox/alen, aoy/alen
@@ -258,9 +222,6 @@ def generate_points_for_relationship(
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import to_rgb, to_hex
-import colorsys
-
 
 def rose_glyph_compass_style(
     pairs,                      # [(sector_id, ring_id)]

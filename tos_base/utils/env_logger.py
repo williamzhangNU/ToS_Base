@@ -1,7 +1,6 @@
 import os
 import json
-from typing import Dict, List, Optional, Tuple
-from collections import defaultdict
+from typing import Dict, List, Optional
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field
@@ -11,8 +10,7 @@ from .. import (
     Room,
     ExplorationTurnLog,
     CognitiveMapTurnLog,
-    Agent,
-    RoomPlotter
+    Agent
 )
 from .visualization.visualization import HTMLGenerator
 
@@ -96,43 +94,6 @@ class SpatialEnvLogger:
             return obj
 
     @staticmethod
-    def _plot_room(room_dict: Dict, agent_dict: Dict, out_dir: str, config_name: str, sample_idx: int, turn_idx: int) -> Optional[str]:
-        """Plot room from state and return image filename"""
-        img_name = f"room_turn_{turn_idx+1}.png" if turn_idx > 0 else "room_initial.png"
-        img_path = os.path.join(out_dir, img_name)
-        RoomPlotter.plot(Room.from_dict(room_dict), Agent.from_dict(agent_dict), mode='img', save_path=img_path)
-
-        return os.path.join("images", config_name, f"sample_{sample_idx+1}", img_name)
-
-    @staticmethod
-    def _validate_and_assign_messages(message: List[Dict], turn_logs: List[Dict]) -> bool:
-        """Validate message structure and assign raw assistant messages to turn logs."""
-        if not message:
-            return False
-        
-        # Remove system messages and check turn structure
-        filtered_msgs = [msg for msg in message if msg.get("role") != "system"]
-        
-        # Check alternating user/assistant pattern
-        for i in range(0, len(filtered_msgs), 2):
-            if i >= len(filtered_msgs) or filtered_msgs[i].get("role") != "user":
-                print(f"User message missing at index {i}")
-                return False
-            if i + 1 >= len(filtered_msgs) or filtered_msgs[i + 1].get("role") != "assistant":
-                print(f"Assistant message missing at index {i+1}")
-                return False
-        
-        # Assign raw assistant messages to turn logs
-        assistant_messages = [msg['content'] for msg in message if msg.get("role") == "assistant"]
-        
-        if len(assistant_messages) != len(turn_logs):
-            print(f"Mismatch: {len(assistant_messages)} assistant messages vs {len(turn_logs)} turns")
-            return False
-        
-        return True
-
-
-    @staticmethod
     def _save_data(aggregated_data: Dict, output_dir: str, model_name: str):
         """Save aggregated data to JSON and generate HTML dashboard."""
         saved_data = {
@@ -159,7 +120,6 @@ class SpatialEnvLogger:
         print(f"Dashboard written to {os.path.abspath(dashboard_path)}")
         return output_dir
     
-
 
     @staticmethod
     def log_each_env_info(output_dir: str, model_name, save_images: bool = True):

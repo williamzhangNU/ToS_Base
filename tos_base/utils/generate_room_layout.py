@@ -6,7 +6,6 @@ def generate_room_layout(
     level: int,
     main: int = None,
     np_random: np.random.Generator = None,
-    debug: bool = False,
     fix_room_size: Optional[List[List[int]]] = None,
     same_room_size: bool = False
 ) -> np.ndarray:
@@ -253,51 +252,6 @@ def _force_place_small_room(n: int, existing_rooms: List[Tuple[int, int, int, in
     if n >= 6:  # Ensure enough space for 4x4 room plus walls
         return (1, 1, 4, 4)
     return None
-
-def _generate_tree_connections(rooms: List[Tuple[int, int, int, int]]) -> List[Tuple[int, int]]:
-    """Generate tree structure connections between rooms (no cycles), using minimum spanning tree algorithm"""
-    if len(rooms) <= 1:
-        return []
-
-    # Calculate room center points
-    centers = []
-    for x1, y1, x2, y2 in rooms:
-        centers.append(((x1 + x2) // 2, (y1 + y2) // 2))
-
-    # Use Prim's algorithm to generate minimum spanning tree, ensure no cycles
-    visited = [False] * len(rooms)
-    visited[0] = True  # Start from first room
-    connections = []
-
-    while len(connections) < len(rooms) - 1:
-        min_dist = float('inf')
-        best_edge = None
-
-        # Find shortest connection from visited rooms to unvisited rooms
-        for i in range(len(rooms)):
-            if not visited[i]:
-                continue
-            for j in range(len(rooms)):
-                if visited[j]:
-                    continue
-
-                # Calculate Manhattan distance
-                cx1, cy1 = centers[i]
-                cx2, cy2 = centers[j]
-                dist = abs(cx1 - cx2) + abs(cy1 - cy2)
-
-                if dist < min_dist:
-                    min_dist = dist
-                    best_edge = (i, j)
-
-        if best_edge:
-            i, j = best_edge
-            visited[j] = True
-            connections.append(best_edge)
-        else:
-            break  # Cannot find more connections
-
-    return connections
 
 def _generate_adjacency_tree_connections(rooms: List[Tuple[int, int, int, int]]) -> List[Tuple[int, int]]:
     """Generate a spanning tree but only using room pairs that are directly adjacent

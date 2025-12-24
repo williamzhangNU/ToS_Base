@@ -1,7 +1,6 @@
 from .types import (
     BaseCogMetrics,
     MapCogMetrics,
-    RelationMetrics,
     ConsistencySummary,
     UnexploredMetrics,
 )
@@ -24,9 +23,6 @@ from .transforms import (
 from .consistency import (
     compare_on_common_subset,
     local_vs_global_consistency,
-    rooms_vs_global_consistency,
-    map_vs_relations_consistency,
-    relations_consistency,
 )
 from .analysis import (
     aggregate_per_sample_then_group,
@@ -44,7 +40,6 @@ __all__ = [
     # types
     "BaseCogMetrics",
     "MapCogMetrics",
-    "RelationMetrics",
     "ConsistencySummary",
     "UnexploredMetrics",
     # metrics
@@ -64,9 +59,6 @@ __all__ = [
     # consistency
     "compare_on_common_subset",
     "local_vs_global_consistency",
-    "rooms_vs_global_consistency",
-    "map_vs_relations_consistency",
-    "relations_consistency",
     # analysis
     "aggregate_per_sample_then_group",
     "aggregate_lists_per_turn",

@@ -174,16 +174,9 @@ class AgentProxy:
             self._observe(acts + self._rotate_to_ori(desired_ori))
         self.anchor = None
 
-    def _room_object_names(self) -> List[str]:
-        rid = self._current_room()
-        return sorted(self.object_nodes_by_room.get(rid, set()))
-
     def _room_node_names(self) -> List[str]:
         rid = self._current_room()
         return sorted(self.nodes_by_room.get(rid, set()))
-
-    def _update_solver_from_last(self) -> None:
-        self._ingest_last_into_solver(getattr(self, 'solver', None))
 
     def _ingest_last_into_solver(self, solver) -> None:
         if solver is None or not self.turns or not self.turns[-1].actions:
@@ -665,9 +658,6 @@ class CandidatePlannerAgentProxy(ObserverAnalystAgentProxy):
 
     def _observe_facing(self, anchor: str, desired_ori: np.ndarray) -> None:
         self._observe_at_anchor(anchor, desired_ori)
-        self._ingest_last_into_solver(self.room_solver)
-
-    def _update_solver_from_last(self) -> None:
         self._ingest_last_into_solver(self.room_solver)
 
     def _explore_room(self, is_initial: bool, prefix_actions: List = None) -> None:

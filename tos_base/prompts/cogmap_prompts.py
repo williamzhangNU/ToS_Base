@@ -83,38 +83,6 @@ Example:
 ```
 """
 
-# Rooms-only specifics
-COGMAP_INSTRUCTION_ROOMS_ONLY = """\
-## Rooms Cognitive Map
-
-- Structure: rooms keyed by room id.
-- Frame per room: include "origin":"<door_name>|initial".
-  - origin is the first entry door; for starting room use "initial" (starting position)
-  - +y: into room (direction of walking through the door); north for starting room
-  - when facing +y: +x -> right, -x -> left, -y -> backward
-  - All positions/facings relative to this frame.
-- Content: room's "objects" dict; exclude agent and entry door.
-- Facing: "+x|-x|+y|-y".
-
-Example:
-```json
-{
-  "1": {
-    "origin": "initial",
-    "objects": {
-      "chair": {"position": [1, 0], "facing": "+y"},
-    }
-  },
-  "2": {
-    "origin": "red door",
-    "objects": {
-      "sofa": {"position": [0, 2], "facing": "-y"}
-    }
-  }
-}
-```
-"""
-
 def get_cogmap_prompt(map_type: str, enable_think: bool = True, all_candidate_coords: Optional[List[Tuple[int, int]]] = None) -> str:
     """Return the assembled cognitive-map prompt for a given type, with format rules."""
     t = (map_type or "global").strip().lower()
@@ -123,14 +91,8 @@ def get_cogmap_prompt(map_type: str, enable_think: bool = True, all_candidate_co
         return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
     if t == "local":
         return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_LOCAL_ONLY}\n\n{fmt}"
-    if t == "rooms":
-        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_ROOMS_ONLY}\n\n{fmt}"
-    if t == "relations":
-        return f"{RELATIONS_PROMPT}\n\n{fmt}"
     if t == "unexplored":
         return get_unexplored_prompt(enable_think, all_candidate_coords)
-    if t == "false_belief":
-        return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
     # default to global
     return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
 
@@ -169,30 +131,3 @@ def get_unexplored_prompt(enable_think: bool = True, all_candidate_coords: Optio
     instruction = UNEXPLORED_INSTRUCTION.format(candidate_coords_str=candidate_coords_str)
     fmt = _cogmap_format_rules(enable_think)
     return f"{instruction}\n\n{fmt}"
-
-
-# --- Pairwise relations ---
-from ..utils.relation_codes import _DIR_LABEL_TO_CODE as _DLC, _DIST_LABEL_TO_CODE as _SLC
-
-def _build_relations_mapping_text() -> str:
-    dir_pairs = ", ".join([f"{lab}={code}" for lab, code in _DLC.items()])
-    dist_pairs = ", ".join([f"{lab}={code}" for lab, code in _SLC.items()])
-    return f"Directions: {dir_pairs}. Distances: {dist_pairs}."
-
-RELATIONS_PROMPT = f"""\
-## Pairwise Relations (JSON)
-
-- Report unordered pairs for ALL observed objects (objects and gates) and agent's initial position as "initial". Do NOT include agent current pose.
-- Keys: "A|B" (alphabetical). A|B means A is relative to B.
-- Report only one direction per pair (A|B or B|A, not both)
-- Values: "(DIR, DIST)" where DIR and DIST are compact codes. {_build_relations_mapping_text()}
-- Output a flat JSON object of pairs (no extra nesting).
-
-Example:
-```json
-{{
-  "initial|chair": "(E, near)",
-  "chair|door1": "(NW, mid)"
-}}
-```
-"""

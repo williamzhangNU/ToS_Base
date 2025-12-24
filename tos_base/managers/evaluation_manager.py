@@ -99,59 +99,6 @@ class EvaluationManager:
         task = self._get_current_eval_task()
         return None if task is None else task.question if task.question else task.generate_question()
     
-    def evaluate_answer(self, answer: str) -> Tuple[bool, Dict[str, Any]]:
-        """Evaluate answer for current task."""
-        assert self.current_index < len(self.tasks), "No more tasks"
-        
-        task = self.tasks[self.current_index]
-        score, info = task.evaluate(answer)
-        
-        # Record result
-        self.results[self.current_index]["score"] = score
-        self.results[self.current_index]["info"] = info
-        
-        # Create turn log
-        turn_log = EvaluationTurnLog(
-            task_type=task.__class__.__name__,
-            user_answer=answer,
-            score=score,
-            room_state=task.room,
-            agent_state=task.agent,
-            evaluation_info=info,
-            evaluation_data=task.eval_data
-        )
-        self.turn_logs.append(turn_log)
-
-        return score, info
-
-    def next_task(self) -> bool:
-        """Move to next task. Returns True if there are more tasks."""
-        self.current_index += 1
-        return self.current_index < len(self.tasks)
-    
-    def get_last_room_state(self) -> Tuple[Room, Agent]:
-        """Get current room and agent state."""
-        task = self.tasks[self.current_index - 1]
-        return task.room, task.agent
-    
-    def get_eval_summary(self) -> Dict[str, Any]:
-        """Calculate evaluation summary from turn logs."""
-        total_tasks = len(self.tasks)
-        answered_tasks = len(self.turn_logs)
-        unanswered_count = total_tasks - answered_tasks
-        total_score = sum(1 for log in self.turn_logs if log.score)
-
-        return {
-            "accuracy": total_score / total_tasks if total_tasks > 0 else 0.0,
-            "total_tasks": total_tasks,
-            "total_score": total_score,
-            "unanswered_count": unanswered_count
-        }
-
-    def check_and_prune_completed_tasks(self) -> bool:
-        """If no tasks to run, return True to signal finished."""
-        return len(self.tasks) == 0
-    
     # ---------------- Aggregations ----------------
     @staticmethod
     def aggregate_per_sample(env_data: Dict[str, Any]) -> Dict[str, Any]:

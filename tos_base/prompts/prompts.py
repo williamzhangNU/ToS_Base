@@ -86,7 +86,3 @@ Room Layout and initial state:
 
 {exp_history}
 """
-
-EVALUATION_INSTRUCTION = "{eval_question}"
-SHORT_EXPLORATION_PROMPT = "Please respond with valid actions to explore the rooms."
-SHORT_EVALUATION_PROMPT = "Please respond with a valid answer to the question."
