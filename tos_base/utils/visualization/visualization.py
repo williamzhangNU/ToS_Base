@@ -200,8 +200,12 @@ class HTMLGenerator:
                 full_data = per_turn.get("cogmap_full_per_turn", cogmap_group.pop("cogmap_full_per_turn", {}))
                 self_tracking_data = per_turn.get("self_tracking_per_turn", cogmap_group.pop("self_tracking_per_turn", {}))
                 other_f1 = per_turn.get("other_candidates_f1_per_turn", cogmap_group.pop("other_candidates_f1_per_turn", []))
+                other_p = per_turn.get("other_candidates_p_per_turn", cogmap_group.pop("other_candidates_p_per_turn", []))
+                other_r = per_turn.get("other_candidates_r_per_turn", cogmap_group.pop("other_candidates_r_per_turn", []))
                 other_count = per_turn.get("other_candidates_count_per_turn", cogmap_group.pop("other_candidates_count_per_turn", []))
                 unexplored_f1 = per_turn.get("unexplored_f1_per_turn", cogmap_group.pop("unexplored_f1_per_turn", []))
+                unexplored_p = per_turn.get("unexplored_p_per_turn", cogmap_group.pop("unexplored_p_per_turn", []))
+                unexplored_r = per_turn.get("unexplored_r_per_turn", cogmap_group.pop("unexplored_r_per_turn", []))
 
                 # Only accept new shape (metric -> list)
                 global_update = update_data if isinstance(update_data, dict) else {}
@@ -221,27 +225,26 @@ class HTMLGenerator:
                     title = f"{gname} - Global (Self-Tracking)"
                     cogmap_self_tracking_plot = create_cogmap_metrics_plot(global_self_tracking, title)
 
+                # Other Candidates plots
+                other_cand_plots = {}
                 if isinstance(other_f1, list):
-                    other_candidates_f1_plot = create_scalar_metric_plot(
-                        other_f1,
-                        title=f"Other-Candidates F1 per Turn - {gname}",
-                        y_label="F1",
-                        ylim=(0.0, 1.0),
-                    )
+                    other_cand_plots['f1'] = create_scalar_metric_plot(other_f1, title=f"Other-Candidates F1 per Turn - {gname}", y_label="F1", ylim=(0.0, 1.0))
+                if isinstance(other_p, list):
+                    other_cand_plots['p'] = create_scalar_metric_plot(other_p, title=f"Other-Candidates Precision per Turn - {gname}", y_label="Precision", ylim=(0.0, 1.0))
+                if isinstance(other_r, list):
+                    other_cand_plots['r'] = create_scalar_metric_plot(other_r, title=f"Other-Candidates Recall per Turn - {gname}", y_label="Recall", ylim=(0.0, 1.0))
                 if isinstance(other_count, list):
-                    other_candidates_count_plot = create_scalar_metric_plot(
-                        other_count,
-                        title=f"Other-Candidates Count Score per Turn - {gname}",
-                        y_label="Count score",
-                        ylim=(0.0, 1.0),
-                    )
+                    other_cand_plots['count'] = create_scalar_metric_plot(other_count, title=f"Other-Candidates Count Score per Turn - {gname}", y_label="Count score", ylim=(0.0, 1.0))
+
+                # Unexplored plots
+                unexplored_plots = {}
                 if isinstance(unexplored_f1, list):
-                    unexplored_f1_plot = create_scalar_metric_plot(
-                        unexplored_f1,
-                        title=f"Unexplored F1 per Turn - {gname}",
-                        y_label="F1",
-                        ylim=(0.0, 1.0),
-                    )
+                    unexplored_plots['f1'] = create_scalar_metric_plot(unexplored_f1, title=f"Unexplored F1 per Turn - {gname}", y_label="F1", ylim=(0.0, 1.0))
+                if isinstance(unexplored_p, list):
+                    unexplored_plots['p'] = create_scalar_metric_plot(unexplored_p, title=f"Unexplored Precision per Turn - {gname}", y_label="Precision", ylim=(0.0, 1.0))
+                if isinstance(unexplored_r, list):
+                    unexplored_plots['r'] = create_scalar_metric_plot(unexplored_r, title=f"Unexplored Recall per Turn - {gname}", y_label="Recall", ylim=(0.0, 1.0))
+
 
             # Generate correlation plots
             correlation_plots = {}
@@ -333,12 +336,24 @@ class HTMLGenerator:
                 available_plots.append(("Cognitive Map (Full)", cogmap_full_plot, "Cognitive Map Full Turn Averages"))
             if cogmap_self_tracking_plot:
                 available_plots.append(("Cognitive Map (Self-Tracking)", cogmap_self_tracking_plot, "Cognitive Map Self-Tracking Turn Averages"))
-            if other_candidates_f1_plot:
-                available_plots.append(("Other-Candidates F1", other_candidates_f1_plot, "Other-Candidates F1 per Turn"))
-            if other_candidates_count_plot:
-                available_plots.append(("Other-Candidates Count", other_candidates_count_plot, "Other-Candidates Count Score per Turn"))
-            if unexplored_f1_plot:
-                available_plots.append(("Unexplored F1", unexplored_f1_plot, "Unexplored F1 per Turn"))
+            
+            # Other Candidates
+            if other_cand_plots.get('f1'):
+                available_plots.append(("Other-Candidates F1", other_cand_plots['f1'], "Other-Candidates F1 per Turn"))
+            if other_cand_plots.get('p'):
+                available_plots.append(("Other-Candidates Precision", other_cand_plots['p'], "Other-Candidates Precision per Turn"))
+            if other_cand_plots.get('r'):
+                available_plots.append(("Other-Candidates Recall", other_cand_plots['r'], "Other-Candidates Recall per Turn"))
+            if other_cand_plots.get('count'):
+                available_plots.append(("Other-Candidates Count", other_cand_plots['count'], "Other-Candidates Count Score per Turn"))
+            
+            # Unexplored
+            if unexplored_plots.get('f1'):
+                available_plots.append(("Unexplored F1", unexplored_plots['f1'], "Unexplored F1 per Turn"))
+            if unexplored_plots.get('p'):
+                available_plots.append(("Unexplored Precision", unexplored_plots['p'], "Unexplored Precision per Turn"))
+            if unexplored_plots.get('r'):
+                available_plots.append(("Unexplored Recall", unexplored_plots['r'], "Unexplored Recall per Turn"))
 
             # Add correlation plots
             if correlation_plots.get('cogmap_vs_accuracy'):
@@ -453,8 +468,12 @@ class HTMLGenerator:
         cogmap_full_data = per_turn_metrics.get('cogmap_full_per_turn', None)
         self_tracking_data = per_turn_metrics.get('self_tracking_per_turn', None)
         other_candidates_f1_per_turn = per_turn_metrics.get('other_candidates_f1_per_turn', None)
+        other_candidates_p_per_turn = per_turn_metrics.get('other_candidates_p_per_turn', None)
+        other_candidates_r_per_turn = per_turn_metrics.get('other_candidates_r_per_turn', None)
         other_candidates_count_per_turn = per_turn_metrics.get('other_candidates_count_per_turn', None)
         unexplored_f1_per_turn = per_turn_metrics.get('unexplored_f1_per_turn', None)
+        unexplored_p_per_turn = per_turn_metrics.get('unexplored_p_per_turn', None)
+        unexplored_r_per_turn = per_turn_metrics.get('unexplored_r_per_turn', None)
 
         # Backward compatibility (older metric shape)
         if cogmap_update_data is None:
@@ -475,9 +494,8 @@ class HTMLGenerator:
         update_plot = None
         full_plot = None
         self_tracking_plot = None
-        other_candidates_f1_plot = None
-        other_candidates_count_plot = None
-        unexplored_f1_plot = None
+        other_cand_plots = {}
+        unexplored_plots = {}
 
         # Information gain plot
         if infogain_per_turn:
@@ -497,26 +515,20 @@ class HTMLGenerator:
             self_tracking_plot = create_cogmap_metrics_plot(self_tracking_data, title)
 
         if isinstance(other_candidates_f1_per_turn, list):
-            other_candidates_f1_plot = create_scalar_metric_plot(
-                other_candidates_f1_per_turn,
-                title=f"Other-Candidates F1 per Turn - {sample_name}",
-                y_label="F1",
-                ylim=(0.0, 1.0),
-            )
+            other_cand_plots['f1'] = create_scalar_metric_plot(other_candidates_f1_per_turn, title=f"Other-Candidates F1 per Turn - {sample_name}", y_label="F1", ylim=(0.0, 1.0))
+        if isinstance(other_candidates_p_per_turn, list):
+            other_cand_plots['p'] = create_scalar_metric_plot(other_candidates_p_per_turn, title=f"Other-Candidates Precision per Turn - {sample_name}", y_label="Precision", ylim=(0.0, 1.0))
+        if isinstance(other_candidates_r_per_turn, list):
+            other_cand_plots['r'] = create_scalar_metric_plot(other_candidates_r_per_turn, title=f"Other-Candidates Recall per Turn - {sample_name}", y_label="Recall", ylim=(0.0, 1.0))
         if isinstance(other_candidates_count_per_turn, list):
-            other_candidates_count_plot = create_scalar_metric_plot(
-                other_candidates_count_per_turn,
-                title=f"Other-Candidates Count Score per Turn - {sample_name}",
-                y_label="Count score",
-                ylim=(0.0, 1.0),
-            )
+            other_cand_plots['count'] = create_scalar_metric_plot(other_candidates_count_per_turn, title=f"Other-Candidates Count Score per Turn - {sample_name}", y_label="Count score", ylim=(0.0, 1.0))
+
         if isinstance(unexplored_f1_per_turn, list):
-            unexplored_f1_plot = create_scalar_metric_plot(
-                unexplored_f1_per_turn,
-                title=f"Unexplored F1 per Turn - {sample_name}",
-                y_label="F1",
-                ylim=(0.0, 1.0),
-            )
+            unexplored_plots['f1'] = create_scalar_metric_plot(unexplored_f1_per_turn, title=f"Unexplored F1 per Turn - {sample_name}", y_label="F1", ylim=(0.0, 1.0))
+        if isinstance(unexplored_p_per_turn, list):
+            unexplored_plots['p'] = create_scalar_metric_plot(unexplored_p_per_turn, title=f"Unexplored Precision per Turn - {sample_name}", y_label="Precision", ylim=(0.0, 1.0))
+        if isinstance(unexplored_r_per_turn, list):
+            unexplored_plots['r'] = create_scalar_metric_plot(unexplored_r_per_turn, title=f"Unexplored Recall per Turn - {sample_name}", y_label="Recall", ylim=(0.0, 1.0))
 
         # Display all plots in horizontal layout (up to 4 plots for samples)
         available_plots = []
@@ -528,12 +540,25 @@ class HTMLGenerator:
             available_plots.append(("Cognitive Map (Full)", full_plot, "Global Full Metrics"))
         if self_tracking_plot:
             available_plots.append(("Cognitive Map (Self-Tracking)", self_tracking_plot, "Global Self-Tracking Metrics"))
-        if other_candidates_f1_plot:
-            available_plots.append(("Other-Candidates F1", other_candidates_f1_plot, "Other-Candidates F1 per Turn"))
-        if other_candidates_count_plot:
-            available_plots.append(("Other-Candidates Count", other_candidates_count_plot, "Other-Candidates Count Score per Turn"))
-        if unexplored_f1_plot:
-            available_plots.append(("Unexplored F1", unexplored_f1_plot, "Unexplored F1 per Turn"))
+        
+        # Other candidates
+        if other_cand_plots.get('f1'):
+            available_plots.append(("Other-Candidates F1", other_cand_plots['f1'], "Other-Candidates F1 per Turn"))
+        if other_cand_plots.get('p'):
+            available_plots.append(("Other-Candidates Precision", other_cand_plots['p'], "Other-Candidates Precision per Turn"))
+        if other_cand_plots.get('r'):
+            available_plots.append(("Other-Candidates Recall", other_cand_plots['r'], "Other-Candidates Recall per Turn"))
+        if other_cand_plots.get('count'):
+            available_plots.append(("Other-Candidates Count", other_cand_plots['count'], "Other-Candidates Count Score per Turn"))
+            
+        # Unexplored
+        if unexplored_plots.get('f1'):
+            available_plots.append(("Unexplored F1", unexplored_plots['f1'], "Unexplored F1 per Turn"))
+        if unexplored_plots.get('p'):
+            available_plots.append(("Unexplored Precision", unexplored_plots['p'], "Unexplored Precision per Turn"))
+        if unexplored_plots.get('r'):
+            available_plots.append(("Unexplored Recall", unexplored_plots['r'], "Unexplored Recall per Turn"))
+
 
         if available_plots:
             f.write("<div class='cognitive-map-charts'>\n")
@@ -823,7 +848,8 @@ class HTMLGenerator:
             "Global": global_log.get("metrics", {}) if global_log else {},
             "Global (Full)": global_log.get("metrics_full", {}) if global_log else {},
             "Local": local_log.get("metrics", {}) if local_log else {},
-            "Unexplored": unexplored_log.get("metrics", {}) if unexplored_log else {}
+            "Unexplored": unexplored_log.get("metrics", {}) if unexplored_log else {},
+            "Other Candidates": cogmap_log.get("other_candidates_metrics", {}),
         }
 
         if any(metrics_block.values()):

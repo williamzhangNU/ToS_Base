@@ -339,16 +339,24 @@ class CognitiveMapManager:
             full_turn = avg_nested_dicts([{'cogmap_full_per_turn': d.get('cogmap_full_per_turn') or {}} for d in per_turn_list]).get('cogmap_full_per_turn', {})
             self_tracking_turn = avg_nested_dicts([{'self_tracking_per_turn': d.get('self_tracking_per_turn') or {}} for d in per_turn_list]).get('self_tracking_per_turn', {})
             other_candidates_f1_turn = avg_nested_dicts([{'other_candidates_f1_per_turn': d.get('other_candidates_f1_per_turn') or []} for d in per_turn_list]).get('other_candidates_f1_per_turn', [])
+            other_candidates_p_turn = avg_nested_dicts([{'other_candidates_p_per_turn': d.get('other_candidates_p_per_turn') or []} for d in per_turn_list]).get('other_candidates_p_per_turn', [])
+            other_candidates_r_turn = avg_nested_dicts([{'other_candidates_r_per_turn': d.get('other_candidates_r_per_turn') or []} for d in per_turn_list]).get('other_candidates_r_per_turn', [])
             other_candidates_count_turn = avg_nested_dicts([{'other_candidates_count_per_turn': d.get('other_candidates_count_per_turn') or []} for d in per_turn_list]).get('other_candidates_count_per_turn', [])
             unexplored_f1_turn = avg_nested_dicts([{'unexplored_f1_per_turn': d.get('unexplored_f1_per_turn') or []} for d in per_turn_list]).get('unexplored_f1_per_turn', [])
+            unexplored_p_turn = avg_nested_dicts([{'unexplored_p_per_turn': d.get('unexplored_p_per_turn') or []} for d in per_turn_list]).get('unexplored_p_per_turn', [])
+            unexplored_r_turn = avg_nested_dicts([{'unexplored_r_per_turn': d.get('unexplored_r_per_turn') or []} for d in per_turn_list]).get('unexplored_r_per_turn', [])
 
             per_turn_metrics = {
                 'cogmap_update_per_turn': update_turn,
                 'cogmap_full_per_turn': full_turn,
                 'self_tracking_per_turn': self_tracking_turn,
                 'other_candidates_f1_per_turn': other_candidates_f1_turn,
+                'other_candidates_p_per_turn': other_candidates_p_turn,
+                'other_candidates_r_per_turn': other_candidates_r_turn,
                 'other_candidates_count_per_turn': other_candidates_count_turn,
                 'unexplored_f1_per_turn': unexplored_f1_turn,
+                'unexplored_p_per_turn': unexplored_p_turn,
+                'unexplored_r_per_turn': unexplored_r_turn,
             }
             return {
                 'exploration': exploration,
@@ -434,15 +442,28 @@ class CognitiveMapManager:
 
         # Per-turn global metrics (list)
         per_turn_update, per_turn_full, per_turn_self_tracking = CognitiveMapManager.compute_per_turn_global_metrics(cog_logs)
-        other_f1, other_count = calculate_other_candidates_metrics(env_data)
+        other_f1, other_p, other_r, other_count = calculate_other_candidates_metrics(env_data)
+        
+        # Inject other candidate metrics back into cog_logs for visualization
+        for i, cl in enumerate(cog_logs):
+            if i < len(other_f1):
+                cl['other_candidates_metrics'] = {
+                    'f1': float(other_f1[i]),
+                    'precision': float(other_p[i]),
+                    'recall': float(other_r[i]),
+                    'count_score': float(other_count[i]),
+                }
+
         # Unexplored: keep per-turn F1 for plotting, but aggregate by points (not turn-average).
-        unexp_f1_per_turn, unexp_f1_avg, unexp_distance_hit_corr = aggregate_unexplored_metrics(cog_logs, exp_logs)
+        unexp_f1_per_turn, unexp_p_per_turn, unexp_r_per_turn, unexp_f1_avg, unexp_p_avg, unexp_r_avg, unexp_distance_hit_corr = aggregate_unexplored_metrics(cog_logs, exp_logs)
 
         def _avg_list(vals: List[Optional[float]]) -> float | None:
             xs = [float(v) for v in (vals or []) if isinstance(v, (int, float))]
             return float(np.mean(xs)) if xs else None
 
         other_f1_avg = _avg_list(other_f1)
+        other_p_avg = _avg_list(other_p)
+        other_r_avg = _avg_list(other_r)
         other_count_avg = _avg_list(other_count)
 
         if exp_type == 'passive':
@@ -459,8 +480,12 @@ class CognitiveMapManager:
             'cogmap_full_per_turn': per_turn_full,
             'self_tracking_per_turn': per_turn_self_tracking,
             'other_candidates_f1_per_turn': other_f1,
+            'other_candidates_p_per_turn': other_p,
+            'other_candidates_r_per_turn': other_r,
             'other_candidates_count_per_turn': other_count,
             'unexplored_f1_per_turn': unexp_f1_per_turn,
+            'unexplored_p_per_turn': unexp_p_per_turn,
+            'unexplored_r_per_turn': unexp_r_per_turn,
         }
 
         return {
@@ -470,10 +495,14 @@ class CognitiveMapManager:
                 'consistency': consistency,
                 'other_candidates': {
                     'f1_avg': other_f1_avg,
+                    'precision_avg': other_p_avg,
+                    'recall_avg': other_r_avg,
                     'count_score_avg': other_count_avg,
                 },
                 'unexplored': {
                     'f1_avg': unexp_f1_avg,
+                    'precision_avg': unexp_p_avg,
+                    'recall_avg': unexp_r_avg,
                     'distance_hit_corr': unexp_distance_hit_corr,
                 },
             },

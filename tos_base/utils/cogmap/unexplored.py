@@ -289,15 +289,21 @@ def distances_to_explored(
 def aggregate_unexplored_metrics(
     cog_logs: List[Dict[str, Any]],
     exp_logs: List[Dict[str, Any]],
-) -> Tuple[List[Optional[float]], Optional[float], Optional[float]]:
+) -> Tuple[List[Optional[float]], List[Optional[float]], List[Optional[float]], Optional[float], Optional[float], Optional[float], Optional[float]]:
     """Aggregate unexplored metrics across turns.
 
     Returns:
         - per-turn F1 list (None for invalid turns)
+        - per-turn Precision list
+        - per-turn Recall list
         - micro-F1 over points across valid turns
+        - micro-Precision over points across valid turns
+        - micro-Recall over points across valid turns
         - correlation between distance-to-explored and hit (1=selected correct point)
     """
     unexp_f1_per_turn: List[Optional[float]] = []
+    unexp_p_per_turn: List[Optional[float]] = []
+    unexp_r_per_turn: List[Optional[float]] = []
     tp = fp = fn = 0
     dist_vals: List[float] = []
     hit_vals: List[float] = []
@@ -306,6 +312,8 @@ def aggregate_unexplored_metrics(
         un = (d.get('unexplored') or {})
         um = UnexploredMetrics.from_dict((un.get('metrics') or {}))
         unexp_f1_per_turn.append(float(um.overall) if um.valid else None)
+        unexp_p_per_turn.append(float(um.precision) if um.valid else None)
+        unexp_r_per_turn.append(float(um.recall) if um.valid else None)
 
         if not um.valid:
             continue
@@ -336,10 +344,14 @@ def aggregate_unexplored_metrics(
                 hit_vals.append(1.0 if pt in pred else 0.0)
 
     unexp_f1_avg = None
+    unexp_p_avg = None
+    unexp_r_avg = None
     if (tp + fp + fn) > 0:
         unexp_p = (tp / (tp + fp)) if (tp + fp) > 0 else 0.0
         unexp_r = (tp / (tp + fn)) if (tp + fn) > 0 else 0.0
         unexp_f1_avg = (2.0 * unexp_p * unexp_r / (unexp_p + unexp_r)) if (unexp_p + unexp_r) > 0 else 0.0
+        unexp_p_avg = float(unexp_p)
+        unexp_r_avg = float(unexp_r)
 
     unexp_distance_hit_corr = None
     if len(dist_vals) >= 2 and len(hit_vals) == len(dist_vals):
@@ -351,7 +363,7 @@ def aggregate_unexplored_metrics(
         except Exception:
             unexp_distance_hit_corr = None
 
-    return unexp_f1_per_turn, unexp_f1_avg, unexp_distance_hit_corr
+    return unexp_f1_per_turn, unexp_p_per_turn, unexp_r_per_turn, unexp_f1_avg, unexp_p_avg, unexp_r_avg, unexp_distance_hit_corr
 
 
 __all__ = [
