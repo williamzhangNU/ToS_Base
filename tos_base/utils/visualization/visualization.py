@@ -909,9 +909,10 @@ class HTMLGenerator:
         """Generate exploration turn logs and evaluation tasks"""
         env_turn_logs = entry.get("env_turn_logs", [])
         evaluation_tasks = entry.get("evaluation_tasks", {})
+        false_belief_turn_logs = entry.get("false_belief_turn_logs", [])
         is_passive = self._is_passive_combo(entry)
 
-        if not env_turn_logs and not evaluation_tasks:
+        if not env_turn_logs and not evaluation_tasks and not false_belief_turn_logs:
             f.write("<div class='metrics'><strong>⚠️ No turns available</strong></div>\n")
             return
 
@@ -947,6 +948,14 @@ class HTMLGenerator:
                 # Display turn metrics
                 self._render_turn_metrics(f, env_log)
 
+                if env_log.get('false_belief_log'):
+                    fb_log = env_log['false_belief_log']
+                    # print(f'fb_log: {fb_log}')
+                    fb_log.pop('room_state', None); fb_log.pop('agent_state', None)
+                    f.write("<div class='metrics'><strong>🧭 False Belief Metrics</strong>")
+                    f.write(VisualizationHelper.dict_to_html(fb_log))
+                    f.write("</div>\n")
+
                 f.write("</div>\n")  # End turn-left
 
                 # Right side: room and message images
@@ -958,6 +967,10 @@ class HTMLGenerator:
         if env_turn_logs:
             f.write("<div class='section-header'><h3>🌍 Exploration Phase</h3></div>\n")
             render_logs(env_turn_logs)
+
+        if false_belief_turn_logs:
+            f.write("<div class='section-header'><h3>🧭 False Belief Exploration</h3></div>\n")
+            render_logs(false_belief_turn_logs, "FB Turn")
 
         # Generate evaluation turns if available
         if evaluation_tasks:
