@@ -84,7 +84,7 @@ Example:
 ```
 """
 
-def get_cogmap_prompt(map_type: str, enable_think: bool = True, all_candidate_coords: Optional[List[Tuple[int, int]]] = None) -> str:
+def get_cogmap_prompt(map_type: str, enable_think: bool = True, all_candidate_coords: Optional[List[Tuple[int, int]]] = None, use_vision=False, room=None, agent=None) -> str:
     """Return the assembled cognitive-map prompt for a given type, with format rules."""
     t = (map_type or "global").strip().lower()
     fmt = _cogmap_format_rules(enable_think)
@@ -95,7 +95,7 @@ def get_cogmap_prompt(map_type: str, enable_think: bool = True, all_candidate_co
     if t == "unexplored":
         return get_unexplored_prompt(enable_think, all_candidate_coords)
     if t == "fog_probe":
-        return get_fog_probe_prompt(enable_think)
+        return get_fog_probe_prompt(enable_think, use_vision, room, agent, all_candidate_coords)
     # default to global
     return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
 
@@ -106,6 +106,7 @@ FOG_PROBE_INSTRUCTION = """\
 
 Identify unexplored candidate points (A-Z) from the map (in the fog).
 
+Map: {symbol_map}
 Example:
 ```json
 {{
@@ -114,9 +115,10 @@ Example:
 ```
 """
 
-def get_fog_probe_prompt(enable_think: bool = True, use_vision: bool = False) -> str:
+def get_fog_probe_prompt(enable_think, use_vision, room, agent, all_candidate_coords) -> str:
     symbol_def = "" if use_vision else RoomPlotter.get_symbol_definition()
-    instruction = FOG_PROBE_INSTRUCTION.format(symbol_def=symbol_def)
+    symbol_map = "<image>" if use_vision else RoomPlotter.get_symbolic_map(room, agent, False, False, all_candidate_coords)
+    instruction = FOG_PROBE_INSTRUCTION.format(symbol_def=symbol_def, symbol_map=symbol_map)
     fmt = _cogmap_format_rules(enable_think)
     return f"{instruction}\n\n{fmt}"
 
