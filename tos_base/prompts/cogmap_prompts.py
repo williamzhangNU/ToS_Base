@@ -6,6 +6,7 @@ Per-type prompts ONLY add their specific instructions (no repetition).
 """
 
 from typing import Optional, Dict, List, Tuple
+from ..utils.room_utils import RoomPlotter
 
 BASE_COGMAP_PROMPT = """\
 ## Cognitive Map (JSON)
@@ -93,8 +94,31 @@ def get_cogmap_prompt(map_type: str, enable_think: bool = True, all_candidate_co
         return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_LOCAL_ONLY}\n\n{fmt}"
     if t == "unexplored":
         return get_unexplored_prompt(enable_think, all_candidate_coords)
+    if t == "fog_probe":
+        return get_fog_probe_prompt(enable_think)
     # default to global
     return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
+
+# --- Fog Probe Prompt ---
+FOG_PROBE_INSTRUCTION = """\
+### Fog Probe
+{symbol_def}
+
+Identify unexplored candidate points (A-Z) from the map (in the fog).
+
+Example:
+```json
+{{
+    "unexplored": ["A", "C"]
+}}
+```
+"""
+
+def get_fog_probe_prompt(enable_think: bool = True, use_vision: bool = False) -> str:
+    symbol_def = "" if use_vision else RoomPlotter.get_symbol_definition()
+    instruction = FOG_PROBE_INSTRUCTION.format(symbol_def=symbol_def)
+    fmt = _cogmap_format_rules(enable_think)
+    return f"{instruction}\n\n{fmt}"
 
 # --- Unexplored Areas Prompt ---
 UNEXPLORED_INSTRUCTION = """\

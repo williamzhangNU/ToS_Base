@@ -1194,6 +1194,53 @@ class RoomGenerator:
 
 class RoomPlotter:
     @staticmethod
+    def get_symbol_definition() -> str:
+        return (
+            "Symbolic Map:\n"
+            "- North is Up.\n"
+            "- Coordinates: (0, 0) is at the bottom-left (last row, first column). X points Right (East), Y points Up (North).\n"
+            "- Legend:\n"
+            "  - '.': Floor\n"
+            "  - '#': Wall\n"
+            "  - '+': Door\n"
+            "  - '*': Agent\n"
+            "  - 'A-Z': Candidates"
+        )
+
+    @staticmethod
+    def get_symbolic_map(room: Room, agent: Agent | None = None, include_object: bool = False, 
+                         use_agent_pos: bool = False, candidate_points: List[Tuple[int, int]] | None = None) -> List[str]:
+        """Convert room to symbolic map (N*M)."""
+        if getattr(room, 'mask', None) is None: return []
+        x_size, y_size = room.mask.shape
+        grid = [['#' for _ in range(x_size)] for _ in range(y_size)]
+
+        for x in range(x_size):
+            for y in range(y_size):
+                v = int(room.mask[x, y])
+                if 1 <= v < 100: grid[y_size - 1 - y][x] = '.'
+                elif v in (100, 101): grid[y_size - 1 - y][x] = '+'
+
+        if include_object:
+            chars = "abcdefghijklmnopqrstuvwxyz"
+            for i, o in enumerate(room.objects):
+                x, y = int(o.pos[0]), int(o.pos[1])
+                if 0 <= x < x_size and 0 <= y < y_size: grid[y_size - 1 - y][x] = chars[i % len(chars)]
+
+        if candidate_points:
+            if len(candidate_points) > 26: raise ValueError("Too many candidate points (max 26)")
+            for i, (x, y) in enumerate(candidate_points):
+                x, y = int(x), int(y)
+                if 0 <= x < x_size and 0 <= y < y_size: grid[y_size - 1 - y][x] = chr(ord('A') + i)
+
+        if agent:
+            pos = agent.pos if use_agent_pos else agent.init_pos
+            x, y = int(pos[0]), int(pos[1])
+            if 0 <= x < x_size and 0 <= y < y_size: grid[y_size - 1 - y][x] = '*'
+
+        return ["".join(row) for row in grid]
+
+    @staticmethod
     def plot(room: Room, agent: Agent | None, mode: str = 'text', save_path: str | None = None):
         """Render room.
         - mode='text': print ASCII.
@@ -1456,18 +1503,20 @@ def initialize_room_from_json(json_data: Dict[str, Any]) ->  Tuple[Room, Agent]:
 
 
 if __name__ == '__main__':
-    np_random = np.random.default_rng(2)
+    import json
+    import os
     
-    # # Test 3 object placement strategies
-    # room1, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, np_random=np_random)
-    # room2, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, proportional_to_area=True, np_random=np_random)
-    # room3, _ = RoomGenerator.generate_room(room_size=[15, 15], level=2, n_objects=9, fix_object_n=[4, 3, 2], np_random=np_random)
-    
-    # RoomPlotter.plot(room1, None, mode='img', save_path='room1.png')
-    # RoomPlotter.plot(room2, None, mode='img', save_path='room2.png')
-    # RoomPlotter.plot(room3, None, mode='img', save_path='room3.png')
+    # Simple debug for symbolic map
+    json_path = "vagen/env/spatial/room_data_3_room/run00/meta_data.json"
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+    room, agent = initialize_room_from_json(data)
 
-    # Test room layout generation
-    # room1, _ = RoomGenerator.generate_room(room_size=[20, 20], level=2, n_objects=9, np_random=np_random, same_room_size=True)
-    room1, _ = RoomGenerator.generate_multi_room(room_size=[6, 6], room_num=4, n_objects=4, np_random=np_random, topology=3)
-    RoomPlotter.plot(room1, None, mode='img', save_path='room1.png')
+    RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
+    
+    print("Symbolic Map (Init Pos):")
+    print("\n".join(RoomPlotter.get_symbolic_map(room, agent, include_object=False, use_agent_pos=False)))
+    
+    print("\nSymbolic Map (Candidate Points):")
+    candidates = [(1, 7), (3, 2), (6, 14)]
+    print("\n".join(RoomPlotter.get_symbolic_map(room, agent, include_object=False, use_agent_pos=False, candidate_points=candidates)))
