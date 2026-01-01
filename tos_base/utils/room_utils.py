@@ -1203,13 +1203,13 @@ class RoomPlotter:
             "  - '.': Floor\n"
             "  - '#': Wall\n"
             "  - '+': Door\n"
-            "  - '*': Agent\n"
+            "  - '*': Agent's current Position\n"
             "  - 'A-Z': Candidates"
         )
 
     @staticmethod
     def get_symbolic_map(room: Room, agent: Agent | None = None, include_object: bool = False, 
-                         use_agent_pos: bool = False, candidate_points: List[Tuple[int, int]] | None = None) -> str:
+                          candidate_points: List[Tuple[int, int]] | None = None) -> str:
         """Convert room to symbolic map (N*M)."""
         if getattr(room, 'mask', None) is None: return ""
         x_size, y_size = room.mask.shape
@@ -1234,7 +1234,7 @@ class RoomPlotter:
                 if 0 <= x < x_size and 0 <= y < y_size: grid[y_size - 1 - y][x] = chr(ord('A') + i)
 
         if agent:
-            pos = agent.pos if use_agent_pos else agent.init_pos
+            pos = agent.pos
             x, y = int(pos[0]), int(pos[1])
             if 0 <= x < x_size and 0 <= y < y_size: grid[y_size - 1 - y][x] = '*'
 

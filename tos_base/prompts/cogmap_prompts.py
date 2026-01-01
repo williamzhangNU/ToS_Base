@@ -119,7 +119,7 @@ Example:
 
 def get_fog_probe_prompt(enable_think, use_vision, room, agent, all_candidate_coords) -> str:
     symbol_def = "" if use_vision else RoomPlotter.get_symbol_definition()
-    symbol_map = "<image>" if use_vision else RoomPlotter.get_symbolic_map(room, agent, False, False, all_candidate_coords)
+    symbol_map = "<image>" if use_vision else RoomPlotter.get_symbolic_map(room, agent, False, all_candidate_coords)
     instruction = FOG_PROBE_INSTRUCTION.format(symbol_def=symbol_def, symbol_map=symbol_map)
     fmt = _cogmap_format_rules(enable_think)
     return f"{instruction}\n\n{fmt}"
