@@ -694,6 +694,7 @@ class HTMLGenerator:
             ('global', '🗺️ Global Cognitive Map Response'),
             ('local', '🗺️ Local Cognitive Map Response'),
             ('unexplored', '🔍 Unexplored Areas Response'),
+            ('fog_probe', '🌫️ Fog Probe Response'),
         ]
 
         for map_type, title in cogmap_types:
@@ -793,18 +794,19 @@ class HTMLGenerator:
                         f.write("</div>\n")  # End json-content
                         f.write("</div>\n")  # End json-container
 
-                elif map_type == 'unexplored':
+                elif map_type == 'unexplored' or map_type == 'fog_probe':
                     all_candidate_points = data.get('all_candidate_points', [])
                     pred_points = data.get('pred_points', [])
                     correct_points = data.get('correct_points', [])
+                    pred_labels = data.get('pred_json', {}).get('predicted_labels', [])
 
                     if all_candidate_points or pred_points or correct_points:
-                        f.write("<div class='json-container unexplored'>\n")
+                        f.write(f"<div class='json-container {map_type}'>\n")
                         f.write("<div class='json-header'>")
-                        f.write("<strong>🔍 Unexplored Areas JSONs</strong>")
+                        f.write(f"<strong>🔍 {map_type.replace('_', ' ').title()} JSONs</strong>")
                         f.write("</div>\n")
                         f.write("<div class='json-content'>\n")
-                        f.write("<div class='json-compare unexplored'>\n")
+                        f.write(f"<div class='json-compare {map_type}'>\n")
 
                         # Left - all candidates
                         f.write("<div class='json-box left predicted'>\n")
@@ -818,6 +820,8 @@ class HTMLGenerator:
                         f.write("<div class='json-box middle gt-observed'>\n")
                         f.write("<strong>🤖 Predicted</strong>\n")
                         f.write("<div class='json-content-inner'>\n")
+                        if pred_labels:
+                             f.write(f"<div>Labels: {escape(str(pred_labels))}</div>\n")
                         f.write(f"<pre>{escape(json.dumps(pred_points, indent=2))}</pre>\n")
                         f.write("</div>\n")
                         f.write("</div>\n")
@@ -849,6 +853,7 @@ class HTMLGenerator:
             "Global (Full)": global_log.get("metrics_full", {}) if global_log else {},
             "Local": local_log.get("metrics", {}) if local_log else {},
             "Unexplored": unexplored_log.get("metrics", {}) if unexplored_log else {},
+            "Fog Probe": cogmap_log.get("fog_probe", {}).get("metrics", {}) if cogmap_log.get("fog_probe") else {},
             "Other Candidates": cogmap_log.get("other_candidates_metrics", {}),
         }
 

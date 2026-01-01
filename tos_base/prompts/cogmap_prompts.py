@@ -104,9 +104,11 @@ FOG_PROBE_INSTRUCTION = """\
 ### Fog Probe
 {symbol_def}
 
-Identify unexplored candidate points (A-Z) from the map (in the fog).
+The map displays candidate points labeled A-Z.
+Select the points that are located in unexplored/unobserved regions.
 
-Map: {symbol_map}
+Map:
+{symbol_map}
 Example:
 ```json
 {{

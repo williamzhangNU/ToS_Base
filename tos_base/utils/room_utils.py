@@ -1209,9 +1209,9 @@ class RoomPlotter:
 
     @staticmethod
     def get_symbolic_map(room: Room, agent: Agent | None = None, include_object: bool = False, 
-                         use_agent_pos: bool = False, candidate_points: List[Tuple[int, int]] | None = None) -> List[str]:
+                         use_agent_pos: bool = False, candidate_points: List[Tuple[int, int]] | None = None) -> str:
         """Convert room to symbolic map (N*M)."""
-        if getattr(room, 'mask', None) is None: return []
+        if getattr(room, 'mask', None) is None: return ""
         x_size, y_size = room.mask.shape
         grid = [['#' for _ in range(x_size)] for _ in range(y_size)]
 
@@ -1238,7 +1238,7 @@ class RoomPlotter:
             x, y = int(pos[0]), int(pos[1])
             if 0 <= x < x_size and 0 <= y < y_size: grid[y_size - 1 - y][x] = '*'
 
-        return ["".join(row) for row in grid]
+        return "\n".join(["".join(row) for row in grid])
 
     @staticmethod
     def plot(room: Room, agent: Agent | None, mode: str = 'text', save_path: str | None = None):
@@ -1515,8 +1515,8 @@ if __name__ == '__main__':
     RoomPlotter.plot(room, agent, mode='img', save_path='room.png')
     
     print("Symbolic Map (Init Pos):")
-    print("\n".join(RoomPlotter.get_symbolic_map(room, agent, include_object=False, use_agent_pos=False)))
+    print(RoomPlotter.get_symbolic_map(room, agent, include_object=False, use_agent_pos=False))
     
     print("\nSymbolic Map (Candidate Points):")
     candidates = [(1, 7), (3, 2), (6, 14)]
-    print("\n".join(RoomPlotter.get_symbolic_map(room, agent, include_object=False, use_agent_pos=False, candidate_points=candidates)))
+    print(RoomPlotter.get_symbolic_map(room, agent, include_object=False, use_agent_pos=False, candidate_points=candidates))
