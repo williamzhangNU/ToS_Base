@@ -582,12 +582,20 @@ class ExplorationManager:
         all_candidate_coords: List[Tuple[int, int]] = []
         all_correct_coords: List[Tuple[int, int]] = []
         
+        # Get agent's current position to exclude it
+        agent_pos = (int(self.agent.pos[0]), int(self.agent.pos[1]))
+        
         for rid_str, unexplored_list in unexplored_positions_by_room.items():
             if not unexplored_list:
                 continue
             
             unexplored_set = set((int(p[0]), int(p[1])) for p in unexplored_list)
             explored_set = set(self._explored_by_room.get(rid_str, set()) or set())
+            
+            # Remove agent's current position from both sets
+            unexplored_set.discard(agent_pos)
+            explored_set.discard(agent_pos)
+            
             if not unexplored_set or not explored_set:
                 continue
 
