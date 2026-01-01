@@ -39,6 +39,7 @@ from ..utils.cogmap.unexplored import (
     evaluate_unexplored_predictions,
     parse_unexplored_response,
     aggregate_unexplored_metrics,
+    parse_fog_probe_response,
 )
 
 
@@ -119,6 +120,7 @@ class CognitiveMapTurnLog:
     global_log: Optional[GlobalCogMapTurnLog] = None
     local_log: Optional[LocalCogMapTurnLog] = None
     unexplored_log: Optional[UnexploredCogMapTurnLog] = None
+    fog_probe_log: Optional[UnexploredCogMapTurnLog] = None
     consistency: Optional[ConsistencySummary] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -129,6 +131,8 @@ class CognitiveMapTurnLog:
             out["local"] = self.local_log.to_dict()
         if self.unexplored_log:
             out["unexplored"] = self.unexplored_log.to_dict()
+        if self.fog_probe_log:
+            out["fog_probe"] = self.fog_probe_log.to_dict()
         if self.consistency:
             out["consistency"] = self.consistency.to_dict()
         return out
@@ -236,6 +240,39 @@ class CognitiveMapManager:
             metrics=metrics,
         )
 
+    def evaluate_fog_probe(
+        self,
+        assistant_response: str,
+        all_candidate_coords: Optional[List[Tuple[int, int]]],
+        correct_coords: List[Tuple[int, int]],
+    ) -> UnexploredCogMapTurnLog:
+        """Evaluate fog-probe predictions where the LLM selects labeled candidates (A-Z).
+
+        The prompt displays candidate points labeled 'A', 'B', ... in the same
+        order as `all_candidate_coords`. The model should return something like
+        `{"unexplored": ["A", "C"]}`. This method parses those labels,
+        maps them to coordinates, and evaluates using the same unexplored
+        prediction metrics.
+        """
+        assert correct_coords and all_candidate_coords, "No correct or candidate coordinates provided"
+
+        # Use shared parser from utils.cogmap.unexplored
+        labels, pred_coords = parse_fog_probe_response(assistant_response, all_candidate_coords)
+
+        # Evaluate predictions using the same unexplored evaluator
+        metrics = evaluate_unexplored_predictions(pred_coords, correct_coords)
+
+        return UnexploredCogMapTurnLog(
+            type="fog_probe",
+            extraction_success=True,
+            original_response=assistant_response,
+            pred_json={"parsed_from_text": True, "predicted_labels": labels, "predicted_coords": [[int(x), int(y)] for x, y in pred_coords]},
+            all_candidate_points=[(int(x), int(y)) for x, y in (all_candidate_coords or [])],
+            pred_points=pred_coords,
+            correct_points=[(int(x), int(y)) for x, y in correct_coords],
+            metrics=metrics,
+        )
+
     def _eval_global(self, pred_global_br: BaseRoom,  gt_global_br: BaseRoom, gt_room_state_full: BaseRoom, agent_br: BaseRoom, assistant_response: str, pred_json: Dict) -> GlobalCogMapTurnLog:
         gt_json = self.baseroom_to_json(gt_global_br, include_gates=True)
         metrics = self._compare_baserooms(pred_global_br, gt_global_br)
@@ -292,8 +329,11 @@ class CognitiveMapManager:
         for map_type_key, resp in (responses_by_type or {}).items():
             if not isinstance(resp, str):
                 continue
+
             if map_type_key == "unexplored":
                 single = self.evaluate_unexplored(resp, all_candidate_coords, all_correct_coords or [])
+            elif map_type_key == "fog_probe":
+                single = self.evaluate_fog_probe(resp, all_candidate_coords, all_correct_coords or [])
             else:
                 single = self.evaluate_cogmap_type(resp, gt_room, gt_agent, observed_items, map_type_key)
             setattr(out, f"{single.type}_log", single)

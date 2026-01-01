@@ -262,6 +262,97 @@ def parse_unexplored_response(text: str) -> List[Tuple[int, int]]:
     # Fallback: plain text parsing
     return _parse_value(raw)
 
+
+def parse_fog_probe_response(text: str, all_candidate_coords: Optional[List[Tuple[int, int]]]) -> Tuple[List[str], List[Tuple[int, int]]]:
+    """Parse fog-probe responses that select labeled candidates (A, B, ...).
+
+    Returns a tuple (labels, coords) where `labels` is an ordered list of
+    uppercase single-character labels ("A", "B", ...) and `coords` is the
+    mapped coordinates from `all_candidate_coords` corresponding to those
+    labels. If a label is out of range or cannot be mapped, it is ignored.
+    """
+    import json
+    import re
+
+    def _extract_json_candidates(s: str) -> List[str]:
+        fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", s, flags=re.DOTALL | re.IGNORECASE)
+        candidates = list(fenced) if fenced else []
+        if candidates:
+            return candidates
+        # Fallback: scan for outermost balanced braces
+        stack, start = [], None
+        for i, ch in enumerate(s):
+            if ch == '{':
+                if not stack:
+                    start = i
+                stack.append(ch)
+            elif ch == '}' and stack:
+                stack.pop()
+                if not stack and start is not None:
+                    candidates.append(s[start:i + 1])
+                    start = None
+        return candidates
+
+    def _parse_labels_from_string(s: str) -> List[str]:
+        labels = re.findall(r"\b([A-Z])\b", s)
+        if labels:
+            seen = set(); out = []
+            for L in labels:
+                if L in seen: continue
+                seen.add(L); out.append(L)
+            return out
+        # fallback: look for quoted letters in lists e.g. "A","B"
+        q = re.findall(r"['\"]([A-Za-z])[ '\"]?[,;\]]", s)
+        if q:
+            out = []
+            seen = set()
+            for L in q:
+                U = L.upper()
+                if U in seen: continue
+                seen.add(U); out.append(U)
+            return out
+        return []
+
+    labels: List[str] = []
+    if isinstance(text, str):
+        raw = text.strip()
+        json_dict = None
+        for cand in _extract_json_candidates(raw):
+            try:
+                json_dict = json.loads(cand)
+                break
+            except json.JSONDecodeError:
+                continue
+        if isinstance(json_dict, dict):
+            v = json_dict.get('unexplored') or json_dict.get('points') or json_dict.get('candidates')
+            if isinstance(v, list):
+                for it in v:
+                    if isinstance(it, str) and len(it.strip()) == 1:
+                        labels.append(it.strip().upper())
+                    elif isinstance(it, (list, tuple)) and it:
+                        try:
+                            labs = [str(x).strip().upper() for x in it if isinstance(x, str) and len(str(x).strip()) == 1]
+                            labels.extend(labs)
+                        except Exception:
+                            continue
+            elif isinstance(v, str):
+                labels = _parse_labels_from_string(v)
+            else:
+                labels = _parse_labels_from_string(json.dumps(json_dict))
+        else:
+            labels = _parse_labels_from_string(raw)
+
+    # Map labels to coordinates using A->0, B->1, ...
+    pred_coords: List[Tuple[int, int]] = []
+    if isinstance(all_candidate_coords, list) and labels:
+        for L in labels:
+            idx = ord(L.upper()) - ord('A')
+            if 0 <= idx < len(all_candidate_coords):
+                c = all_candidate_coords[idx]
+                pred_coords.append((int(c[0]), int(c[1])))
+
+    return labels, pred_coords
+
 def distances_to_explored(
     points: List[Tuple[int, int]],
     explored_points: Set[Tuple[int, int]],
@@ -309,7 +400,8 @@ def aggregate_unexplored_metrics(
     hit_vals: List[float] = []
 
     for d, exp in zip(cog_logs, exp_logs):
-        un = (d.get('unexplored') or {})
+        # un = (d.get('unexplored') or {})
+        un = (d.get('fog_probe') or {})
         um = UnexploredMetrics.from_dict((un.get('metrics') or {}))
         unexp_f1_per_turn.append(float(um.overall) if um.valid else None)
         unexp_p_per_turn.append(float(um.precision) if um.valid else None)
@@ -371,6 +463,7 @@ __all__ = [
     'generate_labeled_points',
     'evaluate_unexplored_predictions',
     'parse_unexplored_response',
+    'parse_fog_probe_response',
     'distances_to_explored',
     'aggregate_unexplored_metrics',
     'UnexploredMetrics',
