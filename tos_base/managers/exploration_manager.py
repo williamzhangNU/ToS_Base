@@ -117,11 +117,6 @@ class ExplorationManager:
         self.spatial_solver = SpatialSolver(self.node_names + ['initial_pos'], self.grid_size)
         self.spatial_solver.set_initial_position('initial_pos', (0, 0))
         
-    def _shift_to_initial(self, p: Tuple[int, int]) -> Tuple[int, int]:
-        """Shift absolute grid coords to global frame where init_pos is (0,0)."""
-        ox, oy = int(self.init_pos[0]), int(self.init_pos[1])
-        return (int(p[0]) - ox, int(p[1]) - oy)
-
     def _execute_and_update(self, action: BaseAction, **kwargs) -> ActionResult:
         """Execute action and update exploration state."""
         # Enforce "observed-before-move"
@@ -431,7 +426,7 @@ class ExplorationManager:
             if rid not in self._visited_rooms:
                 continue
             for p in (pts or set()):
-                explored_global.add(self._shift_to_initial(p))
+                explored_global.add(p)
         all_candidate_dists = distances_to_explored(all_candidate_coords, explored_global)
         
         step_idx = len(self.turn_logs) + 1
@@ -572,6 +567,7 @@ class ExplorationManager:
         - max 3 per room
         - if a room has either side empty, skip that room
         - if no available points across rooms, return empty lists (caller should skip)
+        - POINTS MUST BE INSIDE ROOMS (mask > 0), excluding walls and outside
         
         Args:
             unexplored_positions_by_room: Dict mapping room_id to unexplored positions
@@ -585,12 +581,47 @@ class ExplorationManager:
         # Get agent's current position to exclude it
         agent_pos = (int(self.agent.pos[0]), int(self.agent.pos[1]))
         
+        # Helper to check if a point is inside a valid room (mask > 0)
+        # Note: Gates might also be valid depending on mask, but usually gates have separate IDs or are part of room. 
+        # Here we assume mask > 0 means "inside room or gate".
+        # If user strictly wanted "not gate", we'd check if it overlaps a gate object.
+        # Given "exclude gates" requirement, we check if point is in any gate pos.
+        gate_positions = set()
+        if hasattr(self.exploration_room, 'gates'):
+            for g in self.exploration_room.gates:
+                gate_positions.add((int(g.pos[0]), int(g.pos[1])))
+
+        def is_valid_room_point(p: Tuple[int, int]) -> bool:
+            x, y = p
+            # Check boundaries
+            if not (0 <= x < self.exploration_room.mask.shape[0] and 0 <= y < self.exploration_room.mask.shape[1]):
+                return False
+            # Check mask (inside room)
+            if self.exploration_room.mask[x, y] <= 0:
+                return False
+            # Check not a gate
+            if p in gate_positions:
+                return False
+            return True
+
         for rid_str, unexplored_list in unexplored_positions_by_room.items():
             if not unexplored_list:
                 continue
             
-            unexplored_set = set((int(p[0]), int(p[1])) for p in unexplored_list)
-            explored_set = set(self._explored_by_room.get(rid_str, set()) or set())
+            # Filter unexplored points
+            unexplored_set = set()
+            for p in unexplored_list:
+                pt = (int(p[0]), int(p[1]))
+                if is_valid_room_point(pt):
+                    unexplored_set.add(pt)
+
+            # Filter explored points
+            explored_raw = self._explored_by_room.get(rid_str, set()) or set()
+            explored_set = set()
+            for p in explored_raw:
+                pt = (int(p[0]), int(p[1]))
+                if is_valid_room_point(pt):
+                    explored_set.add(pt)
             
             # Remove agent's current position from both sets
             unexplored_set.discard(agent_pos)
@@ -603,8 +634,8 @@ class ExplorationManager:
             if k <= 0:
                 continue
 
-            unexplored_samples = [self._shift_to_initial(p) for p in self._rng.sample(list(unexplored_set), k)]
-            explored_samples = [self._shift_to_initial(p) for p in self._rng.sample(list(explored_set), k)]
+            unexplored_samples = [p for p in self._rng.sample(list(unexplored_set), k)]
+            explored_samples = [p for p in self._rng.sample(list(explored_set), k)]
 
             all_correct_coords.extend(unexplored_samples)
             all_candidate_coords.extend(unexplored_samples)

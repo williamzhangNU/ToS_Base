@@ -14,19 +14,23 @@ class EvalTaskType(Enum):
     # Task type definitions: (short_name, class_name)
     DIR = ("dir", "DirectionEvaluationTask")
     ROT = ("rot", "RotEvaluationTask")
-    ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
     POV = ("pov", "PovEvaluationTask")
     BWD_POV_TEXT = ("bwd_pov_text", "BackwardPovTextEvaluationTask")
-    BWD_POV_VISION = ("bwd_pov_vision", "BackwardPovVisionEvaluationTask")
     E2A = ("e2a", "AlloMappingEvaluationTask")
     FWD_LOC = ("fwd_loc", "Location2ViewEvaluationTask")
     BWD_LOC_TEXT = ("bwd_loc_text", "View2LocationTextEvaluationTask")
-    BWD_LOC_VISION = ("bwd_loc_vision", "View2LocationVisionEvaluationTask")
     FWD_FOV = ("fwd_fov", "Action2ViewEvaluationTask")
     BWD_NAV_TEXT = ("bwd_nav_text", "View2ActionTextEvaluationTask")
+
+    # vision
+    BWD_POV_VISION = ("bwd_pov_vision", "BackwardPovVisionEvaluationTask")
+    BWD_LOC_VISION = ("bwd_loc_vision", "View2LocationVisionEvaluationTask")
     BWD_NAV_VISION = ("bwd_nav_vision", "View2ActionVisionEvaluationTask")
-    BWD_NAV_REV = ("bwd_nav_rev", "View2ActionRevEvaluationTask")
+
+    # useless
     BWD_NAV_VISION_OLD = ("bwd_nav_vision", "Location2ActionVisionEvaluationTask")  # deprecated
+    ROT_DUAL = ("rot_dual", "RotDualEvaluationTask")
+    BWD_NAV_REV = ("bwd_nav_rev", "View2ActionRevEvaluationTask")
     FALSE_BELIEF = ("false_belief", "FalseBeliefDirectionPov")
     DIR_ANCHOR = ("dir_anchor", "DirectionPov")
     
@@ -90,11 +94,28 @@ class EvalTaskType(Enum):
     @classmethod
     def resolve_class_name(cls, task_name: str) -> str:
         """Resolve short or long task identifier to class name."""
+        task_name = cls.migrate_legacy_name(task_name)
         if task_name in cls.get_short_names():
             return cls.from_short_name(task_name).class_name
         if task_name in cls.get_class_names():
             return task_name
         raise ValueError(f"Unknown task identifier: {task_name}")
+
+    @classmethod
+    def migrate_legacy_name(cls, task_name: str) -> str:
+        """Migrate legacy task names to current ones."""
+        mapping = {
+            # Forward: Action2Location (Old) -> Location2View (New)
+            "Action2LocationEvaluationTask": "Location2ViewEvaluationTask",
+            "Action2LocationTextEvaluationTask": "Location2ViewEvaluationTask",
+            "Action2LocationVisionEvaluationTask": "Location2ViewEvaluationTask",
+
+            # Backward: Location2Action (Old) -> View2Location (New)
+            "Location2ActionEvaluationTask": "View2LocationTextEvaluationTask", 
+            "Location2ActionTextEvaluationTask": "View2LocationTextEvaluationTask",
+            "Location2ActionVisionEvaluationTask": "View2LocationVisionEvaluationTask",
+        }
+        return mapping.get(task_name, task_name)
 
     @classmethod
     def evaluate_prediction(

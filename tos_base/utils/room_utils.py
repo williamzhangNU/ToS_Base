@@ -1197,10 +1197,10 @@ class RoomPlotter:
     def get_symbol_definition() -> str:
         return (
             "Symbolic Map:\n"
-            "- North is Up.\n"
-            "- Coordinates: (0, 0) is at the bottom-left (last row, first column). X points Right (East), Y points Up (North).\n"
+            "- **North is Up.**\n"
+            "- **Coordinates**: (0, 0) is at the bottom-left (last row, first column). X points Right (East), Y points Up (North).\n"
             "- Legend:\n"
-            "  - '.': Floor\n"
+            "  - '.': Floor (integer coordinates)\n"
             "  - '#': Wall\n"
             "  - '+': Door\n"
             "  - '*': Agent's current Position\n"
@@ -1243,96 +1243,18 @@ class RoomPlotter:
     @staticmethod
     def plot(room: Room, agent: Agent | None, mode: str = 'text', save_path: str | None = None):
         """Render room.
-        - mode='text': print ASCII.
-        - mode='img': save image to save_path if provided; otherwise just draw (no return).
-        Use plot_to_image() when a numpy frame is needed.
+        - mode='text': print symbolic map.
+        - mode='img': save image to save_path if provided.
         """
-        has_mask = getattr(room, 'mask', None) is not None and isinstance(room, Room)
-        # gate labels: show gate index and connected rooms, e.g. G0[1-3]
-        gate_labels = {}
-        if room.gates:
-            gate_labels = {g.name: g.name for i, g in enumerate(room.gates)}
         if mode == 'text':
-            # helpers
-            arrow = lambda v: { (0,1): '↑', (1,0): '→', (0,-1): '↓', (-1,0): '←' }.get(tuple(v), '•')
-            col = lambda s,c: f"\033[{c}m{s}\033[0m"
-            BLUE, RED, GRN = 34, 31, 32
-            # grid from mask if available
-            if has_mask:
-                h, w = room.mask.shape  # h: number of rows (x), w: number of cols (y)
-                min_x, max_x, min_y, max_y = 0, h - 1, 0, w - 1
-                # Build grid as rows over world y (vertical), cols over world x (horizontal)
-                grid = [[' '] * h for _ in range(w)]
-                # draw background: rooms '.', walls '#', doors '+'
-                for wy in range(w):
-                    for wx in range(h):
-                        v = int(room.mask[wx, wy])
-                        if v == -1:
-                            ch = ' '
-                        elif v == 0:
-                            ch = '#'
-                        elif v in (100, 101):
-                            ch = '+'
-                        else:
-                            ch = '·'
-                        grid[w - 1 - wy][wx] = ch
-                # room labels at centers
-                rids = sorted(int(r) for r in np.unique(room.mask) if 1 <= int(r) < 100)
-                for rid in rids:
-                    xs, ys = np.where(room.mask == rid)
-                    if len(xs) == 0:
-                        continue
-                    cx, cy = int(np.mean(xs)), int(np.mean(ys))
-                    grid[w - 1 - cy][cx] = str(rid % 10)
-            else:
-                # bounds/grid from objects if no mask
-                min_x, max_x, min_y, max_y = room.get_boundary()
-                min_x, max_x, min_y, max_y = int(min_x)-1, int(max_x)+1, int(min_y)-1, int(max_y)+1
-                w, h = max_x - min_x + 1, max_y - min_y + 1
-                grid = [['·'] * w for _ in range(h)]
-            # objects + gates with orientation
-            for obj in room.all_objects:
-                x, y = int(obj.pos[0]) - min_x, max_y - int(obj.pos[1])
-                # grid may be (w rows, h cols) when has_mask, or (h rows, w cols) when no mask
-                height, width = len(grid), len(grid[0]) if grid else (0)
-                if 0 <= y < height and 0 <= x < width:
-                    is_gate = isinstance(obj, Gate) if hasattr(room, 'gates') else False
-                    ch = 'D' if is_gate else (arrow(obj.ori) if getattr(obj, 'has_orientation', True) else '●')
-                    grid[y][x] = col(ch, RED if is_gate else BLUE)
-                    if is_gate:
-                        # write compact gate tag next to door cell when possible
-                        tag = gate_labels.get(obj.name, '')
-                        if x+1 < width:
-                            grid[y][x+1] = col(tag, RED)
-            # agent (current + init)
-            if agent is not None:
-                ax, ay = int(agent.pos[0]) - min_x, max_y - int(agent.pos[1])
-                height, width = len(grid), len(grid[0]) if grid else (0)
-                if 0 <= ay < height and 0 <= ax < width:
-                    grid[ay][ax] = col(arrow(agent.ori), GRN)
-                iax, iay = int(agent.init_pos[0]) - min_x, max_y - int(agent.init_pos[1])
-                if 0 <= iay < height and 0 <= iax < width and not (iax == ax and iay == ay):
-                    grid[iay][iax] = col('×', GRN)
-            print(f"--- {room.name} ---")
-            for yy in range(len(grid)):
-                print(' '.join(grid[yy]))
-            # gate legend
-            if gate_labels:
-                order = [f"{gate_labels[g.name]}:{g.name}" for g in room.gates]
-                print("Gates:", ", ".join(order))
-            if agent is not None:
-                def name_ori(v):
-                    m = {(0,1): 'N', (1,0): 'E', (0,-1): 'S', (-1,0): 'W'}
-                    return m.get(tuple(v), '?')
-                print(f"A:{tuple(agent.pos)} {name_ori(agent.ori)}  a(init):{tuple(agent.init_pos)} {name_ori(getattr(agent,'init_ori',agent.ori))}")
-            return
+            print(RoomPlotter.get_symbolic_map(room, agent, include_object=True))
         elif mode == 'img':
 
             fig, ax = plt.subplots(figsize=(8, 6))
             ax.set_facecolor('white')
             RoomPlotter._draw_img(ax, room, agent)
             if save_path:
-                plt.savefig(save_path, bbox_inches='tight', dpi=300)
+                plt.savefig(save_path, bbox_inches='tight', dpi=100)
             plt.close(); return
         else:
             raise ValueError('mode must be text or img')

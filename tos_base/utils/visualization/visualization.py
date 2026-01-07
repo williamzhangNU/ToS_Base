@@ -199,13 +199,13 @@ class HTMLGenerator:
                 update_data = per_turn.get("cogmap_update_per_turn", cogmap_group.pop("cogmap_update_per_turn", {}))
                 full_data = per_turn.get("cogmap_full_per_turn", cogmap_group.pop("cogmap_full_per_turn", {}))
                 self_tracking_data = per_turn.get("self_tracking_per_turn", cogmap_group.pop("self_tracking_per_turn", {}))
-                other_f1 = per_turn.get("other_candidates_f1_per_turn", cogmap_group.pop("other_candidates_f1_per_turn", []))
-                other_p = per_turn.get("other_candidates_p_per_turn", cogmap_group.pop("other_candidates_p_per_turn", []))
-                other_r = per_turn.get("other_candidates_r_per_turn", cogmap_group.pop("other_candidates_r_per_turn", []))
-                other_count = per_turn.get("other_candidates_count_per_turn", cogmap_group.pop("other_candidates_count_per_turn", []))
-                unexplored_f1 = per_turn.get("unexplored_f1_per_turn", cogmap_group.pop("unexplored_f1_per_turn", []))
-                unexplored_p = per_turn.get("unexplored_p_per_turn", cogmap_group.pop("unexplored_p_per_turn", []))
-                unexplored_r = per_turn.get("unexplored_r_per_turn", cogmap_group.pop("unexplored_r_per_turn", []))
+                # other_f1 = per_turn.get("other_candidates_f1_per_turn", cogmap_group.pop("other_candidates_f1_per_turn", []))
+                # other_p = per_turn.get("other_candidates_p_per_turn", cogmap_group.pop("other_candidates_p_per_turn", []))
+                # other_r = per_turn.get("other_candidates_r_per_turn", cogmap_group.pop("other_candidates_r_per_turn", []))
+                # other_count = per_turn.get("other_candidates_count_per_turn", cogmap_group.pop("other_candidates_count_per_turn", []))
+                # unexplored_f1 = per_turn.get("unexplored_f1_per_turn", cogmap_group.pop("unexplored_f1_per_turn", []))
+                # unexplored_p = per_turn.get("unexplored_p_per_turn", cogmap_group.pop("unexplored_p_per_turn", []))
+                # unexplored_r = per_turn.get("unexplored_r_per_turn", cogmap_group.pop("unexplored_r_per_turn", []))
 
                 # Only accept new shape (metric -> list)
                 global_update = update_data if isinstance(update_data, dict) else {}
@@ -227,23 +227,23 @@ class HTMLGenerator:
 
                 # Other Candidates plots
                 other_cand_plots = {}
-                if isinstance(other_f1, list):
-                    other_cand_plots['f1'] = create_scalar_metric_plot(other_f1, title=f"Other-Candidates F1 per Turn - {gname}", y_label="F1", ylim=(0.0, 1.0))
-                if isinstance(other_p, list):
-                    other_cand_plots['p'] = create_scalar_metric_plot(other_p, title=f"Other-Candidates Precision per Turn - {gname}", y_label="Precision", ylim=(0.0, 1.0))
-                if isinstance(other_r, list):
-                    other_cand_plots['r'] = create_scalar_metric_plot(other_r, title=f"Other-Candidates Recall per Turn - {gname}", y_label="Recall", ylim=(0.0, 1.0))
-                if isinstance(other_count, list):
-                    other_cand_plots['count'] = create_scalar_metric_plot(other_count, title=f"Other-Candidates Count Score per Turn - {gname}", y_label="Count score", ylim=(0.0, 1.0))
+                # if isinstance(other_f1, list):
+                #     other_cand_plots['f1'] = create_scalar_metric_plot(other_f1, title=f"Other-Candidates F1 per Turn - {gname}", y_label="F1", ylim=(0.0, 1.0))
+                # if isinstance(other_p, list):
+                #     other_cand_plots['p'] = create_scalar_metric_plot(other_p, title=f"Other-Candidates Precision per Turn - {gname}", y_label="Precision", ylim=(0.0, 1.0))
+                # if isinstance(other_r, list):
+                #     other_cand_plots['r'] = create_scalar_metric_plot(other_r, title=f"Other-Candidates Recall per Turn - {gname}", y_label="Recall", ylim=(0.0, 1.0))
+                # if isinstance(other_count, list):
+                #     other_cand_plots['count'] = create_scalar_metric_plot(other_count, title=f"Other-Candidates Count Score per Turn - {gname}", y_label="Count score", ylim=(0.0, 1.0))
 
                 # Unexplored plots
-                unexplored_plots = {}
-                if isinstance(unexplored_f1, list):
-                    unexplored_plots['f1'] = create_scalar_metric_plot(unexplored_f1, title=f"Unexplored F1 per Turn - {gname}", y_label="F1", ylim=(0.0, 1.0))
-                if isinstance(unexplored_p, list):
-                    unexplored_plots['p'] = create_scalar_metric_plot(unexplored_p, title=f"Unexplored Precision per Turn - {gname}", y_label="Precision", ylim=(0.0, 1.0))
-                if isinstance(unexplored_r, list):
-                    unexplored_plots['r'] = create_scalar_metric_plot(unexplored_r, title=f"Unexplored Recall per Turn - {gname}", y_label="Recall", ylim=(0.0, 1.0))
+                # unexplored_plots = {}
+                # if isinstance(unexplored_f1, list):
+                #     unexplored_plots['f1'] = create_scalar_metric_plot(unexplored_f1, title=f"Unexplored F1 per Turn - {gname}", y_label="F1", ylim=(0.0, 1.0))
+                # if isinstance(unexplored_p, list):
+                #     unexplored_plots['p'] = create_scalar_metric_plot(unexplored_p, title=f"Unexplored Precision per Turn - {gname}", y_label="Precision", ylim=(0.0, 1.0))
+                # if isinstance(unexplored_r, list):
+                #     unexplored_plots['r'] = create_scalar_metric_plot(unexplored_r, title=f"Unexplored Recall per Turn - {gname}", y_label="Recall", ylim=(0.0, 1.0))
 
 
             # Generate correlation plots
@@ -303,7 +303,7 @@ class HTMLGenerator:
                 # Display main cognitive map metrics (exclude per_turn data)
                 main_metrics = {k: v for k, v in cogmap_group.items()
                                if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn", "self_tracking_per_turn",
-                                            "other_candidates_f1_per_turn", "other_candidates_count_per_turn",
+                                            # "other_candidates_f1_per_turn", "other_candidates_count_per_turn",
                                             "unexplored_f1_per_turn", "per_turn_metrics"]}
                 if main_metrics:
                     f.write("<div class='metrics-box cogmap'>\n")
@@ -338,22 +338,22 @@ class HTMLGenerator:
                 available_plots.append(("Cognitive Map (Self-Tracking)", cogmap_self_tracking_plot, "Cognitive Map Self-Tracking Turn Averages"))
             
             # Other Candidates
-            if other_cand_plots.get('f1'):
-                available_plots.append(("Other-Candidates F1", other_cand_plots['f1'], "Other-Candidates F1 per Turn"))
-            if other_cand_plots.get('p'):
-                available_plots.append(("Other-Candidates Precision", other_cand_plots['p'], "Other-Candidates Precision per Turn"))
-            if other_cand_plots.get('r'):
-                available_plots.append(("Other-Candidates Recall", other_cand_plots['r'], "Other-Candidates Recall per Turn"))
-            if other_cand_plots.get('count'):
-                available_plots.append(("Other-Candidates Count", other_cand_plots['count'], "Other-Candidates Count Score per Turn"))
+            # if other_cand_plots.get('f1'):
+            #     available_plots.append(("Other-Candidates F1", other_cand_plots['f1'], "Other-Candidates F1 per Turn"))
+            # if other_cand_plots.get('p'):
+            #     available_plots.append(("Other-Candidates Precision", other_cand_plots['p'], "Other-Candidates Precision per Turn"))
+            # if other_cand_plots.get('r'):
+            #     available_plots.append(("Other-Candidates Recall", other_cand_plots['r'], "Other-Candidates Recall per Turn"))
+            # if other_cand_plots.get('count'):
+            #     available_plots.append(("Other-Candidates Count", other_cand_plots['count'], "Other-Candidates Count Score per Turn"))
             
             # Unexplored
-            if unexplored_plots.get('f1'):
-                available_plots.append(("Unexplored F1", unexplored_plots['f1'], "Unexplored F1 per Turn"))
-            if unexplored_plots.get('p'):
-                available_plots.append(("Unexplored Precision", unexplored_plots['p'], "Unexplored Precision per Turn"))
-            if unexplored_plots.get('r'):
-                available_plots.append(("Unexplored Recall", unexplored_plots['r'], "Unexplored Recall per Turn"))
+            # if unexplored_plots.get('f1'):
+            #     available_plots.append(("Unexplored F1", unexplored_plots['f1'], "Unexplored F1 per Turn"))
+            # if unexplored_plots.get('p'):
+            #     available_plots.append(("Unexplored Precision", unexplored_plots['p'], "Unexplored Precision per Turn"))
+            # if unexplored_plots.get('r'):
+            #     available_plots.append(("Unexplored Recall", unexplored_plots['r'], "Unexplored Recall per Turn"))
 
             # Add correlation plots
             if correlation_plots.get('cogmap_vs_accuracy'):
@@ -467,13 +467,13 @@ class HTMLGenerator:
         cogmap_update_data = per_turn_metrics.get('cogmap_update_per_turn', None)
         cogmap_full_data = per_turn_metrics.get('cogmap_full_per_turn', None)
         self_tracking_data = per_turn_metrics.get('self_tracking_per_turn', None)
-        other_candidates_f1_per_turn = per_turn_metrics.get('other_candidates_f1_per_turn', None)
-        other_candidates_p_per_turn = per_turn_metrics.get('other_candidates_p_per_turn', None)
-        other_candidates_r_per_turn = per_turn_metrics.get('other_candidates_r_per_turn', None)
-        other_candidates_count_per_turn = per_turn_metrics.get('other_candidates_count_per_turn', None)
-        unexplored_f1_per_turn = per_turn_metrics.get('unexplored_f1_per_turn', None)
-        unexplored_p_per_turn = per_turn_metrics.get('unexplored_p_per_turn', None)
-        unexplored_r_per_turn = per_turn_metrics.get('unexplored_r_per_turn', None)
+        # other_candidates_f1_per_turn = per_turn_metrics.get('other_candidates_f1_per_turn', None)
+        # other_candidates_p_per_turn = per_turn_metrics.get('other_candidates_p_per_turn', None)
+        # other_candidates_r_per_turn = per_turn_metrics.get('other_candidates_r_per_turn', None)
+        # other_candidates_count_per_turn = per_turn_metrics.get('other_candidates_count_per_turn', None)
+        # unexplored_f1_per_turn = per_turn_metrics.get('unexplored_f1_per_turn', None)
+        # unexplored_p_per_turn = per_turn_metrics.get('unexplored_p_per_turn', None)
+        # unexplored_r_per_turn = per_turn_metrics.get('unexplored_r_per_turn', None)
 
         # Backward compatibility (older metric shape)
         if cogmap_update_data is None:
@@ -482,12 +482,12 @@ class HTMLGenerator:
             cogmap_full_data = entry['metrics'].get('cogmap', {}).pop('cogmap_full_per_turn', {})
         if self_tracking_data is None:
             self_tracking_data = entry['metrics'].get('cogmap', {}).pop('self_tracking_per_turn', {})
-        if other_candidates_f1_per_turn is None:
-            other_candidates_f1_per_turn = entry['metrics'].get('cogmap', {}).pop('other_candidates_f1_per_turn', None)
-        if other_candidates_count_per_turn is None:
-            other_candidates_count_per_turn = entry['metrics'].get('cogmap', {}).pop('other_candidates_count_per_turn', None)
-        if unexplored_f1_per_turn is None:
-            unexplored_f1_per_turn = entry['metrics'].get('cogmap', {}).pop('unexplored_f1_per_turn', [])
+        # if other_candidates_f1_per_turn is None:
+        #     other_candidates_f1_per_turn = entry['metrics'].get('cogmap', {}).pop('other_candidates_f1_per_turn', None)
+        # if other_candidates_count_per_turn is None:
+        #     other_candidates_count_per_turn = entry['metrics'].get('cogmap', {}).pop('other_candidates_count_per_turn', None)
+        # if unexplored_f1_per_turn is None:
+        #     unexplored_f1_per_turn = entry['metrics'].get('cogmap', {}).pop('unexplored_f1_per_turn', [])
 
         # Generate plots
         infogain_plot = None
@@ -495,7 +495,7 @@ class HTMLGenerator:
         full_plot = None
         self_tracking_plot = None
         other_cand_plots = {}
-        unexplored_plots = {}
+        # unexplored_plots = {}
 
         # Information gain plot
         if infogain_per_turn:
@@ -514,21 +514,21 @@ class HTMLGenerator:
             title = f"{sample_name} - Global (Self-Tracking)"
             self_tracking_plot = create_cogmap_metrics_plot(self_tracking_data, title)
 
-        if isinstance(other_candidates_f1_per_turn, list):
-            other_cand_plots['f1'] = create_scalar_metric_plot(other_candidates_f1_per_turn, title=f"Other-Candidates F1 per Turn - {sample_name}", y_label="F1", ylim=(0.0, 1.0))
-        if isinstance(other_candidates_p_per_turn, list):
-            other_cand_plots['p'] = create_scalar_metric_plot(other_candidates_p_per_turn, title=f"Other-Candidates Precision per Turn - {sample_name}", y_label="Precision", ylim=(0.0, 1.0))
-        if isinstance(other_candidates_r_per_turn, list):
-            other_cand_plots['r'] = create_scalar_metric_plot(other_candidates_r_per_turn, title=f"Other-Candidates Recall per Turn - {sample_name}", y_label="Recall", ylim=(0.0, 1.0))
-        if isinstance(other_candidates_count_per_turn, list):
-            other_cand_plots['count'] = create_scalar_metric_plot(other_candidates_count_per_turn, title=f"Other-Candidates Count Score per Turn - {sample_name}", y_label="Count score", ylim=(0.0, 1.0))
+        # if isinstance(other_candidates_f1_per_turn, list):
+        #     other_cand_plots['f1'] = create_scalar_metric_plot(other_candidates_f1_per_turn, title=f"Other-Candidates F1 per Turn - {sample_name}", y_label="F1", ylim=(0.0, 1.0))
+        # if isinstance(other_candidates_p_per_turn, list):
+        #     other_cand_plots['p'] = create_scalar_metric_plot(other_candidates_p_per_turn, title=f"Other-Candidates Precision per Turn - {sample_name}", y_label="Precision", ylim=(0.0, 1.0))
+        # if isinstance(other_candidates_r_per_turn, list):
+        #     other_cand_plots['r'] = create_scalar_metric_plot(other_candidates_r_per_turn, title=f"Other-Candidates Recall per Turn - {sample_name}", y_label="Recall", ylim=(0.0, 1.0))
+        # if isinstance(other_candidates_count_per_turn, list):
+        #     other_cand_plots['count'] = create_scalar_metric_plot(other_candidates_count_per_turn, title=f"Other-Candidates Count Score per Turn - {sample_name}", y_label="Count score", ylim=(0.0, 1.0))
 
-        if isinstance(unexplored_f1_per_turn, list):
-            unexplored_plots['f1'] = create_scalar_metric_plot(unexplored_f1_per_turn, title=f"Unexplored F1 per Turn - {sample_name}", y_label="F1", ylim=(0.0, 1.0))
-        if isinstance(unexplored_p_per_turn, list):
-            unexplored_plots['p'] = create_scalar_metric_plot(unexplored_p_per_turn, title=f"Unexplored Precision per Turn - {sample_name}", y_label="Precision", ylim=(0.0, 1.0))
-        if isinstance(unexplored_r_per_turn, list):
-            unexplored_plots['r'] = create_scalar_metric_plot(unexplored_r_per_turn, title=f"Unexplored Recall per Turn - {sample_name}", y_label="Recall", ylim=(0.0, 1.0))
+        # if isinstance(unexplored_f1_per_turn, list):
+        #     unexplored_plots['f1'] = create_scalar_metric_plot(unexplored_f1_per_turn, title=f"Unexplored F1 per Turn - {sample_name}", y_label="F1", ylim=(0.0, 1.0))
+        # if isinstance(unexplored_p_per_turn, list):
+        #     unexplored_plots['p'] = create_scalar_metric_plot(unexplored_p_per_turn, title=f"Unexplored Precision per Turn - {sample_name}", y_label="Precision", ylim=(0.0, 1.0))
+        # if isinstance(unexplored_r_per_turn, list):
+        #     unexplored_plots['r'] = create_scalar_metric_plot(unexplored_r_per_turn, title=f"Unexplored Recall per Turn - {sample_name}", y_label="Recall", ylim=(0.0, 1.0))
 
         # Display all plots in horizontal layout (up to 4 plots for samples)
         available_plots = []
@@ -542,22 +542,22 @@ class HTMLGenerator:
             available_plots.append(("Cognitive Map (Self-Tracking)", self_tracking_plot, "Global Self-Tracking Metrics"))
         
         # Other candidates
-        if other_cand_plots.get('f1'):
-            available_plots.append(("Other-Candidates F1", other_cand_plots['f1'], "Other-Candidates F1 per Turn"))
-        if other_cand_plots.get('p'):
-            available_plots.append(("Other-Candidates Precision", other_cand_plots['p'], "Other-Candidates Precision per Turn"))
-        if other_cand_plots.get('r'):
-            available_plots.append(("Other-Candidates Recall", other_cand_plots['r'], "Other-Candidates Recall per Turn"))
-        if other_cand_plots.get('count'):
-            available_plots.append(("Other-Candidates Count", other_cand_plots['count'], "Other-Candidates Count Score per Turn"))
+        # if other_cand_plots.get('f1'):
+        #     available_plots.append(("Other-Candidates F1", other_cand_plots['f1'], "Other-Candidates F1 per Turn"))
+        # if other_cand_plots.get('p'):
+        #     available_plots.append(("Other-Candidates Precision", other_cand_plots['p'], "Other-Candidates Precision per Turn"))
+        # if other_cand_plots.get('r'):
+        #     available_plots.append(("Other-Candidates Recall", other_cand_plots['r'], "Other-Candidates Recall per Turn"))
+        # if other_cand_plots.get('count'):
+        #     available_plots.append(("Other-Candidates Count", other_cand_plots['count'], "Other-Candidates Count Score per Turn"))
             
         # Unexplored
-        if unexplored_plots.get('f1'):
-            available_plots.append(("Unexplored F1", unexplored_plots['f1'], "Unexplored F1 per Turn"))
-        if unexplored_plots.get('p'):
-            available_plots.append(("Unexplored Precision", unexplored_plots['p'], "Unexplored Precision per Turn"))
-        if unexplored_plots.get('r'):
-            available_plots.append(("Unexplored Recall", unexplored_plots['r'], "Unexplored Recall per Turn"))
+        # if unexplored_plots.get('f1'):
+        #     available_plots.append(("Unexplored F1", unexplored_plots['f1'], "Unexplored F1 per Turn"))
+        # if unexplored_plots.get('p'):
+        #     available_plots.append(("Unexplored Precision", unexplored_plots['p'], "Unexplored Precision per Turn"))
+        # if unexplored_plots.get('r'):
+        #     available_plots.append(("Unexplored Recall", unexplored_plots['r'], "Unexplored Recall per Turn"))
 
 
         if available_plots:
@@ -688,12 +688,12 @@ class HTMLGenerator:
         content_escaped = escape(content).replace("\n", "<br>")
         f.write(f"<div class='block {block_class}'><strong>{title}</strong><br>{content_escaped}</div>\n")
 
-    def _render_cogmap_responses(self, f, cogmap_log: Dict, page_idx: int, t_idx: int) -> None:
+    def _render_cogmap_responses(self, f, cogmap_log: Dict, page_idx: int, t_idx: int, env_log: Optional[Dict] = None) -> None:
         """Helper to render cognitive map responses"""
         cogmap_types = [
             ('global', '🗺️ Global Cognitive Map Response'),
             ('local', '🗺️ Local Cognitive Map Response'),
-            ('unexplored', '🔍 Unexplored Areas Response'),
+            # ('unexplored', '🔍 Unexplored Areas Response'),
             ('fog_probe', '🌫️ Fog Probe Response'),
         ]
 
@@ -702,6 +702,35 @@ class HTMLGenerator:
             if data.get('original_response'):
                 response_id = f"cogmap_{map_type}_{page_idx}_{t_idx}"
                 self._render_expandable_block(f, data['original_response'], response_id, title, "cogmap-response")
+
+                # Add Symbolic Map and Fog Probe Image side-by-side
+                if map_type == 'fog_probe':
+                    f.write("<div class='fog-probe-container' style='display: flex; gap: 20px;'>\n")
+                    
+                    # Left: Symbolic Map
+                    symbolic_map = data.get('symbolic_map')
+                    if symbolic_map:
+                        f.write(f"<div class='symbolic-map-box' style='flex: 1;'>")
+                        f.write(f"<strong>🗺️ Symbolic Fog Map</strong>")
+                        f.write(f"<pre class='symbolic-map' style='font-family: monospace; white-space: pre; overflow-x: auto;'>{escape(symbolic_map)}</pre>")
+                        f.write(f"</div>\n")
+                    
+                    # Right: Fog Probe Image
+                    if self.show_images:
+                        msg_imgs = (data.get("message_images") or []) if isinstance(data, dict) else []
+                        if not msg_imgs and env_log:
+                            msg_imgs = env_log.get("message_images") or []
+                        for img_path in msg_imgs:
+                            if not isinstance(img_path, str):
+                                continue
+                            img_src = self._to_rel_if_abs(img_path)
+                            if "top_down_candidates" in img_src:
+                                f.write("<div class='fog-probe-image' style='flex: 1;'>")
+                                f.write(f"<figure><img src='{img_src}' class='room-plot' alt='Fog Probe Candidates' style='max-width: 100%;'><figcaption>Fog Probe Candidates</figcaption></figure>")
+                                f.write("</div>\n")
+                                break  # Only show the first matching image
+                    
+                    f.write("</div>\n") # End fog-probe-container
 
                 # Add JSON display for global and local
                 if map_type == 'global':
@@ -794,49 +823,63 @@ class HTMLGenerator:
                         f.write("</div>\n")  # End json-content
                         f.write("</div>\n")  # End json-container
 
-                elif map_type == 'unexplored' or map_type == 'fog_probe':
+                elif map_type == 'fog_probe':
                     all_candidate_points = data.get('all_candidate_points', [])
                     pred_points = data.get('pred_points', [])
                     correct_points = data.get('correct_points', [])
-                    pred_labels = data.get('pred_json', {}).get('predicted_labels', [])
 
-                    if all_candidate_points or pred_points or correct_points:
+                    if all_candidate_points:
+                        pt_to_label = {str(pt): chr(ord('A') + i) for i, pt in enumerate(all_candidate_points)}
+                        candidates_labels = [chr(ord('A') + i) for i in range(len(all_candidate_points))]
+                        
+                        pred_labels_list = []
+                        if pred_points:
+                            for pt in pred_points:
+                                lbl = pt_to_label.get(str(pt))
+                                if lbl: pred_labels_list.append(lbl)
+                        
+                        correct_labels_list = []
+                        if correct_points:
+                            for pt in correct_points:
+                                lbl = pt_to_label.get(str(pt))
+                                if lbl: correct_labels_list.append(lbl)
+
                         f.write(f"<div class='json-container {map_type}'>\n")
                         f.write("<div class='json-header'>")
                         f.write(f"<strong>🔍 {map_type.replace('_', ' ').title()} JSONs</strong>")
                         f.write("</div>\n")
-                        f.write("<div class='json-content'>\n")
-                        f.write(f"<div class='json-compare {map_type}'>\n")
-
-                        # Left - all candidates
-                        f.write("<div class='json-box left predicted'>\n")
-                        f.write("<strong>📍 Candidates</strong>\n")
-                        f.write("<div class='json-content-inner'>\n")
-                        f.write(f"<pre>{escape(json.dumps(all_candidate_points, indent=2))}</pre>\n")
+                        
+                        # Compact display
+                        f.write("<div class='json-content' style='padding: 5px 10px;'>\n")
+                        f.write(f"<div style='margin-bottom:2px;'><strong>📍 Candidates:</strong> {', '.join(candidates_labels)}</div>\n")
+                        f.write(f"<div style='margin-bottom:2px;'><strong>🤖 Predicted:</strong> {', '.join(pred_labels_list) if pred_labels_list else '(none)'}</div>\n")
+                        f.write(f"<div><strong>🎯 Ground Truth:</strong> {', '.join(correct_labels_list) if correct_labels_list else '(none)'}</div>\n")
                         f.write("</div>\n")
                         f.write("</div>\n")
 
-                        # Middle - predicted
-                        f.write("<div class='json-box middle gt-observed'>\n")
-                        f.write("<strong>🤖 Predicted</strong>\n")
-                        f.write("<div class='json-content-inner'>\n")
-                        if pred_labels:
-                             f.write(f"<div>Labels: {escape(str(pred_labels))}</div>\n")
-                        f.write(f"<pre>{escape(json.dumps(pred_points, indent=2))}</pre>\n")
-                        f.write("</div>\n")
-                        f.write("</div>\n")
-
-                        # Right - correct
-                        f.write("<div class='json-box right gt'>\n")
-                        f.write("<strong>🎯 Ground Truth</strong>\n")
-                        f.write("<div class='json-content-inner'>\n")
-                        f.write(f"<pre>{escape(json.dumps(correct_points, indent=2))}</pre>\n")
-                        f.write("</div>\n")
-                        f.write("</div>\n")
-
-                        f.write("</div>\n")  # End json-compare
-                        f.write("</div>\n")  # End json-content
-                        f.write("</div>\n")  # End json-container
+                # elif map_type == 'unexplored':
+                #     all_candidate_points = data.get('all_candidate_points', [])
+                #     pred_points = data.get('pred_points', [])
+                #     correct_points = data.get('correct_points', [])
+                #
+                #     if all_candidate_points or pred_points or correct_points:
+                #         f.write(f"<div class='json-container {map_type}'>\n")
+                #         f.write("<div class='json-header'>")
+                #         f.write(f"<strong>🔍 {map_type.replace('_', ' ').title()} JSONs</strong>")
+                #         f.write("</div>\n")
+                #         
+                #         # Compact display using coordinates
+                #         f.write("<div class='json-content' style='padding: 5px 10px;'>\n")
+                #         
+                #         candidates_str = str(all_candidate_points) if all_candidate_points else "[]"
+                #         pred_str = str(pred_points) if pred_points else "[]"
+                #         correct_str = str(correct_points) if correct_points else "[]"
+                #         
+                #         f.write(f"<div style='margin-bottom:2px;'><strong>📍 Candidates:</strong> {escape(candidates_str)}</div>\n")
+                #         f.write(f"<div style='margin-bottom:2px;'><strong>🤖 Predicted:</strong> {escape(pred_str)}</div>\n")
+                #         f.write(f"<div><strong>🎯 Ground Truth:</strong> {escape(correct_str)}</div>\n")
+                #         f.write("</div>\n")
+                #         f.write("</div>\n")
 
     def _render_cogmap_metrics(self, f, cogmap_log: Dict) -> None:
         """Helper to render cognitive map metrics"""
@@ -852,9 +895,9 @@ class HTMLGenerator:
             "Global": global_log.get("metrics", {}) if global_log else {},
             "Global (Full)": global_log.get("metrics_full", {}) if global_log else {},
             "Local": local_log.get("metrics", {}) if local_log else {},
-            "Unexplored": unexplored_log.get("metrics", {}) if unexplored_log else {},
+            # "Unexplored": unexplored_log.get("metrics", {}) if unexplored_log else {},
             "Fog Probe": cogmap_log.get("fog_probe", {}).get("metrics", {}) if cogmap_log.get("fog_probe") else {},
-            "Other Candidates": cogmap_log.get("other_candidates_metrics", {}),
+            # "Other Candidates": cogmap_log.get("other_candidates_metrics", {}),
         }
 
         if any(metrics_block.values()):
@@ -947,7 +990,7 @@ class HTMLGenerator:
 
                 # Display cognitive map original responses if available
                 if env_log.get('cogmap_log'):
-                    self._render_cogmap_responses(f, env_log['cogmap_log'], page_idx, t_idx)
+                    self._render_cogmap_responses(f, env_log['cogmap_log'], page_idx, t_idx, env_log=env_log)
                     self._render_cogmap_metrics(f, env_log['cogmap_log'])
 
                 # Display turn metrics
@@ -1019,7 +1062,7 @@ class HTMLGenerator:
                     
                     # self._render_simple_block(f, eval_log.get('assistant_parsed_message', ''), "💬 Assistant Answer", "answer")
                     if eval_log.get('cogmap_log'):
-                        self._render_cogmap_responses(f, eval_log['cogmap_log'], page_idx, t_idx)
+                        self._render_cogmap_responses(f, eval_log['cogmap_log'], page_idx, t_idx, env_log=eval_log)
                         self._render_cogmap_metrics(f, eval_log['cogmap_log'])
                     # Display evaluation results
                     if eval_log.get('evaluation_log'):
@@ -1047,7 +1090,8 @@ class HTMLGenerator:
                         # Only show the question-specific image for vision tasks (builder appends it last).
                         msg_imgs = eval_log.get("message_images") or []
                         if is_passive:
-                            if self._is_vision_eval_task(task_type) and msg_imgs:
+                            # Try to find the image for the question (usually the last one for vision tasks)
+                            if msg_imgs:
                                 img_path = msg_imgs[-1]
                                 if isinstance(img_path, str):
                                     f.write(f"<figure><img src='{img_path}' class='room-plot' alt='Question image'><figcaption>Question Image</figcaption></figure>\n")

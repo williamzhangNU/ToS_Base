@@ -6,6 +6,7 @@ import json
 from ..utils.cogmap.correlation import compute_correlation_metrics
 from ..utils.utils import hash, get_model_name
 from ..utils.room_utils import RoomPlotter
+from ..evaluation.task_types import EvalTaskType
 from .. import (
     Agent,
     Room,
@@ -112,10 +113,24 @@ class HistoryManager:
         if os.path.exists(self.evaluation_path):
             with open(self.evaluation_path, "r") as f:
                 self.evaluation_turn_logs = json.load(f)
+            self.evaluation_turn_logs = self._migrate_task_names(self.evaluation_turn_logs)
+
         if os.path.exists(self.messages_path):
             with open(self.messages_path, "r") as f:
                 self.messages = json.load(f)
                 
+    @staticmethod
+    def _migrate_task_names(logs: Dict[str, Dict]) -> Dict[str, Dict]:
+        """Migrate old task names to new ones using EvalTaskType."""
+        new_logs = {}
+        for task_name, content in logs.items():
+            new_name = EvalTaskType.migrate_legacy_name(task_name)
+            if new_name in new_logs:
+                new_logs[new_name].update(content)
+            else:
+                new_logs[new_name] = content
+        return new_logs
+
     def save_exploration(self) -> None:
         """Save env turn logs to JSON file"""
         if self.exploration_turn_logs:
@@ -189,11 +204,12 @@ class HistoryManager:
     def _attach_room_image(self, turn_log: Dict, filename: str) -> None:
         if turn_log['room_state'] and turn_log['agent_state']:
             img_path = os.path.join(self.output_dir, IMAGES_DIRNAME, filename)
-            RoomPlotter.plot(
-                Room.from_dict(turn_log['room_state']),
-                Agent.from_dict(turn_log['agent_state']),
-                mode='img', save_path=img_path,
-            )
+            if not os.path.exists(img_path):
+                RoomPlotter.plot(
+                    Room.from_dict(turn_log['room_state']),
+                    Agent.from_dict(turn_log['agent_state']),
+                    mode='img', save_path=img_path,
+                )
             turn_log['room_image'] = os.path.relpath(img_path, self.model_path)
         # turn_log.pop('room_state', None)
         # turn_log.pop('agent_state', None)
@@ -201,6 +217,7 @@ class HistoryManager:
     def update_exp_turn_log(self, turn_log: Dict, replay: bool = False) -> None:
         assert turn_log['is_exploration_phase']
         turn_idx = turn_log['turn_number'] - 1
+        self._attach_room_image(turn_log, f"room_turn_{turn_log['turn_number']}.png") # fix the bug caused by cogmap override
         
         if replay:
             # Override mode: replace existing turn log at the given index
@@ -210,7 +227,6 @@ class HistoryManager:
         else:
             # Append mode: add new turn log
             assert not self.has_exploration(turn_idx), f"Turn {turn_log['turn_number']} already exists"
-            self._attach_room_image(turn_log, f"room_turn_{turn_log['turn_number']}.png")
             self.exploration_turn_logs.append(turn_log)
 
     def update_false_belief_turn_log(self, turn_log: Dict) -> None:
@@ -408,6 +424,8 @@ class HistoryManager:
         if os.path.exists(evaluation_file):
             with open(evaluation_file, 'r') as f:
                 evaluation_logs = json.load(f)
+            # Migrate task names
+            evaluation_logs = HistoryManager._migrate_task_names(evaluation_logs)
             # Store each evaluation task separately
             sample_data["evaluation_tasks"] = evaluation_logs if evaluation_logs else {}
 
@@ -495,7 +513,7 @@ class HistoryManager:
             json.dump(state, f, ensure_ascii=False, indent=2)
 
     @staticmethod
-    def load_from_dir(combo_dir: str, eval_override: bool, all_tasks: List = None) -> "HistoryManager":
+    def load_from_dir(combo_dir: str, eval_override: bool, all_tasks: List = None, image_dir: str = None) -> "HistoryManager":
         """Load a HistoryManager using state saved in combo_dir/history_state.json."""
         combo_dir = os.path.abspath(combo_dir)
         state_file = os.path.join(combo_dir, STATE_BASENAME)
@@ -505,6 +523,12 @@ class HistoryManager:
         model_name = get_model_name(s.get("model_config", {}).get("model_name", ""))
         output_dir = combo_dir.split(model_name)[0]
         assert model_name and model_name not in output_dir, f"Failed to infer output_dir from combo_dir: {combo_dir}"
+        
+        saved_image_dir = s.get("image_dir")
+        final_image_dir = saved_image_dir
+        if image_dir is not None and saved_image_dir:
+            final_image_dir = os.path.join(image_dir, os.path.basename(saved_image_dir.rstrip(os.sep)))
+        
         hm = HistoryManager(
             observation_config=s.get("observation_config", {}),
             model_config=s.get("model_config", {}),
@@ -512,7 +536,7 @@ class HistoryManager:
             agent_dict=s.get("agent_dict", {}),
             output_dir=output_dir,
             seed=s.get("seed", 0),
-            image_dir=s.get("image_dir"),
+            image_dir=final_image_dir,
             eval_override=eval_override,
             false_belief_override=False,
             all_tasks=all_tasks,

@@ -34,13 +34,14 @@ from ..utils.cogmap.analysis import (
     get_last_exploration_cogmap,
     avg_nested_dicts,
 )
-from ..utils.cogmap.candidates import calculate_other_candidates_metrics
+# from ..utils.cogmap.candidates import calculate_other_candidates_metrics
 from ..utils.cogmap.unexplored import (
     evaluate_unexplored_predictions,
     parse_unexplored_response,
     aggregate_unexplored_metrics,
     parse_fog_probe_response,
 )
+from ..utils.room_utils import RoomPlotter
 
 
 @dataclass
@@ -103,6 +104,7 @@ class UnexploredCogMapTurnLog(BaseCogMapTurnLog):
     all_candidate_points: List[Tuple[int, int]] = field(default_factory=list)
     pred_points: List[Tuple[int, int]] = field(default_factory=list)
     correct_points: List[Tuple[int, int]] = field(default_factory=list)
+    symbolic_map: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         out = super().to_dict()
@@ -110,6 +112,7 @@ class UnexploredCogMapTurnLog(BaseCogMapTurnLog):
             "all_candidate_points": [[int(x), int(y)] for x, y in (self.all_candidate_points or [])],
             "pred_points": [[int(x), int(y)] for x, y in (self.pred_points or [])],
             "correct_points": [[int(x), int(y)] for x, y in (self.correct_points or [])],
+            "symbolic_map": self.symbolic_map,
         })
         return out
 
@@ -119,7 +122,7 @@ class CognitiveMapTurnLog:
     """Aggregate per-type logs for one turn."""
     global_log: Optional[GlobalCogMapTurnLog] = None
     local_log: Optional[LocalCogMapTurnLog] = None
-    unexplored_log: Optional[UnexploredCogMapTurnLog] = None
+    # unexplored_log: Optional[UnexploredCogMapTurnLog] = None
     fog_probe_log: Optional[UnexploredCogMapTurnLog] = None
     consistency: Optional[ConsistencySummary] = None
 
@@ -129,8 +132,8 @@ class CognitiveMapTurnLog:
             out["global"] = self.global_log.to_dict()
         if self.local_log:
             out["local"] = self.local_log.to_dict()
-        if self.unexplored_log:
-            out["unexplored"] = self.unexplored_log.to_dict()
+        # if self.unexplored_log:
+        #     out["unexplored"] = self.unexplored_log.to_dict()
         if self.fog_probe_log:
             out["fog_probe"] = self.fog_probe_log.to_dict()
         if self.consistency:
@@ -193,58 +196,60 @@ class CognitiveMapManager:
 
         raise ValueError(f"Invalid map type: {t}")
 
-    def evaluate_unexplored(
-        self,
-        assistant_response: str,
-        all_candidate_coords: Optional[List[Tuple[int, int]]],
-        correct_coords: List[Tuple[int, int]],
-    ) -> UnexploredCogMapTurnLog:
-        """Evaluate unexplored area predictions using coordinate selection.
-        
-        The LLM is presented with candidate coordinates and must select those
-        corresponding to unexplored regions.
-        
-        Args:
-            assistant_response: LLM response text containing unexplored predictions
-            correct_coords: List of correct unexplored (x, y) coordinates
-            
-        Returns:
-            UnexploredCogMapTurnLog with evaluation metrics
-        """
-        assert correct_coords and all_candidate_coords, "No correct or candidate coordinates provided"
-        # Parse predicted coordinates
-        pred_coords = parse_unexplored_response(assistant_response)
-        # if not all_candidate_coords or not correct_coords:
-        #     return UnexploredCogMapTurnLog(
-        #         type="unexplored",
-        #         extraction_success=True,
-        #         original_response=assistant_response,
-        #         pred_json={"parsed_from_text": True, "predicted_coords": [[int(x), int(y)] for x, y in pred_coords]},
-        #         all_candidate_points=all_candidate_coords,
-        #         pred_points=pred_coords,
-        #         correct_points=correct_coords,
-        #         metrics=UnexploredMetrics(overall=1.0, precision=1.0, recall=1.0, valid=True),
-        #     )
-
-        # Evaluate predictions
-        metrics = evaluate_unexplored_predictions(pred_coords, correct_coords)
-        
-        return UnexploredCogMapTurnLog(
-            type="unexplored",
-            extraction_success=True,
-            original_response=assistant_response,
-            pred_json={"parsed_from_text": True, "predicted_coords": [[int(x), int(y)] for x, y in pred_coords]},
-            all_candidate_points=all_candidate_coords,
-            pred_points=pred_coords,
-            correct_points=correct_coords,
-            metrics=metrics,
-        )
+    # def evaluate_unexplored(
+    #     self,
+    #     assistant_response: str,
+    #     all_candidate_coords: Optional[List[Tuple[int, int]]],
+    #     correct_coords: List[Tuple[int, int]],
+    # ) -> UnexploredCogMapTurnLog:
+    #     """Evaluate unexplored area predictions using coordinate selection.
+    #     
+    #     The LLM is presented with candidate coordinates and must select those
+    #     corresponding to unexplored regions.
+    #     
+    #     Args:
+    #         assistant_response: LLM response text containing unexplored predictions
+    #         correct_coords: List of correct unexplored (x, y) coordinates
+    #         
+    #     Returns:
+    #         UnexploredCogMapTurnLog with evaluation metrics
+    #     """
+    #     assert correct_coords and all_candidate_coords, "No correct or candidate coordinates provided"
+    #     # Parse predicted coordinates
+    #     pred_coords = parse_unexplored_response(assistant_response)
+    #     # if not all_candidate_coords or not correct_coords:
+    #     #     return UnexploredCogMapTurnLog(
+    #     #         type="unexplored",
+    #     #         extraction_success=True,
+    #     #         original_response=assistant_response,
+    #     #         pred_json={"parsed_from_text": True, "predicted_coords": [[int(x), int(y)] for x, y in pred_coords]},
+    #     #         all_candidate_points=all_candidate_coords,
+    #     #         pred_points=pred_coords,
+    #     #         correct_points=correct_coords,
+    #     #         metrics=UnexploredMetrics(overall=1.0, precision=1.0, recall=1.0, valid=True),
+    #     #     )
+    #
+    #     # Evaluate predictions
+    #     metrics = evaluate_unexplored_predictions(pred_coords, correct_coords)
+    #     
+    #     return UnexploredCogMapTurnLog(
+    #         type="unexplored",
+    #         extraction_success=True,
+    #         original_response=assistant_response,
+    #         pred_json={"parsed_from_text": True, "predicted_coords": [[int(x), int(y)] for x, y in pred_coords]},
+    #         all_candidate_points=all_candidate_coords,
+    #         pred_points=pred_coords,
+    #         correct_points=correct_coords,
+    #         metrics=metrics,
+    #     )
 
     def evaluate_fog_probe(
         self,
         assistant_response: str,
         all_candidate_coords: Optional[List[Tuple[int, int]]],
         correct_coords: List[Tuple[int, int]],
+        gt_room: Optional[Room] = None,
+        gt_agent: Optional[Agent] = None,
     ) -> UnexploredCogMapTurnLog:
         """Evaluate fog-probe predictions where the LLM selects labeled candidates (A-Z).
 
@@ -261,6 +266,11 @@ class CognitiveMapManager:
 
         # Evaluate predictions using the same unexplored evaluator
         metrics = evaluate_unexplored_predictions(pred_coords, correct_coords)
+        
+        # Generate symbolic map for visualization (always useful to have text representation available)
+        symbolic_map = None
+        if gt_room and gt_agent and all_candidate_coords:
+            symbolic_map = RoomPlotter.get_symbolic_map(gt_room, gt_agent, False, all_candidate_coords)
 
         return UnexploredCogMapTurnLog(
             type="fog_probe",
@@ -271,6 +281,7 @@ class CognitiveMapManager:
             pred_points=pred_coords,
             correct_points=[(int(x), int(y)) for x, y in correct_coords],
             metrics=metrics,
+            symbolic_map=symbolic_map,
         )
 
     def _eval_global(self, pred_global_br: BaseRoom,  gt_global_br: BaseRoom, gt_room_state_full: BaseRoom, agent_br: BaseRoom, assistant_response: str, pred_json: Dict) -> GlobalCogMapTurnLog:
@@ -330,13 +341,15 @@ class CognitiveMapManager:
             if not isinstance(resp, str):
                 continue
 
-            if map_type_key == "unexplored":
-                single = self.evaluate_unexplored(resp, all_candidate_coords, all_correct_coords or [])
-            elif map_type_key == "fog_probe":
-                single = self.evaluate_fog_probe(resp, all_candidate_coords, all_correct_coords or [])
-            else:
+            # if map_type_key == "unexplored":
+            #     single = self.evaluate_unexplored(resp, all_candidate_coords, all_correct_coords or [])
+            #     setattr(out, f"{single.type}_log", single)
+            if map_type_key == "fog_probe":
+                single = self.evaluate_fog_probe(resp, all_candidate_coords, all_correct_coords or [], gt_room=gt_room, gt_agent=gt_agent)
+                setattr(out, f"{single.type}_log", single)
+            elif map_type_key != "unexplored":
                 single = self.evaluate_cogmap_type(resp, gt_room, gt_agent, observed_items, map_type_key)
-            setattr(out, f"{single.type}_log", single)
+                setattr(out, f"{single.type}_log", single)
         # Consistency fields per turn
         summary = ConsistencySummary()
         if (
@@ -378,10 +391,10 @@ class CognitiveMapManager:
             update_turn = avg_nested_dicts([{'cogmap_update_per_turn': d.get('cogmap_update_per_turn') or {}} for d in per_turn_list]).get('cogmap_update_per_turn', {})
             full_turn = avg_nested_dicts([{'cogmap_full_per_turn': d.get('cogmap_full_per_turn') or {}} for d in per_turn_list]).get('cogmap_full_per_turn', {})
             self_tracking_turn = avg_nested_dicts([{'self_tracking_per_turn': d.get('self_tracking_per_turn') or {}} for d in per_turn_list]).get('self_tracking_per_turn', {})
-            other_candidates_f1_turn = avg_nested_dicts([{'other_candidates_f1_per_turn': d.get('other_candidates_f1_per_turn') or []} for d in per_turn_list]).get('other_candidates_f1_per_turn', [])
-            other_candidates_p_turn = avg_nested_dicts([{'other_candidates_p_per_turn': d.get('other_candidates_p_per_turn') or []} for d in per_turn_list]).get('other_candidates_p_per_turn', [])
-            other_candidates_r_turn = avg_nested_dicts([{'other_candidates_r_per_turn': d.get('other_candidates_r_per_turn') or []} for d in per_turn_list]).get('other_candidates_r_per_turn', [])
-            other_candidates_count_turn = avg_nested_dicts([{'other_candidates_count_per_turn': d.get('other_candidates_count_per_turn') or []} for d in per_turn_list]).get('other_candidates_count_per_turn', [])
+            # other_candidates_f1_turn = avg_nested_dicts([{'other_candidates_f1_per_turn': d.get('other_candidates_f1_per_turn') or []} for d in per_turn_list]).get('other_candidates_f1_per_turn', [])
+            # other_candidates_p_turn = avg_nested_dicts([{'other_candidates_p_per_turn': d.get('other_candidates_p_per_turn') or []} for d in per_turn_list]).get('other_candidates_p_per_turn', [])
+            # other_candidates_r_turn = avg_nested_dicts([{'other_candidates_r_per_turn': d.get('other_candidates_r_per_turn') or []} for d in per_turn_list]).get('other_candidates_r_per_turn', [])
+            # other_candidates_count_turn = avg_nested_dicts([{'other_candidates_count_per_turn': d.get('other_candidates_count_per_turn') or []} for d in per_turn_list]).get('other_candidates_count_per_turn', [])
             unexplored_f1_turn = avg_nested_dicts([{'unexplored_f1_per_turn': d.get('unexplored_f1_per_turn') or []} for d in per_turn_list]).get('unexplored_f1_per_turn', [])
             unexplored_p_turn = avg_nested_dicts([{'unexplored_p_per_turn': d.get('unexplored_p_per_turn') or []} for d in per_turn_list]).get('unexplored_p_per_turn', [])
             unexplored_r_turn = avg_nested_dicts([{'unexplored_r_per_turn': d.get('unexplored_r_per_turn') or []} for d in per_turn_list]).get('unexplored_r_per_turn', [])
@@ -390,10 +403,10 @@ class CognitiveMapManager:
                 'cogmap_update_per_turn': update_turn,
                 'cogmap_full_per_turn': full_turn,
                 'self_tracking_per_turn': self_tracking_turn,
-                'other_candidates_f1_per_turn': other_candidates_f1_turn,
-                'other_candidates_p_per_turn': other_candidates_p_turn,
-                'other_candidates_r_per_turn': other_candidates_r_turn,
-                'other_candidates_count_per_turn': other_candidates_count_turn,
+                # 'other_candidates_f1_per_turn': other_candidates_f1_turn,
+                # 'other_candidates_p_per_turn': other_candidates_p_turn,
+                # 'other_candidates_r_per_turn': other_candidates_r_turn,
+                # 'other_candidates_count_per_turn': other_candidates_count_turn,
                 'unexplored_f1_per_turn': unexplored_f1_turn,
                 'unexplored_p_per_turn': unexplored_p_turn,
                 'unexplored_r_per_turn': unexplored_r_turn,
@@ -482,29 +495,29 @@ class CognitiveMapManager:
 
         # Per-turn global metrics (list)
         per_turn_update, per_turn_full, per_turn_self_tracking = CognitiveMapManager.compute_per_turn_global_metrics(cog_logs)
-        other_f1, other_p, other_r, other_count = calculate_other_candidates_metrics(env_data)
+        # other_f1, other_p, other_r, other_count = calculate_other_candidates_metrics(env_data)
         
-        # Inject other candidate metrics back into cog_logs for visualization
-        for i, cl in enumerate(cog_logs):
-            if i < len(other_f1):
-                cl['other_candidates_metrics'] = {
-                    'f1': float(other_f1[i]),
-                    'precision': float(other_p[i]),
-                    'recall': float(other_r[i]),
-                    'count_score': float(other_count[i]),
-                }
+        # # Inject other candidate metrics back into cog_logs for visualization
+        # for i, cl in enumerate(cog_logs):
+        #     if i < len(other_f1):
+        #         cl['other_candidates_metrics'] = {
+        #             'f1': float(other_f1[i]),
+        #             'precision': float(other_p[i]),
+        #             'recall': float(other_r[i]),
+        #             'count_score': float(other_count[i]),
+        #         }
 
-        # Unexplored: keep per-turn F1 for plotting, but aggregate by points (not turn-average).
+        # Unexplored: keep per_turn F1 for plotting, but aggregate by points (not turn-average).
         unexp_f1_per_turn, unexp_p_per_turn, unexp_r_per_turn, unexp_f1_avg, unexp_p_avg, unexp_r_avg, unexp_distance_hit_corr = aggregate_unexplored_metrics(cog_logs, exp_logs)
 
         def _avg_list(vals: List[Optional[float]]) -> float | None:
             xs = [float(v) for v in (vals or []) if isinstance(v, (int, float))]
             return float(np.mean(xs)) if xs else None
 
-        other_f1_avg = _avg_list(other_f1)
-        other_p_avg = _avg_list(other_p)
-        other_r_avg = _avg_list(other_r)
-        other_count_avg = _avg_list(other_count)
+        # other_f1_avg = _avg_list(other_f1)
+        # other_p_avg = _avg_list(other_p)
+        # other_r_avg = _avg_list(other_r)
+        # other_count_avg = _avg_list(other_count)
 
         if exp_type == 'passive':
             return {
@@ -519,10 +532,10 @@ class CognitiveMapManager:
             'cogmap_update_per_turn': per_turn_update,
             'cogmap_full_per_turn': per_turn_full,
             'self_tracking_per_turn': per_turn_self_tracking,
-            'other_candidates_f1_per_turn': other_f1,
-            'other_candidates_p_per_turn': other_p,
-            'other_candidates_r_per_turn': other_r,
-            'other_candidates_count_per_turn': other_count,
+            # 'other_candidates_f1_per_turn': other_f1,
+            # 'other_candidates_p_per_turn': other_p,
+            # 'other_candidates_r_per_turn': other_r,
+            # 'other_candidates_count_per_turn': other_count,
             'unexplored_f1_per_turn': unexp_f1_per_turn,
             'unexplored_p_per_turn': unexp_p_per_turn,
             'unexplored_r_per_turn': unexp_r_per_turn,
@@ -533,12 +546,12 @@ class CognitiveMapManager:
                 'error': error,
                 'correctness': correctness,
                 'consistency': consistency,
-                'other_candidates': {
-                    'f1_avg': other_f1_avg,
-                    'precision_avg': other_p_avg,
-                    'recall_avg': other_r_avg,
-                    'count_score_avg': other_count_avg,
-                },
+                # 'other_candidates': {
+                #     'f1_avg': other_f1_avg,
+                #     'precision_avg': other_p_avg,
+                #     'recall_avg': other_r_avg,
+                #     'count_score_avg': other_count_avg,
+                # },
                 'unexplored': {
                     'f1_avg': unexp_f1_avg,
                     'precision_avg': unexp_p_avg,
@@ -951,11 +964,11 @@ def test_evaluate_cogmaps():
     cogmap_log = turn_log.get('cogmap_log', {})
 
     # Extract original responses from each cogmap type'global', 'local', 
-    for map_type in ['unexplored']:
-        if map_type in cogmap_log and isinstance(cogmap_log[map_type], dict):
-            original_response = cogmap_log[map_type].get('original_response', '')
-            if original_response:
-                responses_by_type[map_type] = original_response
+    # for map_type in ['unexplored']:
+    #     if map_type in cogmap_log and isinstance(cogmap_log[map_type], dict):
+    #         original_response = cogmap_log[map_type].get('original_response', '')
+    #         if original_response:
+    #             responses_by_type[map_type] = original_response
 
 
     print(f"\n📋 Constructing gt_room and gt_agent from turn data...")

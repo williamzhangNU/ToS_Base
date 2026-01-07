@@ -14,60 +14,6 @@ import math
 from .types import UnexploredMetrics
 
 
-def generate_labeled_points(
-    unexplored_regions: List[Set[Tuple[int, int]]],
-    explored_positions: Set[Tuple[int, int]],
-    num_distractors: Optional[int] = None,
-    seed: Optional[int] = None,
-) -> Tuple[List[Tuple[int, Tuple[int, int], bool]], List[int]]:
-    """Generate labeled points: one representative per unexplored region + distractor points.
-    
-    Args:
-        unexplored_regions: List of connected unexplored region sets
-        explored_positions: Set of already explored positions (for selecting distractors)
-        num_distractors: Number of distractor points (defaults to same as number of regions)
-        seed: Random seed for reproducibility
-        
-    Returns:
-        Tuple of:
-        - List of (label, (x, y), is_unexplored) tuples, randomly shuffled
-        - List of correct labels (unexplored region labels)
-    """
-    if seed is not None:
-        random.seed(seed)
-    
-    if num_distractors is None:
-        num_distractors = len(unexplored_regions)
-    
-    labeled_points: List[Tuple[int, Tuple[int, int], bool]] = []
-    correct_labels: List[int] = []
-    
-    # Select one point from each unexplored region
-    for i, region in enumerate(unexplored_regions):
-        label = i + 1  # Labels start from 1
-        point = random.choice(list(region))
-        labeled_points.append((label, point, True))
-        correct_labels.append(label)
-    
-    # Select distractor points from explored positions
-    if explored_positions and num_distractors > 0:
-        available_distractors = list(explored_positions)
-        if len(available_distractors) > num_distractors:
-            distractor_points = random.sample(available_distractors, num_distractors)
-        else:
-            distractor_points = available_distractors
-        
-        start_label = len(unexplored_regions) + 1
-        for i, point in enumerate(distractor_points):
-            label = start_label + i
-            labeled_points.append((label, point, False))
-    
-    # Shuffle to randomize order
-    random.shuffle(labeled_points)
-    
-    return labeled_points, correct_labels
-
-
 def compute_unexplored_regions(
     unexplored_positions: Set[Tuple[int, int]],
 ) -> List[Set[Tuple[int, int]]]:
@@ -460,7 +406,6 @@ def aggregate_unexplored_metrics(
 
 __all__ = [
     'compute_unexplored_regions',
-    'generate_labeled_points',
     'evaluate_unexplored_predictions',
     'parse_unexplored_response',
     'parse_fog_probe_response',
