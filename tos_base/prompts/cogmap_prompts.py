@@ -89,8 +89,6 @@ def get_cogmap_prompt(map_type: str, enable_think: bool = True, all_candidate_co
         return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_GLOBAL_ONLY}\n\n{fmt}"
     if t == "local":
         return f"{BASE_COGMAP_PROMPT}\n\n{COGMAP_INSTRUCTION_LOCAL_ONLY}\n\n{fmt}"
-    # if t == "unexplored":
-    #     return get_unexplored_prompt(enable_think, all_candidate_coords)
     if t == "fog_probe":
         return get_fog_probe_prompt(enable_think, use_vision, room, agent, all_candidate_coords)
     # default to global
@@ -148,38 +146,3 @@ def get_fog_probe_prompt(enable_think, use_vision, room, agent, all_candidate_co
     fmt = _cogmap_format_rules(enable_think)
     return f"{instruction}\n\n{fmt}"
 
-# --- Unexplored Areas Prompt ---
-# UNEXPLORED_INSTRUCTION = """\
-# ### Unexplored Areas
-# Select ALL coordinates that correspond to points in **unexplored/unobserved** regions.
-# {candidate_coords_str}
-# ### Rules
-# - Coordinates are in GLOBAL coordinates (relative to your starting position ([0,0]) and orientation (north))
-# - Output only the selected coordinates in the same format
-# - Separate with semicolons
-#
-# Example:
-# ```json
-# {{
-#     "unexplored": "(5, 3); (2, 1); (10, 2)"
-# }}
-# ```
-# """
-
-# def get_unexplored_prompt(enable_think: bool = True, all_candidate_coords: Optional[List[Tuple[int, int]]] = None) -> str:
-#     """Return the unexplored areas prompt with format rules.
-#     
-#     Args:
-#         enable_think: Whether to include thinking section
-#         all_candidate_coords: List of all candidate (x, y) coordinates
-#     """
-#     # Format all coordinates
-#     if all_candidate_coords:
-#         coord_strs = [f"({x}, {y})" for x, y in all_candidate_coords]
-#         candidate_coords_str = '; '.join(coord_strs)
-#     else:
-#         raise ValueError("all_candidate_coords must be provided for unexplored prompt.")
-#     
-#     instruction = UNEXPLORED_INSTRUCTION.format(candidate_coords_str=candidate_coords_str)
-#     fmt = _cogmap_format_rules(enable_think)
-#     return f"{instruction}\n\n{fmt}"

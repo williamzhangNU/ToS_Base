@@ -58,7 +58,6 @@ class HistoryManager:
         if observation_config['exp_type'] == 'passive':
             self.output_dir = os.path.join(self.output_dir, observation_config["proxy_agent"])
         self.model_config_path = os.path.join(self.model_path, CONFIG_BASENAME)
-        self.model_config_path = os.path.join(self.model_path, CONFIG_BASENAME)
         self.exploration_path = os.path.join(self.output_dir, EXPLORATION_LOG_BASENAME)
         self.false_belief_path = os.path.join(self.output_dir, FALSE_BELIEF_LOG_BASENAME)
         self.evaluation_path = os.path.join(self.output_dir, EVALUATION_LOG_BASENAME)
@@ -211,8 +210,6 @@ class HistoryManager:
                     mode='img', save_path=img_path,
                 )
             turn_log['room_image'] = os.path.relpath(img_path, self.model_path)
-        # turn_log.pop('room_state', None)
-        # turn_log.pop('agent_state', None)
 
     def update_exp_turn_log(self, turn_log: Dict, replay: bool = False) -> None:
         assert turn_log['is_exploration_phase']
@@ -547,7 +544,3 @@ class HistoryManager:
     # -------- Accessors for builder/inference --------
     def get_enable_think(self) -> bool:
         return bool(self.enable_think)
-
-    # def get_observation_config(self) -> Dict:
-    #     with open(self.state_path, "r") as f:
-    #         return (json.load(f) or {}).get("observation_config", {})
