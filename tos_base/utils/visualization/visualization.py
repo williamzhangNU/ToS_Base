@@ -203,7 +203,10 @@ class HTMLGenerator:
                 # New consistency metrics
                 pos_up = per_turn.get("position_update_per_turn", cogmap_group.pop("position_update_per_turn", []))
                 fac_up = per_turn.get("facing_update_per_turn", cogmap_group.pop("facing_update_per_turn", []))
-                stab = per_turn.get("stability_per_turn", cogmap_group.pop("stability_per_turn", []))
+                pos_stab = per_turn.get(
+                    "position_stability_per_turn",
+                    per_turn.get("stability_per_turn", cogmap_group.pop("stability_per_turn", [])),
+                )
                 fac_stab = per_turn.get("facing_stability_per_turn", cogmap_group.pop("facing_stability_per_turn", []))
 
                 # Only accept new shape (metric -> list)
@@ -238,8 +241,8 @@ class HTMLGenerator:
                     consistency_plots['pos_up'] = create_scalar_metric_plot(pos_up, title=f"Position Update - {gname}", y_label="Score", ylim=(0.0, 1.0))
                 if isinstance(fac_up, list):
                     consistency_plots['fac_up'] = create_scalar_metric_plot(fac_up, title=f"Facing Update - {gname}", y_label="Score", ylim=(0.0, 1.0))
-                if isinstance(stab, list):
-                    consistency_plots['stab'] = create_scalar_metric_plot(stab, title=f"Stability - {gname}", y_label="Score", ylim=(0.0, 1.0))
+                if isinstance(pos_stab, list):
+                    consistency_plots['pos_stab'] = create_scalar_metric_plot(pos_stab, title=f"Position Stability - {gname}", y_label="Score", ylim=(0.0, 1.0))
                 if isinstance(fac_stab, list):
                     consistency_plots['fac_stab'] = create_scalar_metric_plot(fac_stab, title=f"Facing Stability - {gname}", y_label="Score", ylim=(0.0, 1.0))
 
@@ -356,8 +359,8 @@ class HTMLGenerator:
                 available_plots.append(("Position Update", consistency_plots['pos_up'], "Position Update per Turn"))
             if consistency_plots.get('fac_up'):
                 available_plots.append(("Facing Update", consistency_plots['fac_up'], "Facing Update per Turn"))
-            if consistency_plots.get('stab'):
-                available_plots.append(("Stability", consistency_plots['stab'], "Stability per Turn"))
+            if consistency_plots.get('pos_stab'):
+                available_plots.append(("Position Stability", consistency_plots['pos_stab'], "Position Stability per Turn"))
             if consistency_plots.get('fac_stab'):
                 available_plots.append(("Facing Stability", consistency_plots['fac_stab'], "Facing Stability per Turn"))
 
@@ -478,7 +481,9 @@ class HTMLGenerator:
         fog_probe_r_per_turn = per_turn_metrics.get('fog_probe_r_per_turn', None)
         pos_up_per_turn = per_turn_metrics.get('position_update_per_turn', None)
         fac_up_per_turn = per_turn_metrics.get('facing_update_per_turn', None)
-        stab_per_turn = per_turn_metrics.get('stability_per_turn', None)
+        pos_stab_per_turn = per_turn_metrics.get('position_stability_per_turn', None)
+        if pos_stab_per_turn is None:
+            pos_stab_per_turn = per_turn_metrics.get('stability_per_turn', None)  # backward compat
         fac_stab_per_turn = per_turn_metrics.get('facing_stability_per_turn', None)
 
         # Backward compatibility (older metric shape)
@@ -527,8 +532,8 @@ class HTMLGenerator:
             consistency_plots['pos_up'] = create_scalar_metric_plot(pos_up_per_turn, title=f"Position Update - {sample_name}", y_label="Score", ylim=(0.0, 1.0))
         if isinstance(fac_up_per_turn, list):
             consistency_plots['fac_up'] = create_scalar_metric_plot(fac_up_per_turn, title=f"Facing Update - {sample_name}", y_label="Score", ylim=(0.0, 1.0))
-        if isinstance(stab_per_turn, list):
-            consistency_plots['stab'] = create_scalar_metric_plot(stab_per_turn, title=f"Stability - {sample_name}", y_label="Score", ylim=(0.0, 1.0))
+        if isinstance(pos_stab_per_turn, list):
+            consistency_plots['pos_stab'] = create_scalar_metric_plot(pos_stab_per_turn, title=f"Position Stability - {sample_name}", y_label="Score", ylim=(0.0, 1.0))
         if isinstance(fac_stab_per_turn, list):
             consistency_plots['fac_stab'] = create_scalar_metric_plot(fac_stab_per_turn, title=f"Facing Stability - {sample_name}", y_label="Score", ylim=(0.0, 1.0))
 
@@ -555,8 +560,8 @@ class HTMLGenerator:
             available_plots.append(("Position Update", consistency_plots['pos_up'], "Position Update per Turn"))
         if consistency_plots.get('fac_up'):
             available_plots.append(("Facing Update", consistency_plots['fac_up'], "Facing Update per Turn"))
-        if consistency_plots.get('stab'):
-            available_plots.append(("Stability", consistency_plots['stab'], "Stability per Turn"))
+        if consistency_plots.get('pos_stab'):
+            available_plots.append(("Position Stability", consistency_plots['pos_stab'], "Position Stability per Turn"))
         if consistency_plots.get('fac_stab'):
             available_plots.append(("Facing Stability", consistency_plots['fac_stab'], "Facing Stability per Turn"))
 

@@ -368,7 +368,7 @@ class CognitiveMapManager:
             
             position_update_turn = avg_nested_dicts([{'position_update_per_turn': d.get('position_update_per_turn') or []} for d in per_turn_list]).get('position_update_per_turn', [])
             facing_update_turn = avg_nested_dicts([{'facing_update_per_turn': d.get('facing_update_per_turn') or []} for d in per_turn_list]).get('facing_update_per_turn', [])
-            stability_turn = avg_nested_dicts([{'stability_per_turn': d.get('stability_per_turn') or []} for d in per_turn_list]).get('stability_per_turn', [])
+            position_stability_turn = avg_nested_dicts([{'position_stability_per_turn': (d.get('position_stability_per_turn') or d.get('stability_per_turn') or [])} for d in per_turn_list]).get('position_stability_per_turn', [])
             facing_stability_turn = avg_nested_dicts([{'facing_stability_per_turn': d.get('facing_stability_per_turn') or []} for d in per_turn_list]).get('facing_stability_per_turn', [])
 
             per_turn_metrics = {
@@ -380,7 +380,7 @@ class CognitiveMapManager:
                 "fog_probe_r_per_turn": fog_probe_r_turn,
                 "position_update_per_turn": position_update_turn,
                 "facing_update_per_turn": facing_update_turn,
-                "stability_per_turn": stability_turn,
+                "position_stability_per_turn": position_stability_turn,
                 "facing_stability_per_turn": facing_stability_turn,
             }
             
@@ -491,11 +491,13 @@ class CognitiveMapManager:
         # Compute stability metrics (now returns dictionary of lists)
         stab_res = stability(env_data, threshold=1)
         
+        pos_stab = stab_res.get('position_stability')
+
         consistency = {
             'local_vs_global_avg': _d(_avg_consistency_lvsg(cog_logs)),
             'position_update_avg': avg_float_list_skip_none(stab_res['position_update']),
             'facing_update_avg': avg_float_list_skip_none(stab_res['facing_update']),
-            'stability_avg': avg_float_list_skip_none(stab_res['stability']),
+            'position_stability_avg': avg_float_list_skip_none(pos_stab),
             'facing_stability_avg': avg_float_list_skip_none(stab_res['facing_stability']),
         }
 
@@ -549,7 +551,7 @@ class CognitiveMapManager:
             'fog_probe_r_per_turn': fog_probe_r_per_turn,
             'position_update_per_turn': [None] + stab_res['position_update'],
             'facing_update_per_turn': [None] + stab_res['facing_update'],
-            'stability_per_turn': [None] + stab_res['stability'],
+            'position_stability_per_turn': [None] + (pos_stab or []),
             'facing_stability_per_turn': [None] + stab_res['facing_stability'],
         }
 
