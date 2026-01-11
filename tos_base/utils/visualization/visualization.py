@@ -235,6 +235,27 @@ class HTMLGenerator:
                     fog_probe_plots['p'] = create_scalar_metric_plot(fog_probe_p, title=f"Fog Probe Precision per Turn - {gname}", y_label="Precision", ylim=(0.0, 1.0))
                 if isinstance(fog_probe_r, list):
                     fog_probe_plots['r'] = create_scalar_metric_plot(fog_probe_r, title=f"Fog Probe Recall per Turn - {gname}", y_label="Recall", ylim=(0.0, 1.0))
+                
+                # False Belief Cogmap plots
+                cogmap_fb_plots = {}
+                cogmap_fb_data = cogmap_group.get('cogmap_fb', {}) if isinstance(cogmap_group, dict) else {}
+                cogmap_fb_per_turn = cogmap_fb_data.get('per_turn_metrics', {}) if isinstance(cogmap_fb_data, dict) else {}
+                
+                fb_full_data = cogmap_fb_per_turn.get('full_per_turn', {})
+                fb_changed_data = cogmap_fb_per_turn.get('changed_objects_per_turn', {})
+                fb_unchanged_data = cogmap_fb_per_turn.get('unchanged_objects_per_turn', {})
+                
+                if fb_full_data and any(fb_full_data.values()):
+                    title = f"{gname} - False Belief (Full)"
+                    cogmap_fb_plots['full'] = create_cogmap_metrics_plot(fb_full_data, title)
+                
+                if fb_changed_data and any(fb_changed_data.values()):
+                    title = f"{gname} - False Belief (Changed Objects)"
+                    cogmap_fb_plots['changed'] = create_cogmap_metrics_plot(fb_changed_data, title)
+                
+                if fb_unchanged_data and any(fb_unchanged_data.values()):
+                    title = f"{gname} - False Belief (Unchanged Objects)"
+                    cogmap_fb_plots['unchanged'] = create_cogmap_metrics_plot(fb_unchanged_data, title)
 
                 consistency_plots = {}
                 if isinstance(pos_up, list):
@@ -354,6 +375,23 @@ class HTMLGenerator:
                 available_plots.append(("Fog Probe Precision", fog_probe_plots['p'], "Fog Probe Precision per Turn"))
             if fog_probe_plots.get('r'):
                 available_plots.append(("Fog Probe Recall", fog_probe_plots['r'], "Fog Probe Recall per Turn"))
+            
+            # False Belief Cogmap
+            if cogmap_fb_plots.get('full'):
+                available_plots.append(("False Belief Cogmap (Full)", cogmap_fb_plots['full'], "False Belief Full Metrics"))
+            if cogmap_fb_plots.get('changed'):
+                available_plots.append(("False Belief Cogmap (Changed)", cogmap_fb_plots['changed'], "False Belief Changed Objects"))
+            if cogmap_fb_plots.get('unchanged'):
+                available_plots.append(("False Belief Cogmap (Unchanged)", cogmap_fb_plots['unchanged'], "False Belief Unchanged Objects"))
+
+            if consistency_plots.get('pos_up'):
+                available_plots.append(("Position Update", consistency_plots['pos_up'], "Position Update per Turn"))
+            if consistency_plots.get('fac_up'):
+                available_plots.append(("Facing Update", consistency_plots['fac_up'], "Facing Update per Turn"))
+            if consistency_plots.get('pos_stab'):
+                available_plots.append(("Position Stability", consistency_plots['pos_stab'], "Position Stability per Turn"))
+            if consistency_plots.get('fac_stab'):
+                available_plots.append(("Facing Stability", consistency_plots['fac_stab'], "Facing Stability per Turn"))
 
             if consistency_plots.get('pos_up'):
                 available_plots.append(("Position Update", consistency_plots['pos_up'], "Position Update per Turn"))
@@ -527,6 +565,29 @@ class HTMLGenerator:
         if isinstance(fog_probe_r_per_turn, list):
             fog_probe_plots['r'] = create_scalar_metric_plot(fog_probe_r_per_turn, title=f"Fog Probe Recall per Turn - {sample_name}", y_label="Recall", ylim=(0.0, 1.0))
 
+        # Extract cogmap_fb per-turn metrics if available
+        cogmap_fb_metrics = entry['metrics'].get('cogmap_fb', {}) or {}
+        cogmap_fb_per_turn = cogmap_fb_metrics.get('per_turn_metrics', {}) if isinstance(cogmap_fb_metrics, dict) else {}
+        
+        cogmap_fb_full_data = cogmap_fb_per_turn.get('full_per_turn', None)
+        cogmap_fb_changed_data = cogmap_fb_per_turn.get('changed_objects_per_turn', None)
+        cogmap_fb_unchanged_data = cogmap_fb_per_turn.get('unchanged_objects_per_turn', None)
+        
+        cogmap_fb_plots = {}
+        
+        # Generate cogmap_fb plots
+        if cogmap_fb_full_data and any(cogmap_fb_full_data.values()):
+            title = f"{sample_name} - False Belief (Full)"
+            cogmap_fb_plots['full'] = create_cogmap_metrics_plot(cogmap_fb_full_data, title)
+        
+        if cogmap_fb_changed_data and any(cogmap_fb_changed_data.values()):
+            title = f"{sample_name} - False Belief (Changed Objects)"
+            cogmap_fb_plots['changed'] = create_cogmap_metrics_plot(cogmap_fb_changed_data, title)
+        
+        if cogmap_fb_unchanged_data and any(cogmap_fb_unchanged_data.values()):
+            title = f"{sample_name} - False Belief (Unchanged Objects)"
+            cogmap_fb_plots['unchanged'] = create_cogmap_metrics_plot(cogmap_fb_unchanged_data, title)
+
         consistency_plots = {}
         if isinstance(pos_up_per_turn, list):
             consistency_plots['pos_up'] = create_scalar_metric_plot(pos_up_per_turn, title=f"Position Update - {sample_name}", y_label="Score", ylim=(0.0, 1.0))
@@ -555,6 +616,23 @@ class HTMLGenerator:
             available_plots.append(("Fog Probe Precision", fog_probe_plots['p'], "Fog Probe Precision per Turn"))
         if fog_probe_plots.get('r'):
             available_plots.append(("Fog Probe Recall", fog_probe_plots['r'], "Fog Probe Recall per Turn"))
+        
+        # Cogmap FB plots
+        if cogmap_fb_plots.get('full'):
+            available_plots.append(("False Belief Cogmap (Full)", cogmap_fb_plots['full'], "False Belief Full Metrics"))
+        if cogmap_fb_plots.get('changed'):
+            available_plots.append(("False Belief Cogmap (Changed)", cogmap_fb_plots['changed'], "False Belief Changed Objects Metrics"))
+        if cogmap_fb_plots.get('unchanged'):
+            available_plots.append(("False Belief Cogmap (Unchanged)", cogmap_fb_plots['unchanged'], "False Belief Unchanged Objects Metrics"))
+
+        if consistency_plots.get('pos_up'):
+            available_plots.append(("Position Update", consistency_plots['pos_up'], "Position Update per Turn"))
+        if consistency_plots.get('fac_up'):
+            available_plots.append(("Facing Update", consistency_plots['fac_up'], "Facing Update per Turn"))
+        if consistency_plots.get('pos_stab'):
+            available_plots.append(("Position Stability", consistency_plots['pos_stab'], "Position Stability per Turn"))
+        if consistency_plots.get('fac_stab'):
+            available_plots.append(("Facing Stability", consistency_plots['fac_stab'], "Facing Stability per Turn"))
 
         if consistency_plots.get('pos_up'):
             available_plots.append(("Position Update", consistency_plots['pos_up'], "Position Update per Turn"))

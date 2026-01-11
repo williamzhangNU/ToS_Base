@@ -384,6 +384,23 @@ class CognitiveMapManager:
                 "facing_stability_per_turn": facing_stability_turn,
             }
             
+            # Aggregate cogmap_fb metrics if available
+            cogmap_fb_list = [m.get('cogmap_fb') or {} for m in pre_list if isinstance(m, dict) and m.get('cogmap_fb')]
+            cogmap_fb_aggregated = {}
+            if cogmap_fb_list:
+                fb_per_turn_list = [fb.get('per_turn_metrics') or {} for fb in cogmap_fb_list]
+                fb_full_turn = avg_nested_dicts([{'full_per_turn': d.get('full_per_turn') or {}} for d in fb_per_turn_list]).get('full_per_turn', {})
+                fb_changed_turn = avg_nested_dicts([{'changed_objects_per_turn': d.get('changed_objects_per_turn') or {}} for d in fb_per_turn_list]).get('changed_objects_per_turn', {})
+                fb_unchanged_turn = avg_nested_dicts([{'unchanged_objects_per_turn': d.get('unchanged_objects_per_turn') or {}} for d in fb_per_turn_list]).get('unchanged_objects_per_turn', {})
+                
+                cogmap_fb_aggregated = {
+                    'per_turn_metrics': {
+                        'full_per_turn': fb_full_turn,
+                        'changed_objects_per_turn': fb_changed_turn,
+                        'unchanged_objects_per_turn': fb_unchanged_turn,
+                    }
+                }
+            
             # Separate fog_probe
             fog_probe = exploration.pop('fog_probe', {}) if exploration else {}
             
@@ -393,12 +410,18 @@ class CognitiveMapManager:
             if fog_probe:
                 fog_probe['n_samples'] = n_fog
 
-            return {
+            result = {
                 "exploration": exploration,
                 "fog_probe": fog_probe,
                 "evaluation": evaluation if evaluation else {"correctness": {}},
                 "per_turn_metrics": per_turn_metrics,
             }
+            
+            # Add cogmap_fb if available
+            if cogmap_fb_aggregated:
+                result["cogmap_fb"] = cogmap_fb_aggregated
+            
+            return result
         if exp_type == "passive":
             exploration = avg_nested_dicts([m.get('exploration') or {} for m in pre_list])
             n_global_full = count_valid(pre_list, ['exploration', 'correctness', 'global_full'])
@@ -555,7 +578,55 @@ class CognitiveMapManager:
             'facing_stability_per_turn': [None] + stab_res['facing_stability'],
         }
 
-        return {
+        # Process false belief cogmap data if available
+        fb_turn_logs = env_data.get('false_belief_turn_logs') or []
+        cogmap_fb_metrics = {}
+        if fb_turn_logs:
+            # Extract cogmap_fb per-turn metrics
+            fb_full_per_turn = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
+            fb_changed_per_turn = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
+            fb_unchanged_per_turn = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
+            
+            for fb_turn in fb_turn_logs:
+                fb_log = fb_turn.get('false_belief_log') or {}
+                cogmap_log = fb_log.get('cogmap_log') or {}
+                
+                # Extract full metrics
+                full_data = cogmap_log.get('full') or {}
+                full_global = full_data.get('global') or {}
+                full_metrics = MapCogMetrics.from_dict(full_global.get('metrics') or {})
+                fb_full_per_turn['dir'].append(float(full_metrics.dir) if full_metrics.valid else None)
+                fb_full_per_turn['facing'].append(float(full_metrics.facing) if full_metrics.valid else None)
+                fb_full_per_turn['pos'].append(float(full_metrics.pos) if full_metrics.valid else None)
+                fb_full_per_turn['overall'].append(float(full_metrics.overall) if full_metrics.valid else None)
+                
+                # Extract changed objects metrics
+                changed_data = cogmap_log.get('changed_objects') or {}
+                changed_global = changed_data.get('global') or {}
+                changed_metrics = MapCogMetrics.from_dict(changed_global.get('metrics') or {})
+                fb_changed_per_turn['dir'].append(float(changed_metrics.dir) if changed_metrics.valid else None)
+                fb_changed_per_turn['facing'].append(float(changed_metrics.facing) if changed_metrics.valid else None)
+                fb_changed_per_turn['pos'].append(float(changed_metrics.pos) if changed_metrics.valid else None)
+                fb_changed_per_turn['overall'].append(float(changed_metrics.overall) if changed_metrics.valid else None)
+                
+                # Extract unchanged objects metrics
+                unchanged_data = cogmap_log.get('unchanged_objects') or {}
+                unchanged_global = unchanged_data.get('global') or {}
+                unchanged_metrics = MapCogMetrics.from_dict(unchanged_global.get('metrics') or {})
+                fb_unchanged_per_turn['dir'].append(float(unchanged_metrics.dir) if unchanged_metrics.valid else None)
+                fb_unchanged_per_turn['facing'].append(float(unchanged_metrics.facing) if unchanged_metrics.valid else None)
+                fb_unchanged_per_turn['pos'].append(float(unchanged_metrics.pos) if unchanged_metrics.valid else None)
+                fb_unchanged_per_turn['overall'].append(float(unchanged_metrics.overall) if unchanged_metrics.valid else None)
+            
+            cogmap_fb_metrics = {
+                'per_turn_metrics': {
+                    'full_per_turn': fb_full_per_turn,
+                    'changed_objects_per_turn': fb_changed_per_turn,
+                    'unchanged_objects_per_turn': fb_unchanged_per_turn,
+                }
+            }
+
+        result = {
             'exploration': {
                 'error': error,
                 'correctness': correctness,
@@ -568,6 +639,12 @@ class CognitiveMapManager:
             },
             'per_turn_metrics': per_turn_metrics,
         }
+        
+        # Add cogmap_fb metrics if available
+        if cogmap_fb_metrics:
+            result['cogmap_fb'] = cogmap_fb_metrics
+        
+        return result
 
     @staticmethod
     def compute_per_turn_global_metrics(cog_logs: List[Dict[str, Any]]) -> Tuple[Dict[str, List[float]], Dict[str, List[float]], Dict[str, List[float]]]:
