@@ -33,6 +33,7 @@ from ..utils.cogmap.types import BaseCogMetrics, MapCogMetrics, ConsistencySumma
 from ..utils.cogmap.analysis import (
     get_last_exploration_cogmap,
     avg_nested_dicts,
+    avg_float_list_skip_none,
 )
 from ..utils.cogmap.unexplored import (
     evaluate_unexplored_predictions,
@@ -364,6 +365,11 @@ class CognitiveMapManager:
             fog_probe_f1_turn = avg_nested_dicts([{'fog_probe_f1_per_turn': d.get('fog_probe_f1_per_turn') or []} for d in per_turn_list]).get('fog_probe_f1_per_turn', [])
             fog_probe_p_turn = avg_nested_dicts([{'fog_probe_p_per_turn': d.get('fog_probe_p_per_turn') or []} for d in per_turn_list]).get('fog_probe_p_per_turn', [])
             fog_probe_r_turn = avg_nested_dicts([{'fog_probe_r_per_turn': d.get('fog_probe_r_per_turn') or []} for d in per_turn_list]).get('fog_probe_r_per_turn', [])
+            
+            position_update_turn = avg_nested_dicts([{'position_update_per_turn': d.get('position_update_per_turn') or []} for d in per_turn_list]).get('position_update_per_turn', [])
+            facing_update_turn = avg_nested_dicts([{'facing_update_per_turn': d.get('facing_update_per_turn') or []} for d in per_turn_list]).get('facing_update_per_turn', [])
+            stability_turn = avg_nested_dicts([{'stability_per_turn': d.get('stability_per_turn') or []} for d in per_turn_list]).get('stability_per_turn', [])
+            facing_stability_turn = avg_nested_dicts([{'facing_stability_per_turn': d.get('facing_stability_per_turn') or []} for d in per_turn_list]).get('facing_stability_per_turn', [])
 
             per_turn_metrics = {
                 'cogmap_update_per_turn': update_turn,
@@ -372,6 +378,10 @@ class CognitiveMapManager:
                 "fog_probe_f1_per_turn": fog_probe_f1_turn,
                 "fog_probe_p_per_turn": fog_probe_p_turn,
                 "fog_probe_r_per_turn": fog_probe_r_turn,
+                "position_update_per_turn": position_update_turn,
+                "facing_update_per_turn": facing_update_turn,
+                "stability_per_turn": stability_turn,
+                "facing_stability_per_turn": facing_stability_turn,
             }
             
             # Separate fog_probe
@@ -478,13 +488,15 @@ class CognitiveMapManager:
                     mats.append(m)
             return MapCogMetrics.average(mats) if mats else MapCogMetrics.invalid()
 
-        # Compute stability metrics (now returns two values: update and stability_check)
-        update_metrics, stability_check_metrics = stability(env_data)
-
+        # Compute stability metrics (now returns dictionary of lists)
+        stab_res = stability(env_data, threshold=1)
+        
         consistency = {
             'local_vs_global_avg': _d(_avg_consistency_lvsg(cog_logs)),
-            'update_avg': float(np.mean(update_metrics)) if update_metrics else None,
-            'stability_avg': _d(MapCogMetrics.average(stability_check_metrics)),
+            'position_update_avg': avg_float_list_skip_none(stab_res['position_update']),
+            'facing_update_avg': avg_float_list_skip_none(stab_res['facing_update']),
+            'stability_avg': avg_float_list_skip_none(stab_res['stability']),
+            'facing_stability_avg': avg_float_list_skip_none(stab_res['facing_stability']),
         }
 
         # Per-turn global metrics (list)
@@ -515,13 +527,9 @@ class CognitiveMapManager:
             if p is not None: fog_probe_p_vals.append(p)
             if r is not None: fog_probe_r_vals.append(r)
 
-        def _avg_list(vals: List[Optional[float]]) -> float | None:
-            xs = [float(v) for v in (vals or []) if isinstance(v, (int, float))]
-            return float(np.mean(xs)) if xs else None
-
-        fog_probe_f1_avg = _avg_list(fog_probe_f1_vals)
-        fog_probe_p_avg = _avg_list(fog_probe_p_vals)
-        fog_probe_r_avg = _avg_list(fog_probe_r_vals)
+        fog_probe_f1_avg = avg_float_list_skip_none(fog_probe_f1_vals)
+        fog_probe_p_avg = avg_float_list_skip_none(fog_probe_p_vals)
+        fog_probe_r_avg = avg_float_list_skip_none(fog_probe_r_vals)
 
         if exp_type == 'passive':
             return {
@@ -539,6 +547,10 @@ class CognitiveMapManager:
             'fog_probe_f1_per_turn': fog_probe_f1_per_turn,
             'fog_probe_p_per_turn': fog_probe_p_per_turn,
             'fog_probe_r_per_turn': fog_probe_r_per_turn,
+            'position_update_per_turn': [None] + stab_res['position_update'],
+            'facing_update_per_turn': [None] + stab_res['facing_update'],
+            'stability_per_turn': [None] + stab_res['stability'],
+            'facing_stability_per_turn': [None] + stab_res['facing_stability'],
         }
 
         return {

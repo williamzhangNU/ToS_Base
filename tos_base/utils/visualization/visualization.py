@@ -199,6 +199,12 @@ class HTMLGenerator:
                 fog_probe_f1 = per_turn.get("fog_probe_f1_per_turn", cogmap_group.pop("fog_probe_f1_per_turn", []))
                 fog_probe_p = per_turn.get("fog_probe_p_per_turn", cogmap_group.pop("fog_probe_p_per_turn", []))
                 fog_probe_r = per_turn.get("fog_probe_r_per_turn", cogmap_group.pop("fog_probe_r_per_turn", []))
+                
+                # New consistency metrics
+                pos_up = per_turn.get("position_update_per_turn", cogmap_group.pop("position_update_per_turn", []))
+                fac_up = per_turn.get("facing_update_per_turn", cogmap_group.pop("facing_update_per_turn", []))
+                stab = per_turn.get("stability_per_turn", cogmap_group.pop("stability_per_turn", []))
+                fac_stab = per_turn.get("facing_stability_per_turn", cogmap_group.pop("facing_stability_per_turn", []))
 
                 # Only accept new shape (metric -> list)
                 global_update = update_data if isinstance(update_data, dict) else {}
@@ -226,6 +232,16 @@ class HTMLGenerator:
                     fog_probe_plots['p'] = create_scalar_metric_plot(fog_probe_p, title=f"Fog Probe Precision per Turn - {gname}", y_label="Precision", ylim=(0.0, 1.0))
                 if isinstance(fog_probe_r, list):
                     fog_probe_plots['r'] = create_scalar_metric_plot(fog_probe_r, title=f"Fog Probe Recall per Turn - {gname}", y_label="Recall", ylim=(0.0, 1.0))
+
+                consistency_plots = {}
+                if isinstance(pos_up, list):
+                    consistency_plots['pos_up'] = create_scalar_metric_plot(pos_up, title=f"Position Update - {gname}", y_label="Score", ylim=(0.0, 1.0))
+                if isinstance(fac_up, list):
+                    consistency_plots['fac_up'] = create_scalar_metric_plot(fac_up, title=f"Facing Update - {gname}", y_label="Score", ylim=(0.0, 1.0))
+                if isinstance(stab, list):
+                    consistency_plots['stab'] = create_scalar_metric_plot(stab, title=f"Stability - {gname}", y_label="Score", ylim=(0.0, 1.0))
+                if isinstance(fac_stab, list):
+                    consistency_plots['fac_stab'] = create_scalar_metric_plot(fac_stab, title=f"Facing Stability - {gname}", y_label="Score", ylim=(0.0, 1.0))
 
 
             # Generate correlation plots
@@ -335,6 +351,15 @@ class HTMLGenerator:
                 available_plots.append(("Fog Probe Precision", fog_probe_plots['p'], "Fog Probe Precision per Turn"))
             if fog_probe_plots.get('r'):
                 available_plots.append(("Fog Probe Recall", fog_probe_plots['r'], "Fog Probe Recall per Turn"))
+
+            if consistency_plots.get('pos_up'):
+                available_plots.append(("Position Update", consistency_plots['pos_up'], "Position Update per Turn"))
+            if consistency_plots.get('fac_up'):
+                available_plots.append(("Facing Update", consistency_plots['fac_up'], "Facing Update per Turn"))
+            if consistency_plots.get('stab'):
+                available_plots.append(("Stability", consistency_plots['stab'], "Stability per Turn"))
+            if consistency_plots.get('fac_stab'):
+                available_plots.append(("Facing Stability", consistency_plots['fac_stab'], "Facing Stability per Turn"))
 
             # Add correlation plots
             if correlation_plots.get('cogmap_vs_accuracy'):
@@ -451,6 +476,10 @@ class HTMLGenerator:
         fog_probe_f1_per_turn = per_turn_metrics.get('fog_probe_f1_per_turn', None)
         fog_probe_p_per_turn = per_turn_metrics.get('fog_probe_p_per_turn', None)
         fog_probe_r_per_turn = per_turn_metrics.get('fog_probe_r_per_turn', None)
+        pos_up_per_turn = per_turn_metrics.get('position_update_per_turn', None)
+        fac_up_per_turn = per_turn_metrics.get('facing_update_per_turn', None)
+        stab_per_turn = per_turn_metrics.get('stability_per_turn', None)
+        fac_stab_per_turn = per_turn_metrics.get('facing_stability_per_turn', None)
 
         # Backward compatibility (older metric shape)
         if cogmap_update_data is None:
@@ -493,6 +522,16 @@ class HTMLGenerator:
         if isinstance(fog_probe_r_per_turn, list):
             fog_probe_plots['r'] = create_scalar_metric_plot(fog_probe_r_per_turn, title=f"Fog Probe Recall per Turn - {sample_name}", y_label="Recall", ylim=(0.0, 1.0))
 
+        consistency_plots = {}
+        if isinstance(pos_up_per_turn, list):
+            consistency_plots['pos_up'] = create_scalar_metric_plot(pos_up_per_turn, title=f"Position Update - {sample_name}", y_label="Score", ylim=(0.0, 1.0))
+        if isinstance(fac_up_per_turn, list):
+            consistency_plots['fac_up'] = create_scalar_metric_plot(fac_up_per_turn, title=f"Facing Update - {sample_name}", y_label="Score", ylim=(0.0, 1.0))
+        if isinstance(stab_per_turn, list):
+            consistency_plots['stab'] = create_scalar_metric_plot(stab_per_turn, title=f"Stability - {sample_name}", y_label="Score", ylim=(0.0, 1.0))
+        if isinstance(fac_stab_per_turn, list):
+            consistency_plots['fac_stab'] = create_scalar_metric_plot(fac_stab_per_turn, title=f"Facing Stability - {sample_name}", y_label="Score", ylim=(0.0, 1.0))
+
         # Display all plots in horizontal layout (up to 4 plots for samples)
         available_plots = []
         if infogain_plot:
@@ -511,6 +550,15 @@ class HTMLGenerator:
             available_plots.append(("Fog Probe Precision", fog_probe_plots['p'], "Fog Probe Precision per Turn"))
         if fog_probe_plots.get('r'):
             available_plots.append(("Fog Probe Recall", fog_probe_plots['r'], "Fog Probe Recall per Turn"))
+
+        if consistency_plots.get('pos_up'):
+            available_plots.append(("Position Update", consistency_plots['pos_up'], "Position Update per Turn"))
+        if consistency_plots.get('fac_up'):
+            available_plots.append(("Facing Update", consistency_plots['fac_up'], "Facing Update per Turn"))
+        if consistency_plots.get('stab'):
+            available_plots.append(("Stability", consistency_plots['stab'], "Stability per Turn"))
+        if consistency_plots.get('fac_stab'):
+            available_plots.append(("Facing Stability", consistency_plots['fac_stab'], "Facing Stability per Turn"))
 
 
         if available_plots:

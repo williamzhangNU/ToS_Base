@@ -6,6 +6,9 @@ def _avg(values: List[float]) -> float:
     v = [x for x in values if isinstance(x, (int, float))]
     return sum(v) / len(v) if v else 0.0
 
+def avg_float_list_skip_none(values: List[Optional[float]]) -> Optional[float]:
+    v = [float(x) for x in (values or []) if isinstance(x, (int, float))]
+    return sum(v) / len(v) if v else None
 
 def _avg_metrics(keys: List[str], metrics_list: List[Dict[str, float]]) -> Dict[str, float]:
     if not metrics_list:
@@ -155,6 +158,5 @@ __all__ = [
     "avg_lists",
     "compute_error_per_sample_local",
     "compute_error_per_sample_global",
+    "avg_float_list_skip_none",
 ]
-
-

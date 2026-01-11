@@ -1,10 +1,9 @@
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Any
 import numpy as np
 import copy
 
 from ...core.room import BaseRoom, Room, Object
 from ...core.object import Agent 
-from .transforms import br_from_anchor_to_initial
 from .metrics import compute_map_metrics
 from .types import MapCogMetrics
 from .transforms import transform_baseroom
@@ -43,20 +42,45 @@ def local_vs_global_consistency(pred_local: BaseRoom | None, pred_global: BaseRo
     # Compare directly (local should already be agent-centered)
     return compare_on_common_subset(pred_local, global_agent_centered, allow_scale=allow_scale, pos_norm_L=pos_norm_L)
 
-def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 5,
-              allow_scale: bool = False, pos_norm_L: float | None = None) -> Tuple[List[float], List[MapCogMetrics]]:
+def _is_valid_for_facing(name: str, gt_curr_dict: Dict, gt_prev_dict: Dict) -> bool:
+    """Check if object is valid for facing evaluation (not agent, not gate, has orientation)."""
+    if name == 'agent':
+        return False
+        
+    # Check exclusion based on GT if available
+    if name in gt_curr_dict:
+        gt_obj = gt_curr_dict[name]
+        is_gate = "door" in name.lower() or "gate" in name.lower()
+        if not gt_obj.has_orientation or is_gate:
+            return False
+    elif name in gt_prev_dict:
+        gt_obj = gt_prev_dict[name]
+        is_gate = "door" in name.lower() or "gate" in name.lower()
+        if not gt_obj.has_orientation or is_gate:
+            return False
+    else:
+        # Fallback exclusion based on name
+        if "door" in name.lower() or "gate" in name.lower():
+            return False
+            
+    return True
+
+def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 1,
+              allow_scale: bool = False, pos_norm_L: float | None = None) -> Dict[str, List[float]]:
     """Per-adjacent-turn stability decoupled into update and stability check metrics.
 
     For each adjacent exploration turn (t-1 -> t):
-    - Update metric: For objects in previous turn's observed_items (re-observed objects),
-      check if predicted position at turn t is getting closer to GT compared to turn t-1
-    - Stability check metric: For objects with small domain-size change (based on possible_positions),
-      compare current predicted global map vs current GT global
+    - Update metric (only for observed objects):
+      - position_update: Check if predicted position at turn t is getting closer to GT compared to turn t-1 (or equal)
+      - facing_update: Check if facing turns from wrong to correct, or keeps unchanged
+    - Stability check metric (for objects with small domain-size change):
+      - stability: 0.5 * pos_acc + 0.5 * dir_acc
+    - Facing stability metric (for unobserved objects):
+      - facing_stability: Check if facing matches previous turn
 
     Returns:
-        Tuple of (update_metrics, stability_check_metrics):
-        - update_metrics: List[float] - Average of boolean values indicating if each re-observed object is getting closer to GT
-        - stability_check_metrics: List[MapCogMetrics] - Stability comparison metrics for unchanged objects
+        Dict with keys: 'position_update', 'facing_update', 'stability', 'facing_stability'
+        Each value is a List[float] (or None where invalid/not applicable)
     """
     # Normalize input to a list of exploration turns
     if isinstance(env_data_or_logs, dict):
@@ -65,10 +89,16 @@ def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 5,
         logs = env_data_or_logs or []
 
     expl = [t for t in logs if t.get('is_exploration_phase')]
-    update_out: List[float] = []
-    stability_out: List[MapCogMetrics] = []
+    
+    out = {
+        'position_update': [],
+        'facing_update': [],
+        'stability': [],
+        'facing_stability': []
+    }
+
     if len(expl) <= 1:
-        return update_out, stability_out
+        return out
 
     def _filter_room(br: BaseRoom, keep: set[str]) -> BaseRoom:
         objs = [o for o in br.objects if o.name in keep]
@@ -77,12 +107,17 @@ def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 5,
     for i in range(1, len(expl)):
         prev_log = expl[i - 1]
         curr_log = expl[i]
-        prev_pp: Dict[str, List[List[int]]] = (prev_log.get('exploration_log') or {}).get('possible_positions') or {}
-        curr_pp: Dict[str, List[List[int]]] = (curr_log.get('exploration_log') or {}).get('possible_positions') or {}
+        prev_exp = prev_log.get('exploration_log') or {}
+        curr_exp = curr_log.get('exploration_log') or {}
+        
+        # Possible positions for stability check
+        prev_pp: Dict[str, List[List[int]]] = prev_exp.get('possible_positions') or {}
+        curr_pp: Dict[str, List[List[int]]] = curr_exp.get('possible_positions') or {}
 
-        # Get observed items from previous turn's exploration log (re-observed objects)
-        prev_observed: List[str] = (prev_log.get('exploration_log') or {}).get('observed_items') or []
-        observed_set = set(prev_observed)
+        # Observed objects in *this* turn:
+        # - Prefer `visible_objects` (per-turn).
+        # - Fallback: derive newly-observed items from cumulative `observed_items`.
+        observed_set = set(curr_exp.get('visible_objects') or [])
 
         # Need previous and current predicted and GT global rooms
         g_prev = ((prev_log.get('cogmap_log') or {}).get('global') or {})
@@ -94,50 +129,88 @@ def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 5,
         gt_curr = BaseRoom.from_dict((g_curr.get('gt_room_state_full') or g_curr.get('gt_room_state')) or {})
 
         if pred_prev is None or pred_curr is None or gt_prev is None or gt_curr is None:
-            update_out.append(0.0)
-            stability_out.append(MapCogMetrics.invalid())
+            out['position_update'].append(None)
+            out['facing_update'].append(None)
+            out['stability'].append(None)
+            out['facing_stability'].append(None)
             continue
 
-        # Compute update metric: check if each observed object is getting closer to GT
-        update_scores: List[bool] = []
         pred_prev_dict = {o.name: o for o in pred_prev.objects}
         pred_curr_dict = {o.name: o for o in pred_curr.objects}
         gt_prev_dict = {o.name: o for o in gt_prev.objects}
         gt_curr_dict = {o.name: o for o in gt_curr.objects}
 
-        for name in observed_set:
-            # Check if object exists in all required maps
-            if name in pred_prev_dict and name in pred_curr_dict and name in gt_prev_dict and name in gt_curr_dict:
-                # Calculate distances to ground truth
-                prev_dist = np.linalg.norm(np.array(pred_prev_dict[name].pos) - np.array(gt_prev_dict[name].pos))
-                curr_dist = np.linalg.norm(np.array(pred_curr_dict[name].pos) - np.array(gt_curr_dict[name].pos))
-                # Object is updating towards GT if current distance is smaller
-                update_scores.append(curr_dist <= prev_dist)
+        # --- Update Metrics (Position & Facing) ---
+        # Calculate for observed objects
+        pos_update_scores: List[float] = []
+        facing_update_scores: List[float] = []
+        
+        if observed_set:
+            for name in observed_set:
+                if name == 'agent':
+                    continue
+                
+                if name in pred_prev_dict and name in pred_curr_dict and name in gt_prev_dict and name in gt_curr_dict:
+                    # Position Update
+                    prev_dist = np.linalg.norm(np.array(pred_prev_dict[name].pos) - np.array(gt_prev_dict[name].pos))
+                    curr_dist = np.linalg.norm(np.array(pred_curr_dict[name].pos) - np.array(gt_curr_dict[name].pos))
+                    pos_update_scores.append(1.0 if curr_dist <= prev_dist else 0.0)
+                    
+                    # Facing Update
+                    if _is_valid_for_facing(name, gt_curr_dict, gt_prev_dict):
+                        curr_correct = np.array_equal(pred_curr_dict[name].ori, gt_curr_dict[name].ori)
+                        prev_correct = np.array_equal(pred_prev_dict[name].ori, gt_prev_dict[name].ori)
+                        unchanged = np.array_equal(pred_curr_dict[name].ori, pred_prev_dict[name].ori)
+                        
+                        if (curr_correct and not prev_correct) or unchanged:
+                            facing_update_scores.append(1.0)
+                        else:
+                            facing_update_scores.append(0.0)
 
-        # Average of boolean values (True=1, False=0)
-        update_metric = float(np.mean(update_scores)) if update_scores else 0.0
-        update_out.append(update_metric)
+        out['position_update'].append(float(np.mean(pos_update_scores)) if pos_update_scores else None)
+        out['facing_update'].append(float(np.mean(facing_update_scores)) if facing_update_scores else None)
 
-        # Compute stability check metric: select unchanged objects based on domain-size change
-        if not prev_pp or not curr_pp:
-            stability_out.append(MapCogMetrics.invalid())
-            continue
+        # --- Stability Check Metric ---
+        # Condition: abs(len(prev_pts) - len(curr_pp[name])) < threshold (1)
+        stability_score = None
+        if prev_pp and curr_pp:
+            selected_stability: set[str] = set()
+            for name, prev_pts in prev_pp.items():
+                if name == 'agent':
+                    continue
+                if name in curr_pp:
+                    if abs(len(prev_pts) - len(curr_pp[name])) < int(threshold):
+                        selected_stability.add(name)
+            
+            if selected_stability:
+                pred_sel = _filter_room(pred_curr, selected_stability)
+                gt_sel = _filter_room(gt_curr, selected_stability)
+                metrics = compare_on_common_subset(pred_sel, gt_sel, allow_scale=allow_scale, pos_norm_L=pos_norm_L)
+                if metrics.valid:
+                    stability_score = 0.5 * metrics.pos + 0.5 * metrics.dir
+        
+        out['stability'].append(stability_score)
 
-        selected: set[str] = set()
-        for name, prev_pts in prev_pp.items():
-            if abs(len(prev_pts) - len(curr_pp[name])) < int(threshold):
-                selected.add(name)
+        # --- Facing Stability Metric ---
+        # Only focus on facing. Calculated when in current turn, if object is NOT observed.
+        # If facing matches previous turn -> 1, else 0.
+        facing_stability_scores: List[float] = []
+        
+        # Check all objects present in both predictions that are NOT in observed_set
+        common_pred_names = set(pred_curr_dict.keys()) & set(pred_prev_dict.keys())
+        unobserved_in_pred = common_pred_names - observed_set
+        
+        if unobserved_in_pred:
+            for name in unobserved_in_pred:
+                if not _is_valid_for_facing(name, gt_curr_dict, gt_prev_dict):
+                    continue
 
-        if not selected:
-            stability_out.append(MapCogMetrics.invalid())
-            continue
+                match = np.array_equal(pred_curr_dict[name].ori, pred_prev_dict[name].ori)
+                facing_stability_scores.append(1.0 if match else 0.0)
+        
+        out['facing_stability'].append(float(np.mean(facing_stability_scores)) if facing_stability_scores else None)
 
-        # Existing comparison logic for stability check
-        pred_sel = _filter_room(pred_curr, selected)
-        gt_sel = _filter_room(gt_curr, selected)
-        stability_out.append(compare_on_common_subset(pred_sel, gt_sel, allow_scale=allow_scale, pos_norm_L=pos_norm_L))
-
-    return update_out, stability_out
+    return out
 
 
 __all__ = [
@@ -146,48 +219,5 @@ __all__ = [
     "stability",
 ]
 
-
-
 if __name__ == "__main__":
-    print("Testing consistency functions...")
-
-    # Test 1: compare_on_common_subset
-    print("\n1. Testing compare_on_common_subset:")
-    try:
-        # Create test BaseRooms with common objects
-        obj1_a = Object(name="chair", pos=[1, 2])
-        obj2_a = Object(name="table", pos=[3, 4])
-        room_a = BaseRoom(objects=[obj1_a, obj2_a], name="room_a")
-
-        obj1_b = Object(name="chair", pos=[1.1, 2.1])  # Slightly different position
-        obj2_b = Object(name="table", pos=[3.2, 4.1])
-        room_b = BaseRoom(objects=[obj1_b, obj2_b], name="room_b")
-
-        metrics = compare_on_common_subset(room_a, room_b, allow_scale=False, pos_norm_L=None)
-        print(f"Metrics: overall={metrics.overall:.3f}, pos={metrics.pos:.3f}, valid={metrics.valid}")
-    except Exception as e:
-        print(f"Error: {e}")
-
-    # Test 2: local_vs_global_consistency
-    print("\n2. Testing local_vs_global_consistency:")
-    try:
-        # Create local and global rooms
-        local_obj = Object(name="chair", pos=[0, 1])  # Relative to agent
-        pred_local = BaseRoom(objects=[local_obj], name="local")
-
-        global_obj = Object(name="chair", pos=[2, 3])  # Global position
-        pred_global = BaseRoom(objects=[global_obj], name="global")
-
-        agent = Agent(pos=[2, 2], ori=[0, 1])  # Agent at (2,2) facing north
-
-        metrics = local_vs_global_consistency(pred_local, pred_global, agent, allow_scale=False, pos_norm_L=None)
-        print(f"Metrics: overall={metrics.overall:.3f}, pos={metrics.pos:.3f}, valid={metrics.valid}")
-    except Exception as e:
-        print(f"Error: {e}")
-
-    except Exception as e:
-        print(f"Error: {e}")
-
-    print("\nConsistency function tests completed!")
-
-
+    pass

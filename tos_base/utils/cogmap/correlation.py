@@ -6,84 +6,69 @@ from scipy.stats import pearsonr
 def compute_correlation_metrics(env_data_list: Dict, exp_type: str = 'active') -> Dict[str, Any]:
     """
     Compute correlations between cognitive map metrics and evaluation metrics, information gain metrics.
-
-    Args:
-        env_data_list: Environment data list
-        exp_type: Task type, 'active' or 'passive'
-
-    Returns:
-        Dictionary containing all correlation analysis results
     """
     assert isinstance(env_data_list, list) and len(env_data_list) > 0, "env_data_list must be a non-empty list"
     if exp_type == 'passive':
         return {}
 
-    # First pass: collect all existing task names
-    all_task_names = set()
+    # Collect valid samples
+    samples = []
+    task_names = set()
+    
     for s in env_data_list:
         metrics = s.get('metrics') or {}
-        evaluation_metric = metrics.get('evaluation') or {}
-        if isinstance(evaluation_metric, dict):
-            per_task = evaluation_metric.get('per_task', {})
-            all_task_names.update(per_task.keys())
-
-    last_global_vs_gt_fulls = []
-    evaluation_metric_list = {'avg_accuracy': []}
-    # Initialize all task names with empty lists
-    for task_name in all_task_names:
-        evaluation_metric_list[task_name] = []
-    last_infogains = []
-
-    for s in env_data_list:
-        metrics = s.get('metrics') or {}
-        cogmap_metric = metrics.get('cogmap') or {}
-        evaluation_metric = metrics.get('evaluation') or {}
-        exploration_metric = metrics.get('exploration', {}) or {}
-        if not isinstance(cogmap_metric, dict) or not isinstance(evaluation_metric, dict):
+        
+        # Get cogmap score (last_global_vs_gt_full)
+        try:
+            cog_score = metrics['cogmap']['exploration']['correctness']['last_global_vs_gt_full']['overall']
+            if not isinstance(cog_score, (int, float)) or np.isnan(cog_score):
+                continue
+        except (KeyError, TypeError):
             continue
 
-        # Extract last_global_vs_gt_full metric
-        exploration = cogmap_metric.get('exploration', {})
-        correctness = exploration.get('correctness', {})
-        last_global_full = correctness.get('last_global_vs_gt_full', {}) or {}
-        # Only keep samples with valid last_global_vs_gt_full
-        if not last_global_full or 'overall' not in last_global_full:
-            continue
-        overall_cogmap = last_global_full.get('overall')
+        # Get evaluation metrics
+        eval_m = metrics.get('evaluation') or {}
+        per_task = (eval_m.get('per_task') or {})
+        task_names.update(per_task.keys())
+        
+        # Get info gain
+        infogain = (metrics.get('exploration') or {}).get('final_information_gain')
 
-        # Extract last_infogain metric
-        last_infogain = exploration_metric.get('final_information_gain')
+        samples.append({
+            'cog_score': float(cog_score),
+            'eval_m': eval_m,
+            'infogain': float(infogain) if isinstance(infogain, (int, float)) and not np.isnan(infogain) else None
+        })
 
-        if isinstance(overall_cogmap, (int, float)) and not np.isnan(overall_cogmap):
-            last_global_vs_gt_fulls.append(float(overall_cogmap))
+    if not samples:
+        return {'n_samples': 0}
 
-            # Extract evaluation metrics
-            # Overall accuracy
-            avg_accuracy = (evaluation_metric.get('overall') or {}).get('avg_accuracy')
-            evaluation_metric_list['avg_accuracy'].append(float(avg_accuracy) if isinstance(avg_accuracy, (int, float)) else None)
-
-            # Accuracy for each task - fill missing tasks with None
-            per_task = evaluation_metric.get('per_task') or {}
-            for task_name in all_task_names:
-                task_acc = (per_task.get(task_name) or {}).get('avg_accuracy')
-                evaluation_metric_list[task_name].append(float(task_acc) if isinstance(task_acc, (int, float)) else None)
-
-            # Add information gain data (aligned)
-            last_infogains.append(float(last_infogain) if isinstance(last_infogain, (int, float)) and not np.isnan(last_infogain) else None)
-
+    # Arrays for correlation
+    cog_scores = [s['cog_score'] for s in samples]
+    infogains = [s['infogain'] for s in samples]
+    
+    # Calculate correlations
     cogmap_acc_correlations = {}
-    for task_name, evaluation_values in evaluation_metric_list.items():
-        cogmap_acc_correlations[task_name] = calculate_pearson_correlation(last_global_vs_gt_fulls, evaluation_values)
-
-    cogmap_infogain_correlation = calculate_pearson_correlation(last_global_vs_gt_fulls, last_infogains)
+    
+    # 1. Overall accuracy
+    avg_accs = [float((s['eval_m'].get('overall') or {}).get('avg_accuracy', float('nan'))) for s in samples]
+    cogmap_acc_correlations['avg_accuracy'] = calculate_pearson_correlation(cog_scores, avg_accs)
+    
+    # 2. Per-task accuracy
+    for task in task_names:
+        task_accs = []
+        for s in samples:
+            acc = (s['eval_m'].get('per_task') or {}).get(task, {}).get('avg_accuracy')
+            task_accs.append(float(acc) if isinstance(acc, (int, float)) else None)
+        cogmap_acc_correlations[task] = calculate_pearson_correlation(cog_scores, task_accs)
 
     return {
         'cogmap_acc_correlations': cogmap_acc_correlations,
-        'cogmap_infogain_correlation': cogmap_infogain_correlation,
-        'last_global_vs_gt_fulls': last_global_vs_gt_fulls,
-        'last_infogains': last_infogains,
-        'avg_acc_metrics': evaluation_metric_list.get('avg_accuracy', []),
-        'n_samples': len(last_global_vs_gt_fulls)
+        'cogmap_infogain_correlation': calculate_pearson_correlation(cog_scores, infogains),
+        'last_global_vs_gt_fulls': cog_scores,
+        'last_infogains': infogains,
+        'avg_acc_metrics': avg_accs,
+        'n_samples': len(samples)
     }
 
 
