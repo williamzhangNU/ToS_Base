@@ -239,8 +239,8 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
         dir_label = rel_t.direction.bin_label
         dist_label = rel_t.dist.bin_label
 
-        dir_group = []
-        dist_group = []
+        # Find all objects that match BOTH direction AND distance bins
+        same_bin_group = []
         visible = mgr.execute_success_action(ObserveAction()).data.get('visible_objects', [])
         for name in visible:
             obj = self.room.get_object_by_name(name)
@@ -251,22 +251,25 @@ class BaseNavEvaluationTask(BaseEvaluationTask):
                 bin_system=bin_sys,
                 distance_bin_system=dist_sys,
             )
-            if int(rel.direction.bin_id) == int(rel_t.direction.bin_id):
-                dir_group.append((obj, float(rel.direction.degree)))
-            if int(rel.dist.bin_id) == int(rel_t.dist.bin_id):
-                dist_group.append((obj, float(np.linalg.norm(np.array(obj.pos) - np.array(mgr.agent.pos)))))
+            # Only include objects that match BOTH direction and distance bins
+            if (int(rel.direction.bin_id) == int(rel_t.direction.bin_id) and 
+                int(rel.dist.bin_id) == int(rel_t.dist.bin_id)):
+                actual_dist = float(np.linalg.norm(np.array(obj.pos) - np.array(mgr.agent.pos)))
+                same_bin_group.append((obj, float(rel.direction.degree), actual_dist))
 
         dir_phrase = None
-        if len(dir_group) > 1:
-            dir_group.sort(key=lambda item: item[1])
-            idx = 1 + next(i for i, (obj, _) in enumerate(dir_group) if obj.name == target.name)
-            dir_phrase = f"{_ordinal(idx)} from left"
-
         dist_phrase = None
-        if len(dist_group) > 1:
-            dist_group.sort(key=lambda item: item[1])
-            idx = 1 + next(i for i, (obj, _) in enumerate(dist_group) if obj.name == target.name)
-            dist_phrase = f"{_nearfar_phrase(idx, len(dist_group))} one"
+        
+        if len(same_bin_group) > 1:
+            # Sort by angular degree (left to right)
+            dir_sorted = sorted(same_bin_group, key=lambda item: item[1])
+            dir_idx = 1 + next(i for i, (obj, _, _) in enumerate(dir_sorted) if obj.name == target.name)
+            dir_phrase = f"{_ordinal(dir_idx)} from left"
+            
+            # Sort by distance (near to far)
+            dist_sorted = sorted(same_bin_group, key=lambda item: item[2])
+            dist_idx = 1 + next(i for i, (obj, _, _) in enumerate(dist_sorted) if obj.name == target.name)
+            dist_phrase = f"{_nearfar_phrase(dist_idx, len(same_bin_group))} one"
 
         if dir_phrase and dist_phrase:
             descriptors = " also ".join(filter(None, (dir_phrase, dist_phrase)))
