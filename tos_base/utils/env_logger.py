@@ -26,6 +26,7 @@ class FBLog:
     correctly_identified_changes: Optional[float] = None
     ground_truth_changes: Optional[List[Any]] = None # List[ChangedObject]
     reported_changes: Optional[List[Dict]] = None
+    cogmap_log: Optional["CognitiveMapTurnLog"] = None
     
     def to_dict(self):
         return {
@@ -34,7 +35,8 @@ class FBLog:
             "agent_state": self.agent_state.to_dict() if self.agent_state else {},
             "correctly_identified_changes": self.correctly_identified_changes,
             "ground_truth_changes": [c.to_dict() for c in self.ground_truth_changes] if self.ground_truth_changes else [],
-            "reported_changes": [c.to_dict() for c in self.reported_changes] if self.reported_changes else []
+            "reported_changes": [c.to_dict() for c in self.reported_changes] if self.reported_changes else [],
+            "cogmap_log": self.cogmap_log.to_dict() if self.cogmap_log else {},
         }
 
 @dataclass

@@ -388,17 +388,12 @@ class CognitiveMapManager:
             cogmap_fb_list = [m.get('cogmap_fb') or {} for m in pre_list if isinstance(m, dict) and m.get('cogmap_fb')]
             cogmap_fb_aggregated = {}
             if cogmap_fb_list:
-                fb_per_turn_list = [fb.get('per_turn_metrics') or {} for fb in cogmap_fb_list]
-                fb_full_turn = avg_nested_dicts([{'full_per_turn': d.get('full_per_turn') or {}} for d in fb_per_turn_list]).get('full_per_turn', {})
-                fb_changed_turn = avg_nested_dicts([{'changed_objects_per_turn': d.get('changed_objects_per_turn') or {}} for d in fb_per_turn_list]).get('changed_objects_per_turn', {})
-                fb_unchanged_turn = avg_nested_dicts([{'unchanged_objects_per_turn': d.get('unchanged_objects_per_turn') or {}} for d in fb_per_turn_list]).get('unchanged_objects_per_turn', {})
-                
+                # Aggregate sample averages
+                fb_metrics_list = [fb.get('metrics') or {} for fb in cogmap_fb_list]
+                fb_avg_summary = avg_nested_dicts(fb_metrics_list)
+
                 cogmap_fb_aggregated = {
-                    'per_turn_metrics': {
-                        'full_per_turn': fb_full_turn,
-                        'changed_objects_per_turn': fb_changed_turn,
-                        'unchanged_objects_per_turn': fb_unchanged_turn,
-                    }
+                    'metrics': fb_avg_summary,
                 }
             
             # Separate fog_probe
@@ -582,48 +577,33 @@ class CognitiveMapManager:
         fb_turn_logs = env_data.get('false_belief_turn_logs') or []
         cogmap_fb_metrics = {}
         if fb_turn_logs:
-            # Extract cogmap_fb per-turn metrics
-            fb_full_per_turn = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
-            fb_changed_per_turn = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
-            fb_unchanged_per_turn = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
-            
+            # Helper to compute average metrics from a list of cogmap logs
+            def _avg_fb_metrics(logs, key):
+                metric_objs = []
+                for log in logs:
+                    sub_log = log.get(key) or {}
+                    g_log = sub_log.get('global') or {}
+                    m = MapCogMetrics.from_dict(g_log.get('metrics') or {})
+                    if m.valid: metric_objs.append(m)
+                avg = MapCogMetrics.average(metric_objs) if metric_objs else MapCogMetrics.invalid()
+                return avg.to_dict() if avg.valid else {}
+
+            fb_cog_logs = []
             for fb_turn in fb_turn_logs:
                 fb_log = fb_turn.get('false_belief_log') or {}
                 cogmap_log = fb_log.get('cogmap_log') or {}
-                
-                # Extract full metrics
-                full_data = cogmap_log.get('full') or {}
-                full_global = full_data.get('global') or {}
-                full_metrics = MapCogMetrics.from_dict(full_global.get('metrics') or {})
-                fb_full_per_turn['dir'].append(float(full_metrics.dir) if full_metrics.valid else None)
-                fb_full_per_turn['facing'].append(float(full_metrics.facing) if full_metrics.valid else None)
-                fb_full_per_turn['pos'].append(float(full_metrics.pos) if full_metrics.valid else None)
-                fb_full_per_turn['overall'].append(float(full_metrics.overall) if full_metrics.valid else None)
-                
-                # Extract changed objects metrics
-                changed_data = cogmap_log.get('changed_objects') or {}
-                changed_global = changed_data.get('global') or {}
-                changed_metrics = MapCogMetrics.from_dict(changed_global.get('metrics') or {})
-                fb_changed_per_turn['dir'].append(float(changed_metrics.dir) if changed_metrics.valid else None)
-                fb_changed_per_turn['facing'].append(float(changed_metrics.facing) if changed_metrics.valid else None)
-                fb_changed_per_turn['pos'].append(float(changed_metrics.pos) if changed_metrics.valid else None)
-                fb_changed_per_turn['overall'].append(float(changed_metrics.overall) if changed_metrics.valid else None)
-                
-                # Extract unchanged objects metrics
-                unchanged_data = cogmap_log.get('unchanged_objects') or {}
-                unchanged_global = unchanged_data.get('global') or {}
-                unchanged_metrics = MapCogMetrics.from_dict(unchanged_global.get('metrics') or {})
-                fb_unchanged_per_turn['dir'].append(float(unchanged_metrics.dir) if unchanged_metrics.valid else None)
-                fb_unchanged_per_turn['facing'].append(float(unchanged_metrics.facing) if unchanged_metrics.valid else None)
-                fb_unchanged_per_turn['pos'].append(float(unchanged_metrics.pos) if unchanged_metrics.valid else None)
-                fb_unchanged_per_turn['overall'].append(float(unchanged_metrics.overall) if unchanged_metrics.valid else None)
+                fb_cog_logs.append(cogmap_log)
             
+            full_avg = _avg_fb_metrics(fb_cog_logs, 'full')
+            changed_avg = _avg_fb_metrics(fb_cog_logs, 'changed_objects')
+            unchanged_avg = _avg_fb_metrics(fb_cog_logs, 'unchanged_objects')
+
             cogmap_fb_metrics = {
-                'per_turn_metrics': {
-                    'full_per_turn': fb_full_per_turn,
-                    'changed_objects_per_turn': fb_changed_per_turn,
-                    'unchanged_objects_per_turn': fb_unchanged_per_turn,
-                }
+                'metrics': {
+                    'full': full_avg,
+                    'changed': changed_avg,
+                    'unchanged': unchanged_avg,
+                },
             }
 
         result = {

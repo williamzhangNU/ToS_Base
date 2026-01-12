@@ -6,8 +6,9 @@ from html import escape
 from typing import List, Dict, Optional
 from .html_templates import HTML_TEMPLATE, CSS_STYLES, JAVASCRIPT_CODE
 
-from ..utils import parse_llm_response, hash as stable_hash
+from ..utils import hash as stable_hash
 from .charts import create_infogain_plot, create_cogmap_metrics_plot, create_correlation_plot, create_scalar_metric_plot
+from ..cogmap.analysis import avg_nested_dicts, avg_float_list_skip_none
 
 
 
@@ -92,9 +93,6 @@ class HTMLGenerator:
         obs_cfg = cfg.get("observation_config") or {}
         return str(obs_cfg.get("exp_type", "")).lower() == "passive"
 
-    def _is_vision_eval_task(self, task_type: str) -> bool:
-        return "vision" in str(task_type or "").lower()
-
     def _to_rel_if_abs(self, p: str) -> str:
         if not isinstance(p, str) or not p:
             return p
@@ -161,10 +159,104 @@ class HTMLGenerator:
         # Return as sorted list for consistent ordering
         return sorted(list(combination_keys))
 
+    @staticmethod
+    def _build_fb_cogmap_metrics(false_belief_turn_logs: List[Dict]) -> Dict:
+        """Derive false-belief cogmap (per-sample averages only) from turn logs."""
+        series = HTMLGenerator._fb_series_from_turn_logs(false_belief_turn_logs)
+        if not series:
+            return {}
+
+        def _avg(s: Dict[str, List[Optional[float]]]) -> Dict[str, float]:
+            return {k: v for k, v in {kk: avg_float_list_skip_none(vv) for kk, vv in (s or {}).items()}.items() if v is not None}
+
+        full = _avg(series.get("full") or {})
+        changed = _avg(series.get("changed") or {})
+        unchanged = _avg(series.get("unchanged") or {})
+        if not (full or changed or unchanged):
+            return {}
+        return {"metrics": {"full": full, "changed": changed, "unchanged": unchanged}}
+
+    @staticmethod
+    def _fb_series_from_turn_logs(false_belief_turn_logs: List[Dict]) -> Dict[str, Dict[str, List[Optional[float]]]]:
+        """Return per-turn series for FB plots (not stored in metrics)."""
+        if not isinstance(false_belief_turn_logs, list) or not false_belief_turn_logs:
+            return {}
+
+        def _series(key: str) -> Dict[str, List[Optional[float]]]:
+            out = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
+            for t in false_belief_turn_logs:
+                fb = (t.get('false_belief_log') or {}) if isinstance(t, dict) else {}
+                cm = (fb.get('cogmap_log') or {}) if isinstance(fb, dict) else {}
+                sub = (cm.get(key) or {}) if isinstance(cm, dict) else {}
+                g = (sub.get('global') or {}) if isinstance(sub, dict) else {}
+                m = (g.get('metrics') or {}) if isinstance(g, dict) else {}
+                for k in out.keys():
+                    v = m.get(k)
+                    out[k].append(float(v) if isinstance(v, (int, float)) else None)
+            return out
+
+        return {
+            'full': _series('full'),
+            'changed': _series('changed_objects'),
+            'unchanged': _series('unchanged_objects'),
+        }
+
+    @staticmethod
+    def _avg_series(series_list: List[Dict[str, List[Optional[float]]]]) -> Dict[str, List[Optional[float]]]:
+        """Average per-turn series across samples (skip None)."""
+        if not series_list:
+            return {}
+        keys = ['dir', 'facing', 'pos', 'overall']
+        max_len = max((len(s.get(k) or []) for s in series_list for k in keys if isinstance(s.get(k), list)), default=0)
+        out = {k: [] for k in keys}
+        for i in range(max_len):
+            for k in keys:
+                vals = [float(v[i]) for s in series_list if isinstance((v := s.get(k)), list) and i < len(v) and isinstance(v[i], (int, float))]
+                out[k].append(sum(vals) / len(vals) if vals else None)
+        return out
+
+    def _ensure_fb_metrics_in_entry(self, entry: Dict) -> None:
+        """Ensure entry['metrics']['cogmap']['cogmap_fb'] exists for visualization."""
+        if not isinstance(entry, dict):
+            return
+        metrics = entry.setdefault('metrics', {})
+        cogmap = metrics.setdefault('cogmap', {})
+        if isinstance(cogmap, dict) and cogmap.get('cogmap_fb'):
+            return
+        fb_turn_logs = entry.get('false_belief_turn_logs') or []
+        fb = self._build_fb_cogmap_metrics(fb_turn_logs)
+        if fb:
+            cogmap['cogmap_fb'] = fb
+
+    def _ensure_fb_in_cogmap_summary(self) -> None:
+        """Ensure group-level summary contains averaged false-belief cogmap metrics."""
+        gp = (self.cogmap_summary or {}).get('group_performance')
+        if not isinstance(gp, dict):
+            return
+        for gname in self.combinations:
+            group = gp.get(gname)
+            if not isinstance(group, dict) or group.get('cogmap_fb'):
+                continue
+            fb_list = []
+            for _sid, sdata in self.samples.items():
+                entry = (sdata or {}).get(gname)
+                if not isinstance(entry, dict):
+                    continue
+                self._ensure_fb_metrics_in_entry(entry)
+                fb = ((entry.get('metrics') or {}).get('cogmap') or {}).get('cogmap_fb') or {}
+                fb_metrics = fb.get('metrics') if isinstance(fb, dict) else None
+                if isinstance(fb_metrics, dict) and fb_metrics:
+                    fb_list.append(fb_metrics)
+            if fb_list:
+                group['cogmap_fb'] = {'metrics': avg_nested_dicts(fb_list)}
+
     def generate_config_summaries(self, f) -> None:
         """Generate summaries for each config combination"""
         f.write("<div class='config-summaries'>\n")
         f.write("<h3>📋 Configuration Summaries</h3>\n")
+
+        # Make sure FB summary exists before we try to plot/display it.
+        self._ensure_fb_in_cogmap_summary()
 
         for gname in self.combinations:
             # Count samples that have this combination
@@ -181,6 +273,8 @@ class HTMLGenerator:
             cogmap_update_plot = None
             cogmap_full_plot = None
             cogmap_self_tracking_plot = None
+            consistency_plots = {}
+
 
             # Exploration infogain plot
             if self.exp_summary.get("group_performance", {}).get(gname):
@@ -236,36 +330,47 @@ class HTMLGenerator:
                 if isinstance(fog_probe_r, list):
                     fog_probe_plots['r'] = create_scalar_metric_plot(fog_probe_r, title=f"Fog Probe Recall per Turn - {gname}", y_label="Recall", ylim=(0.0, 1.0))
                 
-                # False Belief Cogmap plots
-                cogmap_fb_plots = {}
-                cogmap_fb_data = cogmap_group.get('cogmap_fb', {}) if isinstance(cogmap_group, dict) else {}
-                cogmap_fb_per_turn = cogmap_fb_data.get('per_turn_metrics', {}) if isinstance(cogmap_fb_data, dict) else {}
-                
-                fb_full_data = cogmap_fb_per_turn.get('full_per_turn', {})
-                fb_changed_data = cogmap_fb_per_turn.get('changed_objects_per_turn', {})
-                fb_unchanged_data = cogmap_fb_per_turn.get('unchanged_objects_per_turn', {})
-                
-                if fb_full_data and any(fb_full_data.values()):
-                    title = f"{gname} - False Belief (Full)"
-                    cogmap_fb_plots['full'] = create_cogmap_metrics_plot(fb_full_data, title)
-                
-                if fb_changed_data and any(fb_changed_data.values()):
-                    title = f"{gname} - False Belief (Changed Objects)"
-                    cogmap_fb_plots['changed'] = create_cogmap_metrics_plot(fb_changed_data, title)
-                
-                if fb_unchanged_data and any(fb_unchanged_data.values()):
-                    title = f"{gname} - False Belief (Unchanged Objects)"
-                    cogmap_fb_plots['unchanged'] = create_cogmap_metrics_plot(fb_unchanged_data, title)
+            # False Belief Cogmap plots (compute per-turn series on the fly; do NOT store per_turn_metrics)
+            cogmap_fb_plots = {}
+            fb_full_series_list = []
+            fb_changed_series_list = []
+            fb_unchanged_series_list = []
+            for _sid, sdata in self.samples.items():
+                entry = (sdata or {}).get(gname)
+                if not isinstance(entry, dict):
+                    continue
+                fb_series = self._fb_series_from_turn_logs(entry.get('false_belief_turn_logs') or [])
+                if not fb_series:
+                    continue
+                if isinstance(fb_series.get('full'), dict):
+                    fb_full_series_list.append(fb_series['full'])
+                if isinstance(fb_series.get('changed'), dict):
+                    fb_changed_series_list.append(fb_series['changed'])
+                if isinstance(fb_series.get('unchanged'), dict):
+                    fb_unchanged_series_list.append(fb_series['unchanged'])
 
-                consistency_plots = {}
-                if isinstance(pos_up, list):
-                    consistency_plots['pos_up'] = create_scalar_metric_plot(pos_up, title=f"Position Update - {gname}", y_label="Score", ylim=(0.0, 1.0))
-                if isinstance(fac_up, list):
-                    consistency_plots['fac_up'] = create_scalar_metric_plot(fac_up, title=f"Facing Update - {gname}", y_label="Score", ylim=(0.0, 1.0))
-                if isinstance(pos_stab, list):
-                    consistency_plots['pos_stab'] = create_scalar_metric_plot(pos_stab, title=f"Position Stability - {gname}", y_label="Score", ylim=(0.0, 1.0))
-                if isinstance(fac_stab, list):
-                    consistency_plots['fac_stab'] = create_scalar_metric_plot(fac_stab, title=f"Facing Stability - {gname}", y_label="Score", ylim=(0.0, 1.0))
+            fb_full_data = self._avg_series(fb_full_series_list)
+            fb_changed_data = self._avg_series(fb_changed_series_list)
+            fb_unchanged_data = self._avg_series(fb_unchanged_series_list)
+
+            if fb_full_data:
+                title = f"{gname} - False Belief (Full)"
+                cogmap_fb_plots['full'] = create_cogmap_metrics_plot(fb_full_data, title)
+            if fb_changed_data:
+                title = f"{gname} - False Belief (Changed)"
+                cogmap_fb_plots['changed'] = create_cogmap_metrics_plot(fb_changed_data, title)
+            if fb_unchanged_data:
+                title = f"{gname} - False Belief (Unchanged)"
+                cogmap_fb_plots['unchanged'] = create_cogmap_metrics_plot(fb_unchanged_data, title)
+
+            if isinstance(pos_up, list):
+                consistency_plots['pos_up'] = create_scalar_metric_plot(pos_up, title=f"Position Update - {gname}", y_label="Score", ylim=(0.0, 1.0))
+            if isinstance(fac_up, list):
+                consistency_plots['fac_up'] = create_scalar_metric_plot(fac_up, title=f"Facing Update - {gname}", y_label="Score", ylim=(0.0, 1.0))
+            if isinstance(pos_stab, list):
+                consistency_plots['pos_stab'] = create_scalar_metric_plot(pos_stab, title=f"Position Stability - {gname}", y_label="Score", ylim=(0.0, 1.0))
+            if isinstance(fac_stab, list):
+                consistency_plots['fac_stab'] = create_scalar_metric_plot(fac_stab, title=f"Facing Stability - {gname}", y_label="Score", ylim=(0.0, 1.0))
 
 
             # Generate correlation plots
@@ -316,7 +421,7 @@ class HTMLGenerator:
             if eval_group:
                 f.write("<div class='metrics-box evaluation'>\n")
                 f.write("<h4>✅ Evaluation</h4>\n")
-                f.write(VisualizationHelper.dict_to_html(eval_group))
+                f.write(VisualizationHelper.dict_to_html(self._filter_eval_for_display(eval_group)))
                 f.write("</div>\n")
 
             # Group cognitive map performance
@@ -324,11 +429,12 @@ class HTMLGenerator:
             if cogmap_group:
                 # Extract fog_probe data (now at top level due to previous change)
                 fog_probe_data = cogmap_group.get('fog_probe')
+                cogmap_fb_data = cogmap_group.get('cogmap_fb')
 
-                # Display main cognitive map metrics (exclude per_turn data AND fog_probe if present as top key)
+                # Display main cognitive map metrics (exclude per_turn data AND fog_probe/cogmap_fb if present as top key)
                 main_metrics = {k: v for k, v in cogmap_group.items()
                                if k not in ["cogmap_update_per_turn", "cogmap_full_per_turn", "self_tracking_per_turn",
-                                            "fog_probe_f1_per_turn", "per_turn_metrics", "fog_probe"]}
+                                            "fog_probe_f1_per_turn", "per_turn_metrics", "fog_probe", "cogmap_fb"]}
                 if main_metrics:
                     f.write("<div class='metrics-box cogmap'>\n")
                     f.write("<h4>🧠 Cognitive Map</h4>\n")
@@ -340,6 +446,13 @@ class HTMLGenerator:
                     f.write("<div class='metrics-box fog-probe'>\n")
                     f.write("<h4>🌫️ Fog Probe</h4>\n")
                     f.write(VisualizationHelper.dict_to_html(fog_probe_data))
+                    f.write("</div>\n")
+                
+                # Display CogMap FB separately
+                if cogmap_fb_data and cogmap_fb_data.get('metrics'):
+                    f.write("<div class='metrics-box cogmap-fb'>\n")
+                    f.write("<h4>🧭 False Belief CogMap</h4>\n")
+                    f.write(VisualizationHelper.dict_to_html(cogmap_fb_data['metrics']))
                     f.write("</div>\n")
 
             # Group correlation performance
@@ -380,18 +493,9 @@ class HTMLGenerator:
             if cogmap_fb_plots.get('full'):
                 available_plots.append(("False Belief Cogmap (Full)", cogmap_fb_plots['full'], "False Belief Full Metrics"))
             if cogmap_fb_plots.get('changed'):
-                available_plots.append(("False Belief Cogmap (Changed)", cogmap_fb_plots['changed'], "False Belief Changed Objects"))
+                available_plots.append(("False Belief Cogmap (Changed)", cogmap_fb_plots['changed'], "False Belief Changed Objects Metrics"))
             if cogmap_fb_plots.get('unchanged'):
-                available_plots.append(("False Belief Cogmap (Unchanged)", cogmap_fb_plots['unchanged'], "False Belief Unchanged Objects"))
-
-            if consistency_plots.get('pos_up'):
-                available_plots.append(("Position Update", consistency_plots['pos_up'], "Position Update per Turn"))
-            if consistency_plots.get('fac_up'):
-                available_plots.append(("Facing Update", consistency_plots['fac_up'], "Facing Update per Turn"))
-            if consistency_plots.get('pos_stab'):
-                available_plots.append(("Position Stability", consistency_plots['pos_stab'], "Position Stability per Turn"))
-            if consistency_plots.get('fac_stab'):
-                available_plots.append(("Facing Stability", consistency_plots['fac_stab'], "Facing Stability per Turn"))
+                available_plots.append(("False Belief Cogmap (Unchanged)", cogmap_fb_plots['unchanged'], "False Belief Unchanged Objects Metrics"))
 
             if consistency_plots.get('pos_up'):
                 available_plots.append(("Position Update", consistency_plots['pos_up'], "Position Update per Turn"))
@@ -483,7 +587,7 @@ class HTMLGenerator:
                 f.write("</div>\n")
 
         # Evaluation metrics
-        evaluation_metrics = metrics.get("evaluation", {})
+        evaluation_metrics = self._filter_eval_for_display(metrics.get("evaluation", {}))
         if evaluation_metrics:
             filtered_evaluation = filter_per_turn_keys(evaluation_metrics)
             if filtered_evaluation:
@@ -500,6 +604,16 @@ class HTMLGenerator:
                 f.write("<div class='metrics-box cogmap'>\n")
                 f.write("<h4>🧠 Cognitive Map</h4>\n")
                 f.write(VisualizationHelper.dict_to_html(filtered_cogmap))
+                f.write("</div>\n")
+        
+        # False Belief Cogmap metrics
+        cogmap_fb_metrics = (metrics.get("cogmap") or {}).get("cogmap_fb", {}) if isinstance(metrics.get("cogmap"), dict) else {}
+        if cogmap_fb_metrics:
+            fb_avg = cogmap_fb_metrics.get("metrics", {})
+            if fb_avg:
+                f.write("<div class='metrics-box cogmap-fb'>\n")
+                f.write("<h4>🧭 False Belief CogMap</h4>\n")
+                f.write(VisualizationHelper.dict_to_html(fb_avg))
                 f.write("</div>\n")
 
         f.write("</div>\n")  # End metrics-grid
@@ -565,13 +679,11 @@ class HTMLGenerator:
         if isinstance(fog_probe_r_per_turn, list):
             fog_probe_plots['r'] = create_scalar_metric_plot(fog_probe_r_per_turn, title=f"Fog Probe Recall per Turn - {sample_name}", y_label="Recall", ylim=(0.0, 1.0))
 
-        # Extract cogmap_fb per-turn metrics if available
-        cogmap_fb_metrics = entry['metrics'].get('cogmap_fb', {}) or {}
-        cogmap_fb_per_turn = cogmap_fb_metrics.get('per_turn_metrics', {}) if isinstance(cogmap_fb_metrics, dict) else {}
-        
-        cogmap_fb_full_data = cogmap_fb_per_turn.get('full_per_turn', None)
-        cogmap_fb_changed_data = cogmap_fb_per_turn.get('changed_objects_per_turn', None)
-        cogmap_fb_unchanged_data = cogmap_fb_per_turn.get('unchanged_objects_per_turn', None)
+        # Cogmap FB plots: compute per-turn series from false_belief_turn_logs (do NOT store per_turn_metrics)
+        fb_series = self._fb_series_from_turn_logs(entry.get('false_belief_turn_logs') or [])
+        cogmap_fb_full_data = fb_series.get('full') if isinstance(fb_series, dict) else None
+        cogmap_fb_changed_data = fb_series.get('changed') if isinstance(fb_series, dict) else None
+        cogmap_fb_unchanged_data = fb_series.get('unchanged') if isinstance(fb_series, dict) else None
         
         cogmap_fb_plots = {}
         
@@ -581,11 +693,11 @@ class HTMLGenerator:
             cogmap_fb_plots['full'] = create_cogmap_metrics_plot(cogmap_fb_full_data, title)
         
         if cogmap_fb_changed_data and any(cogmap_fb_changed_data.values()):
-            title = f"{sample_name} - False Belief (Changed Objects)"
+            title = f"{sample_name} - False Belief (Changed)"
             cogmap_fb_plots['changed'] = create_cogmap_metrics_plot(cogmap_fb_changed_data, title)
-        
+
         if cogmap_fb_unchanged_data and any(cogmap_fb_unchanged_data.values()):
-            title = f"{sample_name} - False Belief (Unchanged Objects)"
+            title = f"{sample_name} - False Belief (Unchanged)"
             cogmap_fb_plots['unchanged'] = create_cogmap_metrics_plot(cogmap_fb_unchanged_data, title)
 
         consistency_plots = {}
@@ -634,15 +746,6 @@ class HTMLGenerator:
         if consistency_plots.get('fac_stab'):
             available_plots.append(("Facing Stability", consistency_plots['fac_stab'], "Facing Stability per Turn"))
 
-        if consistency_plots.get('pos_up'):
-            available_plots.append(("Position Update", consistency_plots['pos_up'], "Position Update per Turn"))
-        if consistency_plots.get('fac_up'):
-            available_plots.append(("Facing Update", consistency_plots['fac_up'], "Facing Update per Turn"))
-        if consistency_plots.get('pos_stab'):
-            available_plots.append(("Position Stability", consistency_plots['pos_stab'], "Position Stability per Turn"))
-        if consistency_plots.get('fac_stab'):
-            available_plots.append(("Facing Stability", consistency_plots['fac_stab'], "Facing Stability per Turn"))
-
 
         if available_plots:
             f.write("<div class='cognitive-map-charts'>\n")
@@ -659,6 +762,22 @@ class HTMLGenerator:
             f.write("</div>\n")  # End three-plots-grid
             f.write("</div>\n")  # End plots-row
             f.write("</div>\n")  # End cognitive-map-charts
+
+    @staticmethod
+    def _filter_eval_for_display(eval_dict: Dict) -> Dict:
+        """Hide rot_dual from evaluation display (but keep it in metrics files)."""
+        if not isinstance(eval_dict, dict) or not eval_dict:
+            return eval_dict
+        # Support both short-name and class-name keys, and a common typo.
+        rot_keys = {"rot_dual", "rotdual", "RotDualEvaluationTask"}
+        d = dict(eval_dict)
+        per_task = d.get("per_task")
+        if isinstance(per_task, dict):
+            d["per_task"] = {k: v for k, v in per_task.items() if k not in rot_keys}
+        task_metrics = d.get("task_metrics")
+        if isinstance(task_metrics, dict):
+            d["task_metrics"] = {k: v for k, v in task_metrics.items() if k not in rot_keys}
+        return d
 
     def generate_sample_page(self, f, page_idx: int, sample_id: str, sample_data: Dict) -> None:
         """Generate a single sample page with combination selector"""
@@ -711,6 +830,9 @@ class HTMLGenerator:
         """Generate HTML content for a single combo configuration"""
         from io import StringIO
         output = StringIO()
+
+        # Ensure FB metrics exist (older runs may only have per-turn logs).
+        self._ensure_fb_metrics_in_entry(entry)
 
         # Generate Sample Metrics at the top
         self.generate_sample_metrics(output, entry, f"{combo} {sample_id}")
@@ -767,7 +889,15 @@ class HTMLGenerator:
         content_escaped = escape(content).replace("\n", "<br>")
         f.write(f"<div class='block {block_class}'><strong>{title}</strong><br>{content_escaped}</div>\n")
 
-    def _render_cogmap_responses(self, f, cogmap_log: Dict, page_idx: int, t_idx: int, env_log: Optional[Dict] = None) -> None:
+    def _render_cogmap_responses(
+        self,
+        f,
+        cogmap_log: Dict,
+        page_idx: int,
+        t_idx: int,
+        env_log: Optional[Dict] = None,
+        show_gt_observed: bool = True,
+    ) -> None:
         """Helper to render cognitive map responses"""
         cogmap_types = [
             ('global', '🗺️ Global Cognitive Map Response'),
@@ -812,7 +942,7 @@ class HTMLGenerator:
 
                 # Add JSON display for global and local
                 if map_type == 'global':
-                    # For global, display pred_json, gt_json, and gt_json_full in three columns
+                    # For global, display pred_json and GT (full). Optionally show GT (observed).
                     pred_json = data.get('pred_json', {})
                     gt_json = data.get('gt_json', {})
                     gt_json_full = data.get('gt_json_full', {})
@@ -836,16 +966,17 @@ class HTMLGenerator:
                             f.write("<div class='empty-json'>(no data)</div>\n")
                         f.write("</div>\n")
 
-                        # Middle - gt_json
-                        f.write("<div class='json-box middle gt-observed'>\n")
-                        f.write("<strong>🎯 Ground Truth (Observed)</strong>\n")
-                        if gt_json:
-                            f.write("<div class='json-content-inner'>\n")
-                            f.write(f"<pre>{escape(json.dumps(gt_json, indent=2))}</pre>\n")
+                        # Middle - gt_json (optional)
+                        if show_gt_observed:
+                            f.write("<div class='json-box middle gt-observed'>\n")
+                            f.write("<strong>🎯 Ground Truth (Observed)</strong>\n")
+                            if gt_json:
+                                f.write("<div class='json-content-inner'>\n")
+                                f.write(f"<pre>{escape(json.dumps(gt_json, indent=2))}</pre>\n")
+                                f.write("</div>\n")
+                            else:
+                                f.write("<div class='empty-json'>(no data)</div>\n")
                             f.write("</div>\n")
-                        else:
-                            f.write("<div class='empty-json'>(no data)</div>\n")
-                        f.write("</div>\n")
 
                         # Right - gt_json_full
                         f.write("<div class='json-box right gt-full'>\n")
@@ -853,6 +984,11 @@ class HTMLGenerator:
                         if gt_json_full:
                             f.write("<div class='json-content-inner'>\n")
                             f.write(f"<pre>{escape(json.dumps(gt_json_full, indent=2))}</pre>\n")
+                            f.write("</div>\n")
+                        elif gt_json:
+                            # Fallback if older logs only have observed GT
+                            f.write("<div class='json-content-inner'>\n")
+                            f.write(f"<pre>{escape(json.dumps(gt_json, indent=2))}</pre>\n")
                             f.write("</div>\n")
                         else:
                             f.write("<div class='empty-json'>(no data)</div>\n")
@@ -1048,11 +1184,65 @@ class HTMLGenerator:
                 self._render_turn_metrics(f, env_log)
 
                 if env_log.get('false_belief_log'):
-                    fb_log = env_log['false_belief_log']
-                    # print(f'fb_log: {fb_log}')
-                    fb_log.pop('room_state', None); fb_log.pop('agent_state', None)
-                    f.write("<div class='metrics'><strong>🧭 False Belief Metrics</strong>")
-                    f.write(VisualizationHelper.dict_to_html(fb_log))
+                    fb_log = env_log['false_belief_log'] or {}
+                    fb_info = dict(fb_log) if isinstance(fb_log, dict) else {}
+                    fb_info.pop('room_state', None)
+                    fb_info.pop('agent_state', None)
+                    
+                    if fb_info.get('cogmap_log'):
+                        # Render responses/metrics for full, changed, unchanged
+                        cm_log = fb_info.get('cogmap_log') or {}
+                        # Assuming 'full' has the response
+                        if cm_log.get('full'):
+                            # False-belief: no need to show GT (observed); use full GT only.
+                            self._render_cogmap_responses(
+                                f,
+                                cm_log['full'],
+                                page_idx,
+                                t_idx,
+                                env_log=fb_info,
+                                show_gt_observed=False,
+                            )
+                        
+                        f.write("<div class='metrics'><strong>🧭 False Belief Cogmap Metrics</strong>")
+                        metrics_block = {}
+                        if cm_log.get('full'):
+                             metrics_block['Full'] = cm_log['full'].get('global', {}).get('metrics')
+                        if cm_log.get('changed_objects'):
+                             metrics_block['Changed'] = cm_log['changed_objects'].get('global', {}).get('metrics')
+                        if cm_log.get('unchanged_objects'):
+                             metrics_block['Unchanged'] = cm_log['unchanged_objects'].get('global', {}).get('metrics')
+                        f.write(VisualizationHelper.dict_to_html(metrics_block))
+                        f.write("</div>\n")
+
+                        # Compact per-turn object set view
+                        changed_names = list((cm_log.get('changed_object_names') or [])) if isinstance(cm_log, dict) else []
+                        unchanged_names = list((cm_log.get('unchanged_object_names') or [])) if isinstance(cm_log, dict) else []
+                        full_names = sorted(set([str(x) for x in changed_names + unchanged_names if x is not None]))
+
+                        def _pred_obj_names(k: str) -> List[str]:
+                            sub = (cm_log.get(k) or {}) if isinstance(cm_log, dict) else {}
+                            pred = ((sub.get("global") or {}).get("pred_json") or {}) if isinstance(sub, dict) else {}
+                            if not isinstance(pred, dict):
+                                return []
+                            return sorted([str(n) for n in pred.keys() if n != "agent"])
+
+                        obj_block = {
+                            "all_objects": full_names,
+                            "changed_objects": sorted([str(x) for x in changed_names if x is not None]),
+                            "unchanged_objects": sorted([str(x) for x in unchanged_names if x is not None]),
+                            "pred_full_keys": _pred_obj_names("full"),
+                            "pred_changed_keys": _pred_obj_names("changed_objects"),
+                            "pred_unchanged_keys": _pred_obj_names("unchanged_objects"),
+                        }
+                        f.write("<div class='metrics'><strong>🧾 False Belief Object Sets</strong>")
+                        f.write(VisualizationHelper.dict_to_html(obj_block))
+                        f.write("</div>\n")
+
+                    # Do not show cogmap_log again in "False Belief Info"
+                    fb_info.pop('cogmap_log', None)
+                    f.write("<div class='metrics'><strong>🧭 False Belief Info</strong>")
+                    f.write(VisualizationHelper.dict_to_html(fb_info))
                     f.write("</div>\n")
 
                 f.write("</div>\n")  # End turn-left

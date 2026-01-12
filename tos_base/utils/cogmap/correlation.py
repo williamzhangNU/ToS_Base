@@ -1,9 +1,15 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import numpy as np
 from scipy.stats import pearsonr
 
 
-def compute_correlation_metrics(env_data_list: Dict, exp_type: str = 'active') -> Dict[str, Any]:
+def _to_float_or_none(v: Any) -> Optional[float]:
+    if isinstance(v, (int, float)) and not np.isnan(v):
+        return float(v)
+    return None
+
+
+def compute_correlation_metrics(env_data_list: List[Dict[str, Any]], exp_type: str = 'active') -> Dict[str, Any]:
     """
     Compute correlations between cognitive map metrics and evaluation metrics, information gain metrics.
     """
@@ -51,7 +57,7 @@ def compute_correlation_metrics(env_data_list: Dict, exp_type: str = 'active') -
     cogmap_acc_correlations = {}
     
     # 1. Overall accuracy
-    avg_accs = [float((s['eval_m'].get('overall') or {}).get('avg_accuracy', float('nan'))) for s in samples]
+    avg_accs = [_to_float_or_none((s['eval_m'].get('overall') or {}).get('avg_accuracy')) for s in samples]
     cogmap_acc_correlations['avg_accuracy'] = calculate_pearson_correlation(cog_scores, avg_accs)
     
     # 2. Per-task accuracy
@@ -59,7 +65,11 @@ def compute_correlation_metrics(env_data_list: Dict, exp_type: str = 'active') -
         task_accs = []
         for s in samples:
             acc = (s['eval_m'].get('per_task') or {}).get(task, {}).get('avg_accuracy')
-            task_accs.append(float(acc) if isinstance(acc, (int, float)) else None)
+            task_accs.append(_to_float_or_none(acc))
+
+        print(f"Task: {task}, Accuracy: {task_accs}")
+        print(f"Cogmap Scores: {cog_scores}")
+        print("--------------------------------")
         cogmap_acc_correlations[task] = calculate_pearson_correlation(cog_scores, task_accs)
 
     return {

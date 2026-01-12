@@ -35,7 +35,7 @@ def create_scalar_metric_plot(
     y_label: str,
     ylim: Optional[tuple[float, float]] = (0.0, 1.0),
 ) -> Optional[str]:
-    if not isinstance(values, list) or len(values) <= 1:
+    if not isinstance(values, list) or len(values) == 0:
         return None
     y = [np.nan if not isinstance(v, (int, float)) else float(v) for v in values]
     if not any(isinstance(v, (int, float)) for v in values):
@@ -74,15 +74,6 @@ def create_cogmap_metrics_plot(
         for k, include, _ in keys
     )
     if not any_data:
-        return None
-
-    # Check if there's only one turn - if so, skip drawing
-    max_turns = max(
-        len(series.get(k, [])) for k, include, _ in keys
-        if include and isinstance(series.get(k), list)
-    ) if any_data else 0
-
-    if max_turns <= 1:
         return None
 
     fig, ax = plt.subplots(figsize=(8, 4))
