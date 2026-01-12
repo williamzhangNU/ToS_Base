@@ -90,6 +90,21 @@ class HistoryManager:
             with open(self.model_config_path, "w") as f:
                 json.dump(model_config, f, ensure_ascii=False, indent=2)
 
+    def replace_paths(self, old_base: str, new_base: str) -> None:
+        def _recursive_replace(obj):
+            if isinstance(obj, str):
+                return obj.replace(old_base, new_base)
+            if isinstance(obj, list):
+                return [_recursive_replace(item) for item in obj]
+            if isinstance(obj, dict):
+                return {k: _recursive_replace(v) for k, v in obj.items()}
+            return obj
+            
+        self.exploration_turn_logs = _recursive_replace(self.exploration_turn_logs)
+        self.false_belief_turn_logs = _recursive_replace(self.false_belief_turn_logs)
+        self.evaluation_turn_logs = _recursive_replace(self.evaluation_turn_logs)
+        self.messages = _recursive_replace(self.messages)
+
     def has_exploration(self, index):
         return 0 <= index < len(self.exploration_turn_logs)
 
@@ -538,6 +553,11 @@ class HistoryManager:
             false_belief_override=False,
             all_tasks=all_tasks,
         )
+        if final_image_dir and saved_image_dir and final_image_dir != saved_image_dir:
+            old_base = os.path.dirname(saved_image_dir)
+            new_base = os.path.dirname(final_image_dir)
+            if old_base != new_base:
+                hm.replace_paths(old_base, new_base)
         return hm
 
 
