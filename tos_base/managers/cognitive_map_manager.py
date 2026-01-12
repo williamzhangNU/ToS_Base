@@ -577,7 +577,21 @@ class CognitiveMapManager:
         fb_turn_logs = env_data.get('false_belief_turn_logs') or []
         cogmap_fb_metrics = {}
         if fb_turn_logs:
-            # Helper to compute average metrics from a list of cogmap logs
+            # Helper to compute average metrics from per-object changed objects
+            def _avg_changed_per_object_metrics(logs):
+                """Average metrics across all changed objects (from all turns)."""
+                all_metrics = []
+                for log in logs:
+                    per_obj_metrics = log.get('changed_objects_per_object') or {}
+                    # per_obj_metrics is a dict: {obj_name: {dir, facing, pos, overall}}
+                    for obj_name, metrics_dict in per_obj_metrics.items():
+                        m = MapCogMetrics.from_dict(metrics_dict)
+                        if m.valid:
+                            all_metrics.append(m)
+                avg = MapCogMetrics.average(all_metrics) if all_metrics else MapCogMetrics.invalid()
+                return avg.to_dict() if avg.valid else {}
+            
+            # Helper to compute average metrics from unchanged objects
             def _avg_fb_metrics(logs, key):
                 metric_objs = []
                 for log in logs:
@@ -590,17 +604,16 @@ class CognitiveMapManager:
 
             fb_cog_logs = []
             for fb_turn in fb_turn_logs:
-                fb_log = fb_turn.get('false_belief_log') or {}
-                cogmap_log = fb_log.get('cogmap_log') or {}
-                fb_cog_logs.append(cogmap_log)
+                cogmap_log = fb_turn.get('cogmap_log') or {}
+                if cogmap_log:
+                    fb_cog_logs.append(cogmap_log)
             
-            full_avg = _avg_fb_metrics(fb_cog_logs, 'full')
-            changed_avg = _avg_fb_metrics(fb_cog_logs, 'changed_objects')
+            # Average changed objects metrics (per-object, across all turns)
+            changed_avg = _avg_changed_per_object_metrics(fb_cog_logs)
             unchanged_avg = _avg_fb_metrics(fb_cog_logs, 'unchanged_objects')
 
             cogmap_fb_metrics = {
                 'metrics': {
-                    'full': full_avg,
                     'changed': changed_avg,
                     'unchanged': unchanged_avg,
                 },
