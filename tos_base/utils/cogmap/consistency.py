@@ -68,8 +68,6 @@ def _is_valid_for_facing(name: str, gt_curr_dict: Dict, gt_prev_dict: Dict) -> b
 def stability(
     env_data_or_logs: Dict | List[Dict],
     threshold: int = 1,
-    allow_scale: bool = False,
-    pos_norm_L: float | None = None,
 ) -> Dict[str, List[float | None]]:
     """Per-adjacent-turn update/stability metrics.
 
