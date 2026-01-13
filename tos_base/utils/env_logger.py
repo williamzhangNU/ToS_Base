@@ -26,7 +26,7 @@ class FBLog:
     correctly_identified_changes: Optional[float] = None
     ground_truth_changes: Optional[List[Any]] = None # List[ChangedObject]
     reported_changes: Optional[List[Dict]] = None
-    cogmap_log: Optional["CognitiveMapTurnLog"] = None
+    cogmap_log: Optional[Dict] = None
     newly_observed_changed_objects: List[str] = field(default_factory=list)  # Changed objects observed for the first time in this turn
     
     def to_dict(self):
@@ -37,7 +37,7 @@ class FBLog:
             "correctly_identified_changes": self.correctly_identified_changes,
             "ground_truth_changes": [c.to_dict() for c in self.ground_truth_changes] if self.ground_truth_changes else [],
             "reported_changes": [c.to_dict() for c in self.reported_changes] if self.reported_changes else [],
-            "cogmap_log": self.cogmap_log.to_dict() if self.cogmap_log else {},
+            "cogmap_log": self.cogmap_log.to_dict() if hasattr(self.cogmap_log, 'to_dict') else (self.cogmap_log or {}),
             "newly_observed_changed_objects": self.newly_observed_changed_objects,
         }
 

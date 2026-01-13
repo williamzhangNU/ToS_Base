@@ -1,9 +1,9 @@
-from typing import Dict, Tuple, List, Any
+from typing import Dict, List, Any
 import numpy as np
 import copy
 
-from ...core.room import BaseRoom, Room, Object
-from ...core.object import Agent 
+from ...core.room import BaseRoom
+from ...core.object import Agent
 from .metrics import compute_map_metrics
 from .types import MapCogMetrics
 from .transforms import transform_baseroom
@@ -65,17 +65,21 @@ def _is_valid_for_facing(name: str, gt_curr_dict: Dict, gt_prev_dict: Dict) -> b
             
     return True
 
-def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 1,
-              allow_scale: bool = False, pos_norm_L: float | None = None) -> Dict[str, List[float]]:
+def stability(
+    env_data_or_logs: Dict | List[Dict],
+    threshold: int = 1,
+    allow_scale: bool = False,
+    pos_norm_L: float | None = None,
+) -> Dict[str, List[float | None]]:
     """Per-adjacent-turn update/stability metrics.
 
     For each adjacent exploration turn (t-1 -> t):
-    - Update metric (only for observed objects in turn t):
+    - Update metric (only for objects observed in turn t AND observed before turn t):
       - position_update: Check if predicted position at turn t is getting closer to GT compared to turn t-1 (or equal)
       - facing_update: Check if facing turns from wrong to correct, or keeps unchanged
     - Stability metrics (only for unobserved objects in turn t):
-      - position_stability: Check if predicted position does not get worse vs previous turn
-      - facing_stability: Check if facing does not get worse vs previous turn
+      - position_stability: Only objects whose possible-position count changes by <= `threshold`; then check non-worse
+      - facing_stability: Only objects observed before turn t but NOT observed in turn t; then check non-worse
 
     Returns:
         Dict with keys: 'position_update', 'facing_update', 'position_stability', 'facing_stability'
@@ -102,8 +106,6 @@ def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 1,
     def _pos_non_worse(name: str,
                        pred_prev_dict: Dict[str, Any], pred_curr_dict: Dict[str, Any],
                        gt_prev_dict: Dict[str, Any], gt_curr_dict: Dict[str, Any]) -> float | None:
-        if name not in pred_prev_dict or name not in pred_curr_dict or name not in gt_prev_dict or name not in gt_curr_dict:
-            return None
         prev_dist = np.linalg.norm(np.array(pred_prev_dict[name].pos) - np.array(gt_prev_dict[name].pos))
         curr_dist = np.linalg.norm(np.array(pred_curr_dict[name].pos) - np.array(gt_curr_dict[name].pos))
         return 1.0 if curr_dist <= prev_dist else 0.0
@@ -112,8 +114,6 @@ def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 1,
                           pred_prev_dict: Dict[str, Any], pred_curr_dict: Dict[str, Any],
                           gt_prev_dict: Dict[str, Any], gt_curr_dict: Dict[str, Any]) -> float | None:
         if not _is_valid_for_facing(name, gt_curr_dict, gt_prev_dict):
-            return None
-        if name not in pred_prev_dict or name not in pred_curr_dict or name not in gt_prev_dict or name not in gt_curr_dict:
             return None
         prev_correct = np.array_equal(pred_prev_dict[name].ori, gt_prev_dict[name].ori)
         curr_correct = np.array_equal(pred_curr_dict[name].ori, gt_curr_dict[name].ori)
@@ -130,10 +130,8 @@ def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 1,
         prev_exp = prev_log.get('exploration_log') or {}
         curr_exp = curr_log.get('exploration_log') or {}
         
-        # Observed objects in *this* turn:
-        # - Prefer `visible_objects` (per-turn).
-        # - Fallback: derive newly-observed items from cumulative `observed_items`.
-        observed_set = set(curr_exp.get('visible_objects') or [])
+        observed_now = set(curr_exp.get('visible_objects') or [])
+        observed_before = set(prev_exp.get('observed_items') or [])
 
         # Need previous and current predicted and GT global rooms
         g_prev = ((prev_log.get('cogmap_log') or {}).get('global') or {})
@@ -144,52 +142,44 @@ def stability(env_data_or_logs: Dict | List[Dict], threshold: int = 1,
         pred_curr = BaseRoom.from_dict((g_curr.get('pred_room_state')) or {})
         gt_curr = BaseRoom.from_dict((g_curr.get('gt_room_state_full') or g_curr.get('gt_room_state')) or {})
 
-        if pred_prev is None or pred_curr is None or gt_prev is None or gt_curr is None:
-            out['position_update'].append(None)
-            out['facing_update'].append(None)
-            out['stability'].append(None)
-            out['facing_stability'].append(None)
-            continue
-
         pred_prev_dict = {o.name: o for o in pred_prev.objects}
         pred_curr_dict = {o.name: o for o in pred_curr.objects}
         gt_prev_dict = {o.name: o for o in gt_prev.objects}
         gt_curr_dict = {o.name: o for o in gt_curr.objects}
+        common_names = set(pred_curr_dict) & set(pred_prev_dict) & set(gt_curr_dict) & set(gt_prev_dict)
 
         # --- Update Metrics (Position & Facing) ---
-        # Calculate only for observed objects
-        pos_update_scores: List[float] = []
-        facing_update_scores: List[float] = []
-        
-        if observed_set:
-            for name in observed_set:
-                if name == 'agent':
-                    continue
-                s = _pos_non_worse(name, pred_prev_dict, pred_curr_dict, gt_prev_dict, gt_curr_dict)
-                if s is not None:
-                    pos_update_scores.append(s)
-
-                s = _facing_non_worse(name, pred_prev_dict, pred_curr_dict, gt_prev_dict, gt_curr_dict)
-                if s is not None:
-                    facing_update_scores.append(s)
-
+        update_names = (observed_now & observed_before & common_names) - {'agent'}
+        pos_update_scores = [_pos_non_worse(n, pred_prev_dict, pred_curr_dict, gt_prev_dict, gt_curr_dict) for n in update_names]
+        facing_update_scores = [_facing_non_worse(n, pred_prev_dict, pred_curr_dict, gt_prev_dict, gt_curr_dict) for n in update_names]
+        pos_update_scores = [s for s in pos_update_scores if s is not None]
+        facing_update_scores = [s for s in facing_update_scores if s is not None]
         out['position_update'].append(float(np.mean(pos_update_scores)) if pos_update_scores else None)
         out['facing_update'].append(float(np.mean(facing_update_scores)) if facing_update_scores else None)
 
         # --- Stability Metrics (Unobserved objects) ---
-        common_names = set(pred_curr_dict) & set(pred_prev_dict) & set(gt_curr_dict) & set(gt_prev_dict)
-        unobserved = common_names - observed_set - {'agent'}
+        unobserved = common_names - observed_now - {'agent'}
 
-        pos_stab_scores: List[float] = []
-        fac_stab_scores: List[float] = []
-        for name in unobserved:
-            s = _pos_non_worse(name, pred_prev_dict, pred_curr_dict, gt_prev_dict, gt_curr_dict)
-            if s is not None:
-                pos_stab_scores.append(s)
+        prev_possible = prev_exp.get('possible_positions') or {}
+        curr_possible = curr_exp.get('possible_positions') or {}
 
-            s = _facing_non_worse(name, pred_prev_dict, pred_curr_dict, gt_prev_dict, gt_curr_dict)
-            if s is not None:
-                fac_stab_scores.append(s)
+        def _n_possible(d: Dict[str, Any], name: str) -> int | None:
+            v = d.get(name)
+            return len(v) if isinstance(v, list) else None
+
+        pos_stab_names: List[str] = []
+        for n in unobserved:
+            a = _n_possible(prev_possible, n)
+            b = _n_possible(curr_possible, n)
+            if a is not None and b is not None and abs(a - b) <= threshold:
+                pos_stab_names.append(n)
+
+        facing_stab_names = (observed_before - observed_now - {'agent'}) & common_names
+
+        pos_stab_scores = [_pos_non_worse(n, pred_prev_dict, pred_curr_dict, gt_prev_dict, gt_curr_dict) for n in pos_stab_names]
+        fac_stab_scores = [_facing_non_worse(n, pred_prev_dict, pred_curr_dict, gt_prev_dict, gt_curr_dict) for n in facing_stab_names]
+        pos_stab_scores = [s for s in pos_stab_scores if s is not None]
+        fac_stab_scores = [s for s in fac_stab_scores if s is not None]
 
         out['position_stability'].append(float(np.mean(pos_stab_scores)) if pos_stab_scores else None)
         out['facing_stability'].append(float(np.mean(fac_stab_scores)) if fac_stab_scores else None)

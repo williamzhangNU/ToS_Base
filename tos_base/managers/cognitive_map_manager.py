@@ -151,6 +151,79 @@ class CognitiveMapManager:
         self._pos_norm_L: float | None = None
         self._start_room_id: int | None = None
 
+    def evaluate_false_belief_cogmap(self, assistant_response: str, fb_turn_log: Dict[str, Any]) -> Dict[str, Any]:
+        """Evaluate false-belief (global) cognitive map.
+
+        The returned dict is intended to be stored at:
+        `turn_log["false_belief_log"]["cogmap_log"]`.
+        """
+        if not isinstance(fb_turn_log, dict):
+            return {}
+        room_dict = fb_turn_log.get("room_state")
+        agent_dict = fb_turn_log.get("agent_state")
+        if not isinstance(room_dict, dict) or not isinstance(agent_dict, dict):
+            return {"original_response": str(assistant_response or ""), "changed_objects_per_object": {}, "unchanged_objects": {}}
+
+        gt_room = Room.from_dict(room_dict)
+        gt_agent = Agent.from_dict(agent_dict)
+
+        fb_log = fb_turn_log.get("false_belief_log") or {}
+        newly_observed_changed = fb_log.get("newly_observed_changed_objects") or []
+        if not isinstance(newly_observed_changed, list):
+            newly_observed_changed = []
+
+        ground_truth_changes = fb_log.get("ground_truth_changes") or []
+        changes_map: dict[str, dict[str, bool]] = {}
+        all_changed_names: set[str] = set()
+        for c in (ground_truth_changes or []):
+            if isinstance(c, dict) and c.get("name"):
+                name = str(c["name"]).replace("_", " ")
+                all_changed_names.add(name)
+                flags = changes_map.setdefault(name, {"pos": False, "ori": False})
+                flags["pos"] = bool(flags["pos"] or c.get("pos"))
+                flags["ori"] = bool(flags["ori"] or c.get("ori"))
+
+        all_object_names = {o.name for o in gt_room.all_objects}
+        unchanged_object_names = sorted(all_object_names - all_changed_names)
+
+        responses_by_type = {"global": str(assistant_response or "")}
+        changed_objects_metrics: Dict[str, Dict[str, float]] = {}
+
+        # Evaluate each newly observed changed object separately (pos+facing only; ignore dir).
+        for obj_name in newly_observed_changed:
+            if not isinstance(obj_name, str) or not obj_name:
+                continue
+            name = obj_name.replace("_", " ")
+            flags = changes_map.get(name) or {}
+            single = self.evaluate_cogmaps(responses_by_type, gt_room, gt_agent, [name])
+            if not (single and single.global_log and single.global_log.pred_room_state and single.global_log.gt_room_state):
+                continue
+            self._ensure_pos_norm_L(gt_room, gt_agent)
+            pred_only = self._filter_br_by_names(single.global_log.pred_room_state, {name})
+            gt_only = self._filter_br_by_names(single.global_log.gt_room_state, {name})
+            m = self._compare_baserooms(pred_only, gt_only)
+            changed_objects_metrics[name] = {
+                "dir": None,
+                "pos": (float(m.pos) if flags.get("pos") else None),
+                "facing": (float(m.facing) if flags.get("ori") else None),
+                "overall": None,
+            }
+
+        # Evaluate unchanged objects as a single (global) cogmap log.
+        unchanged_log = (
+            self.evaluate_cogmaps(responses_by_type, gt_room, gt_agent, unchanged_object_names)
+            if unchanged_object_names else None
+        )
+
+        return {
+            "original_response": str(assistant_response or ""),
+            "changed_objects_per_object": changed_objects_metrics,
+            "unchanged_objects": (unchanged_log.to_dict() if unchanged_log else {}),
+            "newly_observed_changed_objects": [str(x).replace("_", " ") for x in newly_observed_changed if isinstance(x, str)],
+            "all_changed_object_names": sorted(all_changed_names),
+            "unchanged_object_names": unchanged_object_names,
+        }
+
     def evaluate_cogmap_type(self, assistant_response: str, gt_room: Room, gt_agent: Agent, observed_items: Optional[List[str]], map_type: str) -> Optional[BaseCogMapTurnLog]:
         """Extract JSON and evaluate a single cogmap type (global|local|rooms). Only compute what's needed for the given type."""
         self._register_active_entry_gate(gt_room)
@@ -361,6 +434,7 @@ class CognitiveMapManager:
             update_turn = avg_nested_dicts([{'cogmap_update_per_turn': d.get('cogmap_update_per_turn') or {}} for d in per_turn_list]).get('cogmap_update_per_turn', {})
             full_turn = avg_nested_dicts([{'cogmap_full_per_turn': d.get('cogmap_full_per_turn') or {}} for d in per_turn_list]).get('cogmap_full_per_turn', {})
             self_tracking_turn = avg_nested_dicts([{'self_tracking_per_turn': d.get('self_tracking_per_turn') or {}} for d in per_turn_list]).get('self_tracking_per_turn', {})
+            fb_unchanged_turn = avg_nested_dicts([{'cogmap_fb_unchanged_per_turn': d.get('cogmap_fb_unchanged_per_turn') or {}} for d in per_turn_list]).get('cogmap_fb_unchanged_per_turn', {})
             
             fog_probe_f1_turn = avg_nested_dicts([{'fog_probe_f1_per_turn': d.get('fog_probe_f1_per_turn') or []} for d in per_turn_list]).get('fog_probe_f1_per_turn', [])
             fog_probe_p_turn = avg_nested_dicts([{'fog_probe_p_per_turn': d.get('fog_probe_p_per_turn') or []} for d in per_turn_list]).get('fog_probe_p_per_turn', [])
@@ -382,6 +456,7 @@ class CognitiveMapManager:
                 "facing_update_per_turn": facing_update_turn,
                 "position_stability_per_turn": position_stability_turn,
                 "facing_stability_per_turn": facing_stability_turn,
+                "cogmap_fb_unchanged_per_turn": fb_unchanged_turn,
             }
             
             # Aggregate cogmap_fb metrics if available
@@ -435,10 +510,90 @@ class CognitiveMapManager:
         return res
 
     @staticmethod
+    def compute_false_belief_metrics(fb_turn_logs: List[Dict]) -> Dict:
+        """Compute aggregated false belief metrics from turn logs."""
+        if not fb_turn_logs:
+            return {}
+
+        def _avg(values: List[float]) -> Optional[float]:
+            v = [float(x) for x in (values or []) if isinstance(x, (int, float))]
+            return (sum(v) / len(v)) if v else None
+
+        # Changed: average ONLY the relevant metric per change type (pos or facing). No per-turn.
+        pos_vals: List[float] = []
+        facing_vals: List[float] = []
+        for fb_turn in (fb_turn_logs or []):
+            fb_log = fb_turn.get('false_belief_log') or {}
+            cm_log = fb_log.get('cogmap_log') or {}
+            per_obj = cm_log.get('changed_objects_per_object') or {}
+
+            # name -> {pos, ori}
+            changes_map: dict[str, dict[str, bool]] = {}
+            for c in (fb_log.get('ground_truth_changes') or []):
+                if not isinstance(c, dict) or not c.get('name'):
+                    continue
+                name = str(c['name']).replace('_', ' ')
+                flags = changes_map.setdefault(name, {'pos': False, 'ori': False})
+                flags['pos'] = bool(flags['pos'] or c.get('pos'))
+                flags['ori'] = bool(flags['ori'] or c.get('ori'))
+
+            if not isinstance(per_obj, dict):
+                continue
+            for obj_name, m in per_obj.items():
+                if not isinstance(m, dict):
+                    continue
+                name = str(obj_name).replace('_', ' ')
+                flags = changes_map.get(name) or {}
+                if flags.get('pos'):
+                    v = m.get('pos')
+                    if isinstance(v, (int, float)):
+                        pos_vals.append(float(v))
+                if flags.get('ori'):
+                    v = m.get('facing')
+                    if isinstance(v, (int, float)):
+                        facing_vals.append(float(v))
+        
+        changed_avg = {'dir': None, 'pos': _avg(pos_vals), 'facing': _avg(facing_vals), 'overall': None}
+
+        # Unchanged: same shape as normal cogmap global metrics
+        unchanged_metrics: List[MapCogMetrics] = []
+        for fb_turn in (fb_turn_logs or []):
+            cm_log = ((fb_turn.get('false_belief_log') or {}).get('cogmap_log') or {})
+            g_log = ((cm_log.get('unchanged_objects') or {}).get('global') or {})
+            m = MapCogMetrics.from_dict((g_log.get('metrics') or {}) if isinstance(g_log, dict) else {})
+            if m.valid:
+                unchanged_metrics.append(m)
+        unchanged_avg = (MapCogMetrics.average(unchanged_metrics).to_dict() if unchanged_metrics else {})
+
+        return {
+            'metrics': {
+                'changed': changed_avg,
+                'unchanged': unchanged_avg,
+            },
+        }
+
+    @staticmethod
+    def compute_false_belief_unchanged_per_turn(fb_turn_logs: List[Dict]) -> Dict[str, List[Optional[float]]]:
+        """Per-turn series for unchanged objects during false-belief phase."""
+        out = {'dir': [], 'facing': [], 'pos': [], 'overall': []}
+        for t in (fb_turn_logs or []):
+            cm_log = (((t or {}).get('false_belief_log') or {}).get('cogmap_log') or {})
+            g = ((cm_log.get('unchanged_objects') or {}).get('global') or {})
+            m = MapCogMetrics.from_dict((g.get('metrics') or {}) if isinstance(g, dict) else {})
+            out['dir'].append(float(m.dir) if m.valid else None)
+            out['facing'].append(float(m.facing) if m.valid else None)
+            out['pos'].append(float(m.pos) if m.valid else None)
+            out['overall'].append(float(m.overall) if m.valid else None)
+        return out
+
+    @staticmethod
     def aggregate_per_sample(env_data: Dict[str, Any], exp_type: str | None = None) -> Dict[str, Any]:
         """Aggregate cognitive-map metrics within a single sample (over turns).
         Returns exploration error/correctness/consistency and per-turn global metrics.
         """
+        fb_turn_logs = env_data.get('false_belief_turn_logs') or []
+        fb_unchanged_turn = CognitiveMapManager.compute_false_belief_unchanged_per_turn(fb_turn_logs) if fb_turn_logs else None
+
         # Helper: get exploration turns' cogmap logs
         turn_logs = env_data.get('env_turn_logs') or []
         cog_logs = []
@@ -448,10 +603,8 @@ class CognitiveMapManager:
                 cog_logs.append(t['cogmap_log'])
                 exp_logs.append(t.get('exploration_log') or {})
         if not cog_logs:
-            # Return empty/invalid metrics structure instead of empty dict
-            # so that visualization can at least show "no data" placeholders
-            # rather than hiding the section completely.
-            return {
+            # Keep placeholder exploration metrics, but still include false-belief cogmap if present.
+            res = {
                 'exploration': {
                     'error': {},
                     'correctness': {},
@@ -460,6 +613,12 @@ class CognitiveMapManager:
                 },
                 'per_turn_metrics': {},
             }
+            if fb_unchanged_turn:
+                res['per_turn_metrics']['cogmap_fb_unchanged_per_turn'] = fb_unchanged_turn
+            cogmap_fb_metrics = CognitiveMapManager.compute_false_belief_metrics(fb_turn_logs) if fb_turn_logs else {}
+            if cogmap_fb_metrics:
+                res['cogmap_fb'] = cogmap_fb_metrics
+            return res
         # Use shared helper to find last exploration cogmap
         
         last = get_last_exploration_cogmap(env_data)
@@ -574,50 +733,9 @@ class CognitiveMapManager:
         }
 
         # Process false belief cogmap data if available
-        fb_turn_logs = env_data.get('false_belief_turn_logs') or []
-        cogmap_fb_metrics = {}
-        if fb_turn_logs:
-            # Helper to compute average metrics from per-object changed objects
-            def _avg_changed_per_object_metrics(logs):
-                """Average metrics across all changed objects (from all turns)."""
-                all_metrics = []
-                for log in logs:
-                    per_obj_metrics = log.get('changed_objects_per_object') or {}
-                    # per_obj_metrics is a dict: {obj_name: {dir, facing, pos, overall}}
-                    for obj_name, metrics_dict in per_obj_metrics.items():
-                        m = MapCogMetrics.from_dict(metrics_dict)
-                        if m.valid:
-                            all_metrics.append(m)
-                avg = MapCogMetrics.average(all_metrics) if all_metrics else MapCogMetrics.invalid()
-                return avg.to_dict() if avg.valid else {}
-            
-            # Helper to compute average metrics from unchanged objects
-            def _avg_fb_metrics(logs, key):
-                metric_objs = []
-                for log in logs:
-                    sub_log = log.get(key) or {}
-                    g_log = sub_log.get('global') or {}
-                    m = MapCogMetrics.from_dict(g_log.get('metrics') or {})
-                    if m.valid: metric_objs.append(m)
-                avg = MapCogMetrics.average(metric_objs) if metric_objs else MapCogMetrics.invalid()
-                return avg.to_dict() if avg.valid else {}
-
-            fb_cog_logs = []
-            for fb_turn in fb_turn_logs:
-                cogmap_log = fb_turn.get('cogmap_log') or {}
-                if cogmap_log:
-                    fb_cog_logs.append(cogmap_log)
-            
-            # Average changed objects metrics (per-object, across all turns)
-            changed_avg = _avg_changed_per_object_metrics(fb_cog_logs)
-            unchanged_avg = _avg_fb_metrics(fb_cog_logs, 'unchanged_objects')
-
-            cogmap_fb_metrics = {
-                'metrics': {
-                    'changed': changed_avg,
-                    'unchanged': unchanged_avg,
-                },
-            }
+        if fb_unchanged_turn:
+            per_turn_metrics['cogmap_fb_unchanged_per_turn'] = fb_unchanged_turn
+        cogmap_fb_metrics = CognitiveMapManager.compute_false_belief_metrics(fb_turn_logs) if fb_turn_logs else {}
 
         result = {
             'exploration': {
