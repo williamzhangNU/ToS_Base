@@ -70,49 +70,40 @@ class ObjectModifier(RoomModifier):
 
     _ROTATIONS = (np.array([0, 1]), np.array([1, 0]), np.array([0, -1]), np.array([-1, 0]))
 
-    def __init__(self, seed: int, n_changes: int = 1, modification_type: Optional[str] = None, agent_pos: Optional[np.ndarray] = None):
+    def __init__(self, seed: int, n_changes: int = 4, agent_pos: Optional[np.ndarray] = None):
         self.rng = np.random.default_rng(seed)
-        self.n_changes = int(max(0, n_changes))
-        self.modification_type = (modification_type or "").strip().lower() or None  # move|rotate|None
+        # Always enforce four changes: two rotations and two moves.
+        self.n_changes = int(n_changes) if n_changes is not None else 4
         self.agent_pos = tuple(map(int, agent_pos)) if agent_pos is not None else None
 
     def modify(self, room: Room) -> Tuple[Room, List[ChangedObject]]:
         r = room.copy()
         candidates = [o for o in r.objects if o.name != "agent"]
-        if self.modification_type == "rotate":
-            candidates = [o for o in candidates if getattr(o, "has_orientation", False)]
-        if not candidates or self.n_changes <= 0:
-            return r, []
+        total_changes = self.n_changes
+        orientable = [o for o in candidates if getattr(o, "has_orientation", False)]
+        n_orientation = min(2, len(orientable), total_changes)
+        orientation_targets = list(self.rng.choice(orientable, size=n_orientation, replace=False)) if n_orientation else []
 
-        n = min(self.n_changes, len(candidates))
-        targets = list(self.rng.choice(candidates, size=n, replace=False))
-
+        remaining = [o for o in candidates if o not in orientation_targets]
         changes: List[ChangedObject] = []
-        for obj in targets:
-            kind = self._choose_kind(obj)
-            if kind == "rotate":
-                if self._rotate(obj):
-                    changes.append(ChangedObject(name=obj.name, ori=True))
-                elif self._move(r, obj):
-                    changes.append(ChangedObject(name=obj.name, pos=True))
-            else:  # move
-                if self._move(r, obj):
-                    changes.append(ChangedObject(name=obj.name, pos=True))
-                elif self._rotate(obj):
-                    changes.append(ChangedObject(name=obj.name, ori=True))
+
+        for obj in orientation_targets:
+            assert self._rotate(obj), f"Failed to rotate object {obj.name}"
+            changes.append(ChangedObject(name=obj.name, ori=True))
+
+        occupied_positions = {(int(o.pos[0]), int(o.pos[1])) for o in r.all_objects}
+        if self.agent_pos is not None:
+            occupied_positions.add(self.agent_pos)
+        position_pool = list(self.rng.permutation(remaining)) if remaining else []
+        while position_pool and len(changes) < total_changes:
+            obj = position_pool.pop()
+            if self._move(r, obj, occupied_positions):
+                changes.append(ChangedObject(name=obj.name, pos=True))
 
         # Rebuild to refresh object_map / membership derived from positions.
         return (Room.from_dict(r.to_dict()), changes)
 
-    def _choose_kind(self, obj: Object) -> str:
-        if self.modification_type in ("move", "rotate"):
-            if self.modification_type == "rotate" and not getattr(obj, "has_orientation", False):
-                return "move"
-            return self.modification_type
-        # random, but avoid rotate for non-orientable objects
-        return "rotate" if (getattr(obj, "has_orientation", False) and bool(self.rng.integers(0, 2))) else "move"
-
-    def _move(self, room: Room, obj: Object) -> bool:
+    def _move(self, room: Room, obj: Object, occupied_positions: Optional[set] = None) -> bool:
         if getattr(room, "mask", None) is None:
             return False
         mask = room.mask
@@ -121,16 +112,23 @@ class ObjectModifier(RoomModifier):
             return False
 
         cur = (int(obj.pos[0]), int(obj.pos[1]))
-        occupied = {(int(o.pos[0]), int(o.pos[1])) for o in room.all_objects }
-        # Also exclude agent position
-        if self.agent_pos is not None:
+        occupied = occupied_positions if occupied_positions is not None else {(int(o.pos[0]), int(o.pos[1])) for o in room.all_objects}
+        if occupied_positions is None and self.agent_pos is not None:
             occupied.add(self.agent_pos)
-        candidates = [tuple(map(int, p)) for p in valid if tuple(map(int, p)) not in occupied and tuple(map(int, p)) != cur]
+        candidates = [
+            tuple(map(int, p))
+            for p in valid
+            if tuple(map(int, p)) not in occupied
+            and ((int(p[0]) - cur[0]) ** 2 + (int(p[1]) - cur[1]) ** 2) >= 4
+        ]
         if not candidates:
             return False
 
         new_pos = candidates[int(self.rng.integers(0, len(candidates)))]
         obj.pos = np.array(new_pos, dtype=int)
+        if occupied_positions is not None:
+            occupied_positions.discard(cur)
+            occupied_positions.add(new_pos)
         return True
 
     def _rotate(self, obj: Object) -> bool:
@@ -153,7 +151,7 @@ if __name__ == "__main__":
 
     seed = 0
     room, agent, _ = create_and_plot_room(seed=seed, plot=True)
-    modified_room, changes = ObjectModifier(seed=seed, n_changes=3).modify(room)
+    modified_room, changes = ObjectModifier(seed=seed, n_changes=4).modify(room)
     assert all((c.pos ^ c.ori) for c in changes), "Each object must change position OR orientation (not both)."
     print("Changes:", [c.to_dict() for c in changes])
     RoomPlotter.plot(modified_room, agent, mode="img", save_path=f"room_{seed}_modified.png")
