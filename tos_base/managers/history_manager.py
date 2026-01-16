@@ -24,6 +24,12 @@ METRICS_BASENAME = "metrics.json"
 IMAGES_DIRNAME = "images"
 MESSAGES_BASENAME = "messages.json"
 STATE_BASENAME = "history_state.json"
+
+def get_evaluation_log_basename(eval_mode: str = "default") -> str:
+    """Get evaluation log filename based on eval_mode."""
+    if eval_mode == "default":
+        return "evaluation_turn_logs.json"
+    return f"evaluation_turn_logs_{eval_mode}.json"
 class HistoryManager:
     """Simple conversation history manager, one history manager for one run.
     Store only env turn logs in a single JSON file
@@ -32,7 +38,7 @@ class HistoryManager:
     """
 
     def __init__(self, observation_config: Dict, model_config: Dict , room_dict: Dict, agent_dict: Dict, output_dir:str, seed: int,
-                 image_dir:str = None, eval_override: bool = False, all_override: bool = False, false_belief_override: bool = False, all_tasks: List = None):
+                 image_dir:str = None, eval_override: bool = False, all_override: bool = False, false_belief_override: bool = False, all_tasks: List = None, eval_mode: str = "default"):
         # only explore turn logs are saved
         self.exploration_turn_logs: List[Dict] = []
         self.false_belief_turn_logs: List[Dict] = []
@@ -41,6 +47,7 @@ class HistoryManager:
         self.seed: int  = seed
         self.exp_type = observation_config['exp_type']
         self.enable_think = bool(((observation_config or {}).get('prompt_config') or {}).get('enable_think', False))
+        self.eval_mode = eval_mode
         self.model_path = HistoryManager.get_model_dir(output_dir, model_config['model_name'])
         self.output_dir = os.path.abspath(os.path.join(
             self.model_path, self._generate_room_key(room_dict, agent_dict),
@@ -60,7 +67,7 @@ class HistoryManager:
         self.model_config_path = os.path.join(self.model_path, CONFIG_BASENAME)
         self.exploration_path = os.path.join(self.output_dir, EXPLORATION_LOG_BASENAME)
         self.false_belief_path = os.path.join(self.output_dir, FALSE_BELIEF_LOG_BASENAME)
-        self.evaluation_path = os.path.join(self.output_dir, EVALUATION_LOG_BASENAME)
+        self.evaluation_path = os.path.join(self.output_dir, get_evaluation_log_basename(self.eval_mode))
         self.metrics_path = os.path.join(self.output_dir, METRICS_BASENAME)
         self.messages_path = os.path.join(self.output_dir, MESSAGES_BASENAME)
         self.state_path = os.path.join(self.output_dir, STATE_BASENAME)
@@ -433,13 +440,24 @@ class HistoryManager:
             sample_data["false_belief_turn_logs"] = false_belief_logs if false_belief_logs else []
 
         # Load evaluation turn logs - store each task separately
-        if os.path.exists(evaluation_file):
-            with open(evaluation_file, 'r') as f:
-                evaluation_logs = json.load(f)
-            # Migrate task names
-            evaluation_logs = HistoryManager._migrate_task_names(evaluation_logs)
-            # Store each evaluation task separately
-            sample_data["evaluation_tasks"] = evaluation_logs if evaluation_logs else {}
+        # Try loading all possible eval_mode files
+        all_eval_modes = ["default", "prompt_cogmap", "use_gt_cogmap", "use_model_cogmap"]
+        for eval_mode in all_eval_modes:
+            eval_file = os.path.join(combo_path, get_evaluation_log_basename(eval_mode))
+            if os.path.exists(eval_file):
+                with open(eval_file, 'r') as f:
+                    evaluation_logs = json.load(f)
+                # Migrate task names
+                evaluation_logs = HistoryManager._migrate_task_names(evaluation_logs)
+                # Store each evaluation task separately with mode suffix if not default
+                if eval_mode == "default":
+                    sample_data["evaluation_tasks"] = evaluation_logs if evaluation_logs else {}
+                else:
+                    sample_data[f"evaluation_tasks_{eval_mode}"] = evaluation_logs if evaluation_logs else {}
+        
+        # Keep backward compatibility: if default mode exists, use it as primary
+        if "evaluation_tasks" not in sample_data:
+            sample_data["evaluation_tasks"] = {}
 
         # Load config and metrics if present
         if os.path.exists(config_file):
@@ -525,7 +543,7 @@ class HistoryManager:
             json.dump(state, f, ensure_ascii=False, indent=2)
 
     @staticmethod
-    def load_from_dir(combo_dir: str, eval_override: bool, all_tasks: List = None, image_dir: str = None) -> "HistoryManager":
+    def load_from_dir(combo_dir: str, eval_override: bool, all_tasks: List = None, image_dir: str = None, eval_mode: str = "default") -> "HistoryManager":
         """Load a HistoryManager using state saved in combo_dir/history_state.json."""
         combo_dir = os.path.abspath(combo_dir)
         state_file = os.path.join(combo_dir, STATE_BASENAME)
@@ -552,6 +570,7 @@ class HistoryManager:
             eval_override=eval_override,
             false_belief_override=False,
             all_tasks=all_tasks,
+            eval_mode=eval_mode,
         )
         if final_image_dir and saved_image_dir and final_image_dir != saved_image_dir:
             old_base = os.path.dirname(saved_image_dir)
