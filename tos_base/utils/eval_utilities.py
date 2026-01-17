@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, 
 from types import SimpleNamespace
 import math
 import re
+import json
 import numpy as np
 
 from ..actions.base import BaseAction
@@ -1022,6 +1023,65 @@ def evaluate_task_answer(
     return evaluator(pred, answer, choices)
 
 
+def parse_cogmap_response_content(content: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    """Parse content containing a cogmap JSON and an answer text.
+    
+    Args:
+        content: The string containing JSON block(s) and answer text.
+        
+    Returns:
+        Tuple of (cogmap_dict, answer_text). 
+        cogmap_dict is None if no valid JSON found.
+        answer_text is the content with the JSON block removed.
+    """
+    if not content:
+        return None, ""
+
+    # Look for ```json ... ``` or ``` ... ```
+    # Non-greedy match for the content inside backticks
+    code_block_pattern = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+    
+    match = code_block_pattern.search(content)
+    cogmap = None
+    answer_text = content
+    
+    if match:
+        json_str = match.group(1)
+        full_match = match.group(0)
+        try:
+            cogmap = json.loads(json_str)
+            # Remove the code block from the text
+            answer_text = content.replace(full_match, "", 1).strip()
+        except json.JSONDecodeError:
+            pass
+            
+    return cogmap, answer_text
+
+
+def evaluate_task_answer_with_cogmap(
+    task_type: str,
+    pred: Any,
+    answer: Any,
+    choices: Optional[List[str]] = None,
+) -> Tuple[float, Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Evaluate task answer after parsing out the cognitive map.
+    
+    Returns:
+        (score, info_dict, cogmap_dict)
+    """
+    if not isinstance(pred, str):
+        # Fallback if pred is not string
+        score, info = evaluate_task_answer(task_type, pred, answer, choices)
+        return score, info, None
+        
+    cogmap, answer_text = parse_cogmap_response_content(pred)
+    
+    # Evaluate the cleaned answer text
+    score, info = evaluate_task_answer(task_type, answer_text, answer, choices)
+    
+    return score, info, cogmap
+
+
 # ========== Exports ==========
 __all__ = [
     'TaskEvaluator',
@@ -1037,4 +1097,6 @@ __all__ = [
     'e2a_eval_fn',
     'resolve_gate_orientation',
     'extract_elements',
+    'parse_cogmap_response_content',
+    'evaluate_task_answer_with_cogmap',
 ]

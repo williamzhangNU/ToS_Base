@@ -1,9 +1,12 @@
 import copy
 import random
+import os
+import json
 from dataclasses import dataclass
-from typing import List, Dict, Set
-
+from typing import List, Dict, Set, Any
+from argparse import ArgumentParser
 import numpy as np
+from tqdm import tqdm
 
 from ..core.room import Room
 from ..actions.base import BaseAction
@@ -13,6 +16,7 @@ from ..core.relationship import CardinalBinsAllo
 from .exploration_manager import ExplorationManager
 from ..core.object import Agent
 from ..utils.action_utils import action_results_to_text
+from ..utils.room_utils import initialize_room_from_json
 
 
 @dataclass
@@ -847,54 +851,68 @@ def get_agent_proxy(name: str, room: Room, agent: Agent, grid_size: int | None =
         return AnalystAgentProxy(room, agent, delegate='observer_analyst', observer_delegate='oracle', grid_size=grid_size)
 
 
-if __name__ == "__main__":
-    import os, json
-    from tqdm import tqdm
-    from ..utils.room_utils import initialize_room_from_json
+def get_exploration_history_stats(data_dir: str, agent_type: str) -> Dict[str, Any]:
+    """Iterate over runs in data_dir, run agent proxy, and return stats."""
+    if not os.path.exists(data_dir):
+        raise FileNotFoundError(f"Directory not found: {data_dir}")
 
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'room_data'))
-    runs = [f"run{idx:02d}" for idx in range(100)]
+    runs = sorted([d for d in os.listdir(data_dir) if d.startswith("run") and os.path.isdir(os.path.join(data_dir, d))])
+    
+    total_cost = 0.0
+    step_counts = []
+    info_gain_lists = []
+    action_counts_sum = {}
+    n = 0
 
-    scout_cost, strategist_cost, n = 0.0, 0.0, 0
-    strat_info_lists, scout_info_lists = [], []
-    scout_counts_sum, strat_counts_sum = {}, {}
-    for r in tqdm(runs, desc="Processing environments"):
-        meta = os.path.join(root, r, 'meta_data.json')
-        if not os.path.isfile(meta):
-            continue
+    for r in tqdm(runs, desc=f"Processing {agent_type}"):
+        meta = os.path.join(data_dir, r, 'meta_data.json')
+        if not os.path.isfile(meta): continue
+            
         with open(meta, 'r') as f:
             data = json.load(f)
+            
         room, agent = initialize_room_from_json(data)
-        scout = get_agent_proxy('scout', room, agent)
-        scout.run()
-        scout_cost += scout.mgr.get_exp_summary().get('action_cost', 0.0)
-        scout_info_lists.append(scout.mgr.get_exp_summary().get('info_gain_list', []) or [])
-        s_counts = scout.mgr.get_exp_summary().get('action_counts', {}) or {}
-        for k, v in s_counts.items():
-            scout_counts_sum[k] = scout_counts_sum.get(k, 0.0) + float(v)
-        room2, agent2 = initialize_room_from_json(data)
-        strat = get_agent_proxy('strategist', room2, agent2)
-        strat.run()
-        strategist_cost += strat.mgr.get_exp_summary().get('action_cost', 0.0)
-        strat_info_lists.append(strat.mgr.get_exp_summary().get('info_gain_list', []) or [])
-        t_counts = strat.mgr.get_exp_summary().get('action_counts', {}) or {}
-        for k, v in t_counts.items():
-            strat_counts_sum[k] = strat_counts_sum.get(k, 0.0) + float(v)
+        proxy = get_agent_proxy(agent_type, room, agent)
+        turns = proxy.run()
+        
+        steps = len(turns)
+        if steps > 0 and turns[-1].actions and turns[-1].actions[0].action_type == 'term':
+            steps -= 1
+        step_counts.append(steps)
+        
+        summary = proxy.mgr.get_exp_summary()
+        total_cost += summary.get('action_cost', 0.0)
+        info_gain_lists.append(summary.get('info_gain_list', []) or [])
+        
+        for k, v in (summary.get('action_counts', {}) or {}).items():
+            action_counts_sum[k] = action_counts_sum.get(k, 0.0) + float(v)
         n += 1
 
-    if n > 0:
-        print(f"Envs: {n}")
-        print(f"Avg action cost (scout): {scout_cost / n:.3f}")
-        print(f"Avg action cost (strategist): {strategist_cost / n:.3f}")
-        avg_info = ExplorationManager._avg_lists_carry_forward(strat_info_lists)
-        print(f"Avg info gain per step (strategist): {[round(x, 4) for x in avg_info]}")
+    return {
+        "num_envs": n,
+        "avg_steps": float(np.mean(step_counts)) if n > 0 else 0.0,
+        "std_steps": float(np.std(step_counts)) if n > 0 else 0.0,
+        "avg_action_cost": (total_cost / n) if n > 0 else 0.0,
+        "avg_info_gain_per_step": ExplorationManager._avg_lists_carry_forward(info_gain_lists) if n > 0 else [],
+        "avg_action_counts": {k: v / n for k, v in sorted(action_counts_sum.items())} if n > 0 else {},
+    }
 
-        avg_info = ExplorationManager._avg_lists_carry_forward(scout_info_lists)
-        print(f"Avg info gain per step (scout): {[round(x, 4) for x in avg_info]}")
-        if n > 0:
-            avg_scout_counts = {k: scout_counts_sum.get(k, 0.0) / n for k in sorted(scout_counts_sum.keys())}
-            avg_strat_counts = {k: strat_counts_sum.get(k, 0.0) / n for k in sorted(strat_counts_sum.keys())}
-            print(f"Avg action counts (scout): {avg_scout_counts}")
-            print(f"Avg action counts (strategist): {avg_strat_counts}")
+
+if __name__ == "__main__":
+    # Simple test for get_exploration_history_stats
+    # Assume we run this from project root or relative to the file location
+    # Adjust path to point to a valid room_data directory if needed
+    argument = ArgumentParser()
+    argument.add_argument("--data_dir", type=str, default="vagen/env/spatial/room_data")
+    argument.add_argument("--agent_type", type=str, default="scout")
+    args = argument.parse_args()
+    root = args.data_dir
+    if os.path.exists(root):
+        print(f"Testing get_exploration_history_stats with '{args.agent_type}' on {root}...")
+        try:
+            stats = get_exploration_history_stats(root, args.agent_type)
+            print(json.dumps(stats, indent=2))
+        except Exception as e:
+            print(f"Error: {e}")
     else:
-        print("No environments found.")
+        print(f"Test skipped: {root} not found. Please provide a valid data directory.")
