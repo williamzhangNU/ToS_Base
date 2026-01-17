@@ -159,6 +159,11 @@ class HTMLGenerator:
         # Return as sorted list for consistent ordering
         return sorted(list(combination_keys))
 
+    @staticmethod
+    def _format_eval_task_label(mode_label: str, task_type: str) -> str:
+        if mode_label == "default":
+            return task_type
+        return f"{mode_label} / {task_type}"
 
     def generate_config_summaries(self, f) -> None:
         """Generate summaries for each config combination"""
@@ -297,13 +302,25 @@ class HTMLGenerator:
                     f.write(VisualizationHelper.dict_to_html(exp_group_filtered))
                     f.write("</div>\n")
 
-            # Group evaluation performance
-            eval_group = self.eval_summary.get("group_performance", {}).get(gname)
-            if eval_group:
-                f.write("<div class='metrics-box evaluation'>\n")
-                f.write("<h4>✅ Evaluation</h4>\n")
-                f.write(VisualizationHelper.dict_to_html(self._filter_eval_for_display(eval_group)))
-                f.write("</div>\n")
+            # Group evaluation performance (default + extra modes)
+            eval_by_mode = self.eval_summary.get("group_performance_by_mode", {})
+            if eval_by_mode:
+                for mode in sorted(eval_by_mode.keys()):
+                    eval_group = (eval_by_mode.get(mode) or {}).get(gname)
+                    if not eval_group:
+                        continue
+                    title = "✅ Evaluation" if mode == "default" else f"✅ Evaluation ({mode})"
+                    f.write("<div class='metrics-box evaluation'>\n")
+                    f.write(f"<h4>{escape(title)}</h4>\n")
+                    f.write(VisualizationHelper.dict_to_html(self._filter_eval_for_display(eval_group)))
+                    f.write("</div>\n")
+            else:
+                eval_group = self.eval_summary.get("group_performance", {}).get(gname)
+                if eval_group:
+                    f.write("<div class='metrics-box evaluation'>\n")
+                    f.write("<h4>✅ Evaluation</h4>\n")
+                    f.write(VisualizationHelper.dict_to_html(self._filter_eval_for_display(eval_group)))
+                    f.write("</div>\n")
 
             # Group cognitive map performance
             cogmap_group = self.cogmap_summary.get("group_performance", {}).get(gname)
@@ -462,13 +479,20 @@ class HTMLGenerator:
                 f.write(VisualizationHelper.dict_to_html(filtered_exploration))
                 f.write("</div>\n")
 
-        # Evaluation metrics
-        evaluation_metrics = self._filter_eval_for_display(metrics.get("evaluation", {}))
-        if evaluation_metrics:
-            filtered_evaluation = filter_per_turn_keys(evaluation_metrics)
+        # Evaluation metrics (default + extra modes)
+        eval_blocks = []
+        default_eval = self._filter_eval_for_display(metrics.get("evaluation", {}))
+        if default_eval:
+            eval_blocks.append(("✅ Evaluation", default_eval))
+        for k, v in metrics.items():
+            if k.startswith("evaluation_") and k != "evaluation":
+                mode = k.split("evaluation_", 1)[1] or "default"
+                eval_blocks.append((f"✅ Evaluation ({mode})", self._filter_eval_for_display(v)))
+        for title, eval_metrics in eval_blocks:
+            filtered_evaluation = filter_per_turn_keys(eval_metrics)
             if filtered_evaluation:
                 f.write("<div class='metrics-box evaluation'>\n")
-                f.write("<h4>✅ Evaluation</h4>\n")
+                f.write(f"<h4>{escape(title)}</h4>\n")
                 f.write(VisualizationHelper.dict_to_html(filtered_evaluation))
                 f.write("</div>\n")
 
@@ -758,6 +782,7 @@ class HTMLGenerator:
         cogmap_types = [
             ('global', '🗺️ Global Cognitive Map Response'),
             ('local', '🗺️ Local Cognitive Map Response'),
+            ('local_newly', '🗺️ Local (Newly Observed) Map Response'),
             ('fog_probe', '🌫️ Fog Probe Response'),
         ]
 
@@ -777,11 +802,13 @@ class HTMLGenerator:
         for map_type, title in cogmap_types:
             data = cogmap_log.get(map_type, {})
             if data.get('original_response'):
-                tail = f"{kind}_{page_idx}_{turn_num}"
-                if qid:
-                    tail = f"{tail}_{_safe_id(qid)}"
-                response_id = f"cogmap_{map_type}_{tail}"
-                self._render_expandable_block(f, data['original_response'], response_id, title, "cogmap-response")
+                # Skip duplicate response display for newly observed (same as local)
+                if map_type != 'local_newly':
+                    tail = f"{kind}_{page_idx}_{turn_num}"
+                    if qid:
+                        tail = f"{tail}_{_safe_id(qid)}"
+                    response_id = f"cogmap_{map_type}_{tail}"
+                    self._render_expandable_block(f, data['original_response'], response_id, title, "cogmap-response")
 
                 # Add Symbolic Map and Fog Probe Image side-by-side
                 if map_type == 'fog_probe':
@@ -870,18 +897,20 @@ class HTMLGenerator:
                         f.write("</div>\n")  # End json-content
                         f.write("</div>\n")  # End json-container
 
-                elif map_type == 'local':
+                elif map_type in ('local', 'local_newly'):
                     # For local, display pred_json and gt_json in two columns
                     pred_json = data.get('pred_json', {})
                     gt_json = data.get('gt_json', {})
 
                     if pred_json or gt_json:
-                        f.write("<div class='json-container local'>\n")
+                        # Use 'local' class for styling compatibility
+                        style_class = 'local'
+                        f.write(f"<div class='json-container {style_class}'>\n")
                         f.write("<div class='json-header'>")
                         f.write("<strong>📊 Cognitive Map JSONs</strong>")
                         f.write("</div>\n")
                         f.write("<div class='json-content'>\n")
-                        f.write("<div class='json-compare local'>\n")
+                        f.write(f"<div class='json-compare {style_class}'>\n")
 
                         # Left - pred_json
                         f.write("<div class='json-box left predicted'>\n")
@@ -951,11 +980,13 @@ class HTMLGenerator:
         # Extract metrics
         global_log = cogmap_log.get("global", {})
         local_log = cogmap_log.get("local", {})
+        local_newly_log = cogmap_log.get("local_newly", {})
 
         metrics_block = {
             "Global": global_log.get("metrics", {}) if global_log else {},
             "Global (Full)": global_log.get("metrics_full", {}) if global_log else {},
             "Local": local_log.get("metrics", {}) if local_log else {},
+            "Local (Newly)": local_newly_log.get("metrics", {}) if local_newly_log else {},
             "Fog Probe": cogmap_log.get("fog_probe", {}).get("metrics", {}) if cogmap_log.get("fog_probe") else {},
         }
 
@@ -1015,9 +1046,16 @@ class HTMLGenerator:
     def generate_exploration_turns(self, f, entry: Dict, page_idx: int) -> None:
         """Generate exploration turn logs and evaluation tasks"""
         env_turn_logs = entry.get("env_turn_logs", [])
-        evaluation_tasks = entry.get("evaluation_tasks", {})
+        evaluation_tasks = entry.get("evaluation_tasks", {}) or {}
         false_belief_turn_logs = entry.get("false_belief_turn_logs", [])
         is_passive = self._is_passive_combo(entry)
+
+        extra_eval_modes = {}
+        for k, v in entry.items():
+            if k.startswith("evaluation_tasks_"):
+                mode = k.split("evaluation_tasks_", 1)[1] or "default"
+                extra_eval_modes[mode] = v
+        eval_groups = [("default", evaluation_tasks)] + sorted(extra_eval_modes.items())
 
         if not env_turn_logs and not evaluation_tasks and not false_belief_turn_logs:
             f.write("<div class='metrics'><strong>⚠️ No turns available</strong></div>\n")
@@ -1145,17 +1183,25 @@ class HTMLGenerator:
             render_logs(false_belief_turn_logs, "FB Turn")
 
         # Generate evaluation turns if available
-        if evaluation_tasks:
+        eval_offset = len(env_turn_logs)
+        for mode_label, task_dict in eval_groups:
+            if not task_dict:
+                continue
+            mode_title = "default" if mode_label == "default" else mode_label
+            f.write(f"<div class='section-header'><h3>📊 Evaluation ({escape(mode_title)})</h3></div>\n")
             # Handle new nested structure: {task_type: {question_id: eval_data}}
-            for eval_idx, (task_type, task_questions) in enumerate(evaluation_tasks.items()):
-                t_idx = len(env_turn_logs) + eval_idx
+            for eval_idx, (task_type, task_questions) in enumerate(task_dict.items()):
+                t_idx = eval_offset + eval_idx
 
                 # Create evaluation turn section with task selector data
-                f.write(f"<div class='turn-split eval-task' data-task-name='{escape(task_type)}'")
-                if eval_idx > 0:  # Hide all but first task by default
-                    f.write(" style='display:none'")
-                f.write(">\n")
-                f.write(f"<h3>📊 Evaluation: {escape(task_type)}</h3>\n")
+                task_label = self._format_eval_task_label(mode_label, task_type)
+                task_key = f"{mode_label}:{task_type}"
+                f.write(
+                    f"<div class='turn-split eval-task' data-task-name='{escape(task_label)}' "
+                    f"data-task-key='{escape(task_key)}' data-task-type='{escape(task_type)}' "
+                    f"data-eval-mode='{escape(mode_label)}'>\n"
+                )
+                f.write(f"<h3>📊 Task: {escape(task_type)}</h3>\n")
 
                 f.write("<div class='turn-content'>\n")
 
@@ -1196,6 +1242,7 @@ class HTMLGenerator:
                             **eval_info.get("evaluation_data", {}),
                             **eval_info.get("evaluation_info", {}),
                             "score": float(eval_info.get("score")),
+                            "evaluation_mode": mode_label,
                         }
                         f.write(VisualizationHelper.dict_to_html(details))
                         f.write("</div>\n")
@@ -1231,6 +1278,7 @@ class HTMLGenerator:
                 f.write("</div>\n")  # End turn-left
                 f.write("</div>\n")  # End turn-content
                 f.write("</div>\n")  # End turn-split
+            eval_offset += len(task_dict)
 
         f.write("</section>\n")
 

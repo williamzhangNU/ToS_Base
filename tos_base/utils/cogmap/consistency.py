@@ -69,15 +69,11 @@ def stability(
     env_data_or_logs: Dict | List[Dict],
     threshold: int = 1,
 ) -> Dict[str, List[float | None]]:
-    """Per-adjacent-turn update/stability metrics.
+    """Per-adjacent-turn stability metrics (merged update/stability).
 
-    For each adjacent exploration turn (t-1 -> t):
-    - Update metric (only for objects observed in turn t AND observed before turn t):
-      - position_update: Check if predicted position at turn t is getting closer to GT compared to turn t-1 (or equal)
-      - facing_update: Check if facing turns from wrong to correct, or keeps unchanged
-    - Stability metrics (only for unobserved objects in turn t):
-      - position_stability: Only objects whose possible-position count changes by <= `threshold`; then check non-worse
-      - facing_stability: Only objects observed before turn t but NOT observed in turn t; then check non-worse
+    For each adjacent exploration turn (t-1 -> t), for every object observed before t:
+    - position: Only objects whose possible-position count changes by <= `threshold`; then check non-worse
+    - facing: Check non-worse
 
     Returns:
         Dict with keys: 'position_update', 'facing_update', 'position_stability', 'facing_stability'
@@ -128,7 +124,6 @@ def stability(
         prev_exp = prev_log.get('exploration_log') or {}
         curr_exp = curr_log.get('exploration_log') or {}
         
-        observed_now = set(curr_exp.get('visible_objects') or [])
         observed_before = set(prev_exp.get('observed_items') or [])
 
         # Need previous and current predicted and GT global rooms
@@ -146,17 +141,7 @@ def stability(
         gt_curr_dict = {o.name: o for o in gt_curr.objects}
         common_names = set(pred_curr_dict) & set(pred_prev_dict) & set(gt_curr_dict) & set(gt_prev_dict)
 
-        # --- Update Metrics (Position & Facing) ---
-        update_names = (observed_now & observed_before & common_names) - {'agent'}
-        pos_update_scores = [_pos_non_worse(n, pred_prev_dict, pred_curr_dict, gt_prev_dict, gt_curr_dict) for n in update_names]
-        facing_update_scores = [_facing_non_worse(n, pred_prev_dict, pred_curr_dict, gt_prev_dict, gt_curr_dict) for n in update_names]
-        pos_update_scores = [s for s in pos_update_scores if s is not None]
-        facing_update_scores = [s for s in facing_update_scores if s is not None]
-        out['position_update'].append(float(np.mean(pos_update_scores)) if pos_update_scores else None)
-        out['facing_update'].append(float(np.mean(facing_update_scores)) if facing_update_scores else None)
-
-        # --- Stability Metrics (Unobserved objects) ---
-        unobserved = common_names - observed_now - {'agent'}
+        stable_names = (observed_before & common_names) - {'agent'}
 
         prev_possible = prev_exp.get('possible_positions') or {}
         curr_possible = curr_exp.get('possible_positions') or {}
@@ -166,21 +151,24 @@ def stability(
             return len(v) if isinstance(v, list) else None
 
         pos_stab_names: List[str] = []
-        for n in unobserved:
+        for n in stable_names:
             a = _n_possible(prev_possible, n)
             b = _n_possible(curr_possible, n)
             if a is not None and b is not None and abs(a - b) <= threshold:
                 pos_stab_names.append(n)
-
-        facing_stab_names = (observed_before - observed_now - {'agent'}) & common_names
+        facing_stab_names = stable_names
 
         pos_stab_scores = [_pos_non_worse(n, pred_prev_dict, pred_curr_dict, gt_prev_dict, gt_curr_dict) for n in pos_stab_names]
         fac_stab_scores = [_facing_non_worse(n, pred_prev_dict, pred_curr_dict, gt_prev_dict, gt_curr_dict) for n in facing_stab_names]
         pos_stab_scores = [s for s in pos_stab_scores if s is not None]
         fac_stab_scores = [s for s in fac_stab_scores if s is not None]
 
-        out['position_stability'].append(float(np.mean(pos_stab_scores)) if pos_stab_scores else None)
-        out['facing_stability'].append(float(np.mean(fac_stab_scores)) if fac_stab_scores else None)
+        pos_stab_avg = float(np.mean(pos_stab_scores)) if pos_stab_scores else None
+        fac_stab_avg = float(np.mean(fac_stab_scores)) if fac_stab_scores else None
+        out['position_stability'].append(pos_stab_avg)
+        out['facing_stability'].append(fac_stab_avg)
+        out['position_update'].append(pos_stab_avg)
+        out['facing_update'].append(fac_stab_avg)
 
     return out
 

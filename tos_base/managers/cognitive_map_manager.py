@@ -120,6 +120,7 @@ class CognitiveMapTurnLog:
     """Aggregate per-type logs for one turn."""
     global_log: Optional[GlobalCogMapTurnLog] = None
     local_log: Optional[LocalCogMapTurnLog] = None
+    local_newly_log: Optional[LocalCogMapTurnLog] = None
     fog_probe_log: Optional[FogProbeCogMapTurnLog] = None
     consistency: Optional[ConsistencySummary] = None
 
@@ -129,6 +130,8 @@ class CognitiveMapTurnLog:
             out["global"] = self.global_log.to_dict()
         if self.local_log:
             out["local"] = self.local_log.to_dict()
+        if self.local_newly_log:
+            out["local_newly"] = self.local_newly_log.to_dict()
         if self.fog_probe_log:
             out["fog_probe"] = self.fog_probe_log.to_dict()
         if self.consistency:
@@ -150,6 +153,9 @@ class CognitiveMapManager:
         # position normalization scale (computed once in global frame)
         self._pos_norm_L: float | None = None
         self._start_room_id: int | None = None
+        
+        # State tracking for newly observed items
+        self._last_observed_items: Set[str] = set()
 
     def evaluate_false_belief_cogmap(self, assistant_response: str, fb_turn_log: Dict[str, Any]) -> Dict[str, Any]:
         """Evaluate false-belief (global) cognitive map.
@@ -357,6 +363,11 @@ class CognitiveMapManager:
             observed_items: List of observed item names
             all_correct_coords: List of correct unexplored (x, y) coordinates
         """
+        # Calculate newly observed items
+        current_observed = set([str(x).replace('_', ' ') for x in (observed_items or [])])
+        newly_observed = current_observed - self._last_observed_items
+        self._last_observed_items = current_observed
+
         out = CognitiveMapTurnLog()
         for map_type_key, resp in (responses_by_type or {}).items():
             if not isinstance(resp, str):
@@ -371,6 +382,29 @@ class CognitiveMapManager:
             else:
                 single = self.evaluate_cogmap_type(resp, gt_room, gt_agent, observed_items, map_type_key)
                 setattr(out, f"{single.type}_log", single)
+
+                # If local map, compute newly observed metrics as a separate log entry
+                if map_type_key == "local" and single and single.pred_room_state and single.gt_room_state:
+                    # Filter both pred and gt to only include newly observed objects
+                    pred_newly = self._filter_br_by_names(single.pred_room_state, newly_observed)
+                    gt_newly = self._filter_br_by_names(single.gt_room_state, newly_observed)
+                    
+                    # Only compute if there are actually newly observed objects in GT
+                    metrics_newly = MapCogMetrics.invalid()
+                    if gt_newly.objects:
+                        metrics_newly = self._compare_baserooms(pred_newly, gt_newly)
+                    
+                    # Create a new log for newly observed
+                    out.local_newly_log = LocalCogMapTurnLog(
+                        type="local_newly",
+                        extraction_success=single.extraction_success,
+                        original_response=single.original_response,
+                        pred_json=single.pred_json,
+                        pred_room_state=pred_newly,
+                        metrics=metrics_newly,
+                        gt_room_state=gt_newly,
+                        gt_json=self.baseroom_to_json(gt_newly, include_gates=True)
+                    )
         # Consistency fields per turn
         summary = ConsistencySummary()
         if (
@@ -424,6 +458,7 @@ class CognitiveMapManager:
         # Calculate counts
         n_global = count_valid(pre_list, ['exploration', 'error', 'global_vs_gt_global_avg'])
         n_local = count_valid(pre_list, ['exploration', 'error', 'local_vs_gt_local_avg'])
+        n_newly = count_valid(pre_list, ['exploration', 'error', 'newly_observed_vs_gt_local_avg'])
         n_fog = count_valid(pre_list, ['exploration', 'fog_probe', 'f1_avg'])
 
         if exp_type == 'active':
@@ -476,7 +511,7 @@ class CognitiveMapManager:
             
             # Add counts
             if exploration:
-                exploration['n_samples'] = f"Global: {n_global}, Local: {n_local}"
+                exploration['n_samples'] = f"Global: {n_global}, Local: {n_local}, Newly: {n_newly}"
             if fog_probe:
                 fog_probe['n_samples'] = n_fog
 
@@ -506,7 +541,7 @@ class CognitiveMapManager:
              if fog:
                  res['fog_probe'] = fog
                  res['fog_probe']['n_samples'] = n_fog
-             res['exploration']['n_samples'] = f"Global: {n_global}, Local: {n_local}"
+             res['exploration']['n_samples'] = f"Global: {n_global}, Local: {n_local}, Newly: {n_newly}"
         return res
 
     @staticmethod
@@ -647,6 +682,7 @@ class CognitiveMapManager:
             'local_vs_gt_local_avg': _d(_avg_maps(cog_logs, ['local', 'metrics'])),
             'global_vs_gt_global_avg': _d(_avg_maps(cog_logs, ['global', 'metrics'])),
             'agent_vs_gt_agent_avg': _d(_avg_maps(cog_logs, ['global', 'metric_agent'])),
+            'newly_observed_vs_gt_local_avg': _d(_avg_maps(cog_logs, ['local_newly', 'metrics'])),
         }
 
         # Correctness: last global_full

@@ -67,10 +67,7 @@ def compute_correlation_metrics(env_data_list: List[Dict[str, Any]], exp_type: s
             acc = (s['eval_m'].get('per_task') or {}).get(task, {}).get('avg_accuracy')
             task_accs.append(_to_float_or_none(acc))
 
-        print(f"Task: {task}, Accuracy: {task_accs}")
-        print("--------------------------------")
         cogmap_acc_correlations[task] = calculate_pearson_correlation(cog_scores, task_accs)
-    print(f"Cogmap Scores: {cog_scores}") 
 
     return {
         'cogmap_acc_correlations': cogmap_acc_correlations,

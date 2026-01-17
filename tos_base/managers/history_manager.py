@@ -24,12 +24,24 @@ METRICS_BASENAME = "metrics.json"
 IMAGES_DIRNAME = "images"
 MESSAGES_BASENAME = "messages.json"
 STATE_BASENAME = "history_state.json"
-
 def get_evaluation_log_basename(eval_mode: str = "default") -> str:
     """Get evaluation log filename based on eval_mode."""
     if eval_mode == "default":
         return "evaluation_turn_logs.json"
     return f"evaluation_turn_logs_{eval_mode}.json"
+
+def _discover_eval_modes(combo_path: str) -> List[str]:
+    modes: List[str] = []
+    default_path = os.path.join(combo_path, EVALUATION_LOG_BASENAME)
+    if os.path.exists(default_path):
+        modes.append("default")
+    for name in os.listdir(combo_path):
+        if not name.startswith("evaluation_turn_logs_") or not name.endswith(".json"):
+            continue
+        mode = name[len("evaluation_turn_logs_"):-len(".json")]
+        if mode and mode not in modes:
+            modes.append(mode)
+    return sorted(modes)
 class HistoryManager:
     """Simple conversation history manager, one history manager for one run.
     Store only env turn logs in a single JSON file
@@ -80,7 +92,6 @@ class HistoryManager:
         self._load()
         os.makedirs(self.output_dir, exist_ok=True)
         if eval_override:
-            from ..evaluation.task_types import EvalTaskType
             task_map = EvalTaskType.get_task_map()
             for task_type in all_tasks:
                 mapped_task = task_map.get(task_type).__name__
@@ -240,7 +251,7 @@ class HistoryManager:
         
         if replay:
             # Override mode: replace existing turn log at the given index
-            assert 0 <= turn_idx < len(self.exploration_turn_logs), f"Invalid turn index {turn_idx} for replay (max: {len(self.exploration_turn_logs)-1})"
+            assert 0 <= turn_idx < len(self.exploration_turn_logs), f"Invalid turn index {turn_idx} for replay (max: {len(self.exploration_turn_logs)-1}) for output directory {self.output_dir}"
             turn_log['cogmap_log'] = self.exploration_turn_logs[turn_idx].get('cogmap_log')
             self.exploration_turn_logs[turn_idx] = turn_log
         else:
@@ -387,7 +398,7 @@ class HistoryManager:
         result = {
             "samples": samples,
             "exp_summary": {"group_performance": {}},
-            "eval_summary": {"group_performance": {}},
+            "eval_summary": {"group_performance": {}, "group_performance_by_mode": {}},
             "cogmap_summary": {"group_performance": {}},
             "correlation": {"group_performance": {}},
         }
@@ -402,6 +413,23 @@ class HistoryManager:
             if env_data_list:
                 result["exp_summary"]["group_performance"][config_name] = ExplorationManager.aggregate_group_performance(env_data_list)
                 result["eval_summary"]["group_performance"][config_name] = EvaluationManager.aggregate_group_performance(env_data_list)
+                modes: List[str] = []
+                for entry in env_data_list:
+                    if entry.get("evaluation_tasks"):
+                        modes.append("default")
+                    for k in entry.keys():
+                        if k.startswith("evaluation_tasks_") and entry.get(k):
+                            modes.append(k.split("evaluation_tasks_", 1)[1] or "default")
+                for mode in sorted(set(modes)):
+                    mode_env = []
+                    for entry in env_data_list:
+                        tasks = entry.get("evaluation_tasks") if mode == "default" else entry.get(f"evaluation_tasks_{mode}")
+                        if tasks:
+                            mode_env.append({"evaluation_tasks": tasks})
+                    if mode_env:
+                        result["eval_summary"]["group_performance_by_mode"].setdefault(mode, {})[config_name] = (
+                            EvaluationManager.aggregate_group_performance(mode_env)
+                        )
                 # Provide both exploration and evaluation cogmap summaries
                 exp_type = "active" if "active" in config_name else "passive"
                 result["cogmap_summary"]["group_performance"][config_name] = CognitiveMapManager.aggregate_group_performance(env_data_list, exp_type=exp_type)
@@ -418,7 +446,6 @@ class HistoryManager:
         metrics_file = os.path.join(combo_path, METRICS_BASENAME)
 
         sample_data = {
-            "sample_id": sample_key,
             "sample_id": sample_key,
             "env_turn_logs": [],  # Only exploration turn logs
             "false_belief_turn_logs": [],
@@ -441,8 +468,7 @@ class HistoryManager:
 
         # Load evaluation turn logs - store each task separately
         # Try loading all possible eval_mode files
-        all_eval_modes = ["default", "prompt_cogmap", "use_gt_cogmap", "use_model_cogmap"]
-        for eval_mode in all_eval_modes:
+        for eval_mode in _discover_eval_modes(combo_path):
             eval_file = os.path.join(combo_path, get_evaluation_log_basename(eval_mode))
             if os.path.exists(eval_file):
                 with open(eval_file, 'r') as f:
@@ -481,6 +507,11 @@ class HistoryManager:
             pass
         try:
             sample_data["metrics"]["evaluation"] = EvaluationManager.aggregate_per_sample(env_data)
+            for k, v in sample_data.items():
+                if k.startswith("evaluation_tasks_"):
+                    mode = k.split("evaluation_tasks_", 1)[1] or "default"
+                    mode_metrics = EvaluationManager.aggregate_per_sample({"evaluation_tasks": v})
+                    sample_data["metrics"][f"evaluation_{mode}"] = mode_metrics
         except Exception:
             pass
         try:
@@ -501,10 +532,16 @@ class HistoryManager:
                 if turn_log.get('message_images'):
                     turn_log['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in turn_log['message_images']]
 
-            # Process evaluation tasks
-            for task in sample_data["evaluation_tasks"].values():
-                for question_data in task.values():
-                        question_data['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in question_data['message_images']]
+            # Process evaluation tasks (all modes)
+            eval_sets = {"evaluation_tasks": sample_data.get("evaluation_tasks") or {}}
+            for k, v in sample_data.items():
+                if k.startswith("evaluation_tasks_") and v:
+                    eval_sets[k] = v
+            for task_set in eval_sets.values():
+                for task in task_set.values():
+                    for question_data in task.values():
+                        if question_data.get('message_images'):
+                            question_data['message_images'] = [os.path.relpath(img_path, model_dir) for img_path in question_data['message_images']]
 
         return sample_data if sample_data["env_turn_logs"] or sample_data["evaluation_tasks"] or sample_data["false_belief_turn_logs"] else None        
 

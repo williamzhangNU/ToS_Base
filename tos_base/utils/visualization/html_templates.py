@@ -111,75 +111,6 @@ body {
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* Summary sections */
-.summary-section {
-    margin: 30px 0;
-    padding: 20px;
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border-radius: 12px;
-    border: 1px solid #dee2e6;
-}
-
-.summary-card {
-    background: white;
-    border-radius: 8px;
-    padding: 20px;
-    margin: 15px 0;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    border-left: 4px solid;
-}
-
-.summary-card.exploration {
-    border-left-color: #17a2b8;
-}
-
-.summary-card.evaluation {
-    border-left-color: #28a745;
-}
-
-.summary-card h4 {
-    margin: 0 0 15px 0;
-    color: #495057;
-    font-size: 1.2em;
-    font-weight: 600;
-}
-
-.config-summaries {
-    margin: 30px 0;
-}
-
-.config-summary {
-    background: white;
-    border-radius: 8px;
-    padding: 20px;
-    margin: 15px 0;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    border: 1px solid #dee2e6;
-}
-
-.config-summary h4 {
-    margin: 0 0 15px 0;
-    color: #495057;
-    font-size: 1.1em;
-    font-weight: 600;
-}
-
-.config-stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 15px;
-    margin-bottom: 15px;
-}
-
-.stat-item {
-    background: #e9ecef;
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-size: 0.9em;
-    color: #495057;
-    font-weight: 500;
-}
-
 .group-metrics {
     margin: 10px 0;
     padding: 10px;
@@ -343,21 +274,6 @@ body {
     background: #f8f9fa;
     border-radius: 6px;
     border: 1px dashed #dee2e6;
-}
-
-.turn {
-    background: #fff;
-    border: 1px solid #e1e5e9;
-    border-radius: 12px;
-    margin: 20px 0;
-    padding: 20px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-    transition: all 0.3s ease;
-}
-
-.turn:hover {
-    box-shadow: 0 8px 25px rgba(0,0,0,0.1);
-    transform: translateY(-2px);
 }
 
 .turn h3 {
@@ -1705,84 +1621,6 @@ function toggleObservation(obsId) {
     }
 }
 
-// Expand thinking functionality
-function expandThinking(thinkId) {
-    const fullContent = document.getElementById(thinkId).innerHTML;
-    
-    // Create modal if it doesn't exist
-    let modal = document.getElementById('think-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'think-modal';
-        modal.className = 'modal-overlay';
-        modal.innerHTML = `
-            <div class="modal-content">
-                <span class="modal-close" onclick="closeThinking()">&times;</span>
-                <h3>🤔 Full Assistant Thinking</h3>
-                <div id="modal-think-content"></div>
-            </div>
-        `;
-        document.body.appendChild(modal);
-        
-        // Close on background click
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) closeThinking();
-        });
-    }
-    
-    // Set content and show modal
-    document.getElementById('modal-think-content').innerHTML = fullContent;
-    modal.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-}
-
-function closeThinking() {
-    const modal = document.getElementById('think-modal');
-    if (modal) {
-        modal.style.display = 'none';
-        document.body.style.overflow = 'auto';
-    }
-}
-
-// Toggle cognitive map response functionality
-function toggleCogmapResponse(cogmapId) {
-    const mainDiv = document.getElementById(cogmapId);
-    const fullContentDiv = document.getElementById(cogmapId + '_full');
-    const shortContentDiv = document.getElementById(cogmapId + '_short');
-    const contentSpan = mainDiv.querySelector('.content-text');
-    
-    if (mainDiv && fullContentDiv && shortContentDiv && contentSpan) {
-        const isExpanded = mainDiv.getAttribute('data-expanded') === 'true';
-        
-        if (isExpanded) {
-            // Switch to short content
-            contentSpan.innerHTML = shortContentDiv.innerHTML;
-            mainDiv.setAttribute('data-expanded', 'false');
-        } else {
-            // Switch to full content
-            contentSpan.innerHTML = fullContentDiv.innerHTML;
-            mainDiv.setAttribute('data-expanded', 'true');
-        }
-    }
-}
-
-// Toggle ground truth visibility
-function toggleGroundTruth(gtId) {
-    const content = document.getElementById(gtId);
-    if (content) {
-        // Check both style.display and computed style to handle initial inline styles
-        const isHidden = content.style.display === 'none' ||
-                        getComputedStyle(content).display === 'none';
-
-        if (isHidden) {
-            content.style.display = 'block';
-        } else {
-            content.style.display = 'none';
-        }
-    }
-}
-
-
 // Reset all combo states across ALL pages
 function resetAllComboStates() {
     console.log('Resetting all combo states globally');
@@ -1833,33 +1671,27 @@ function initEvaluationTaskSelector() {
     const taskSelector = document.getElementById('eval-task-selector');
     const taskSelect = document.getElementById('task-select');
 
-    // Look for evaluation tasks in the current page's active content
     const activeContent = currentPageDiv.querySelector('.combo-content-inner');
-    let evalSections = [];
+    const evalSections = activeContent ? activeContent.querySelectorAll('.eval-task') : [];
 
-    if (activeContent) {
-        // Look for eval tasks in the active combo content
-        evalSections = activeContent.querySelectorAll('.eval-task');
-    } else {
-        // Fallback: look in the entire page
-        evalSections = currentPageDiv.querySelectorAll('.eval-task');
-    }
-
-    if (evalSections.length > 1) {
-        // Show selector and populate options
+    if (evalSections.length > 0) {
         taskSelector.style.display = 'inline-block';
         taskSelect.innerHTML = '';
 
-        evalSections.forEach((section, index) => {
-            const taskName = section.getAttribute('data-task-name');
+        const seen = new Set();
+        evalSections.forEach((section) => {
+            const taskType = section.getAttribute('data-task-type');
+            if (!taskType || seen.has(taskType)) return;
+            seen.add(taskType);
             const option = document.createElement('option');
-            option.value = taskName;
-            option.textContent = taskName;
-            if (index === 0) option.selected = true;
+            option.value = taskType;
+            option.textContent = taskType;
             taskSelect.appendChild(option);
         });
 
-        // Show first task by default
+        if (taskSelect.options.length > 0) {
+            taskSelect.selectedIndex = 0;
+        }
         switchEvaluationTask();
     } else {
         taskSelector.style.display = 'none';
@@ -1869,36 +1701,17 @@ function initEvaluationTaskSelector() {
 // Switch evaluation task display
 function switchEvaluationTask() {
     const taskSelect = document.getElementById('task-select');
-    const selectedTask = taskSelect.value;
+    const selectedTask = taskSelect ? taskSelect.value : '';
     const currentPageDiv = document.querySelector('.sample-page.active');
-
     if (!currentPageDiv) return;
 
-    // Look for evaluation tasks in the current page's active content
     const activeContent = currentPageDiv.querySelector('.combo-content-inner');
-    let evalSections = [];
+    const evalSections = activeContent ? activeContent.querySelectorAll('.eval-task') : [];
 
-    if (activeContent) {
-        // Look for eval tasks in the active combo content
-        evalSections = activeContent.querySelectorAll('.eval-task');
-    } else {
-        // Fallback: look in the entire page
-        evalSections = currentPageDiv.querySelectorAll('.eval-task');
-    }
-
-    // Hide all evaluation tasks
     evalSections.forEach(section => {
-        section.style.display = 'none';
+        const taskType = section.getAttribute('data-task-type');
+        section.style.display = taskType === selectedTask ? 'block' : 'none';
     });
-
-    // Show selected task
-    const selectedSection = activeContent ?
-        activeContent.querySelector(`.eval-task[data-task-name="${selectedTask}"]`) :
-        currentPageDiv.querySelector(`.eval-task[data-task-name="${selectedTask}"]`);
-
-    if (selectedSection) {
-        selectedSection.style.display = 'block';
-    }
 }
 
 // Switch combination for a sample
@@ -1949,5 +1762,6 @@ function switchCombination(selectedCombo, sampleId) {
 
     // Reinitialize evaluation task selector for the new combination
     initEvaluationTaskSelector();
+
 }
 """
