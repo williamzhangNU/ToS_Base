@@ -100,12 +100,25 @@ class SpatialEnvLogger:
     @staticmethod
     def _save_data(aggregated_data: Dict, output_dir: str, model_name: str):
         """Save aggregated data to JSON and generate HTML dashboard."""
+        # Sort samples by run number before saving
+        samples = aggregated_data.get('samples', {})
+        def get_sample_number(sample_key: str) -> float:
+            """Extract numeric part from sample key for sorting."""
+            if sample_key.startswith('sample_run'):
+                # Extract number from 'sample_run59' -> 59
+                num_part = sample_key.replace('sample_run', '')
+                return int(num_part) if num_part.isdigit() else float('inf')
+            return float('inf')
+        
+        sorted_samples = dict(sorted(samples.items(), key=lambda x: get_sample_number(x[0])))
+        
         saved_data = {
             'meta_info': {
                 'model_name': model_name,
-                'n_envs': len(aggregated_data.get('samples', {})),
+                'n_envs': len(samples),
             },
-            **aggregated_data,
+            **{k: v for k, v in aggregated_data.items() if k != 'samples'},
+            'samples': sorted_samples,
         }
 
         # Convert OmegaConf objects to standard Python types
