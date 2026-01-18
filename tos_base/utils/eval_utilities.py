@@ -1024,37 +1024,46 @@ def evaluate_task_answer(
 
 
 def parse_cogmap_response_content(content: str) -> Tuple[Optional[Dict[str, Any]], str]:
-    """Parse content containing a cogmap JSON and an answer text.
-    
-    Args:
-        content: The string containing JSON block(s) and answer text.
-        
-    Returns:
-        Tuple of (cogmap_dict, answer_text). 
-        cogmap_dict is None if no valid JSON found.
-        answer_text is the content with the JSON block removed.
-    """
+    """Parse content containing a cogmap JSON and an answer text."""
     if not content:
         return None, ""
 
-    # Look for ```json ... ``` or ``` ... ```
-    # Non-greedy match for the content inside backticks
-    code_block_pattern = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
-    
-    match = code_block_pattern.search(content)
     cogmap = None
-    answer_text = content
-    
-    if match:
-        json_str = match.group(1)
-        full_match = match.group(0)
+    answer_text = content.strip()
+
+    # Try parsing with tags
+    cogmap_match = re.search(r"<cogmap>\s*(.*?)\s*</cogmap>", content, re.DOTALL | re.IGNORECASE)
+    answer_match = re.search(r"<answer>\s*(.*?)\s*</answer>", content, re.DOTALL | re.IGNORECASE)
+
+    if cogmap_match:
+        json_str = cogmap_match.group(1).strip()
+        # Extract potential JSON object (robust to wrapping text/markdown)
+        match = re.search(r"(\{.*\})", json_str, re.DOTALL)
+        if match:
+            json_str = match.group(1)
         try:
             cogmap = json.loads(json_str)
-            # Remove the code block from the text
-            answer_text = content.replace(full_match, "", 1).strip()
         except json.JSONDecodeError:
             pass
-            
+        
+        # If explicit answer tag missing, remove cogmap block and use rest
+        if not answer_match:
+            answer_text = content.replace(cogmap_match.group(0), "", 1).strip()
+
+    if answer_match:
+        answer_text = answer_match.group(1).strip()
+    
+    # Fallback to old logic (markdown code block) if no tags found
+    if not cogmap and not answer_match:
+        code_block_pattern = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+        match = code_block_pattern.search(content)
+        if match:
+            try:
+                cogmap = json.loads(match.group(1))
+                answer_text = content.replace(match.group(0), "", 1).strip()
+            except json.JSONDecodeError:
+                pass
+
     return cogmap, answer_text
 
 
