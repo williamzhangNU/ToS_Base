@@ -47,37 +47,6 @@ class DistanceBinSystem(Protocol):
         """Return description of the distance bin system."""
         pass
 
-
-# class EgoFrontBins:
-#     """Ego-centric front-focused bins (front is (-22.5°, 22.5°); nodes at ±22.5°, ±45°)."""
-#     EPS: ClassVar[float] = 1e-3
-#     # open intervals; preserve ±1e-3 slack at the interior edges
-#     BINS = [
-#         (-180.0, -45.0 - 1e-3),
-#         (-45.0 - 1e-3, -22.5 - 1e-3),
-#         (-22.5 - 1e-3, 22.5 + 1e-3),
-#         (22.5 + 1e-3, 45.0 + 1e-3),
-#         (45.0 + 1e-3, 180.0 + 1e-3),
-#     ]
-#     LABELS = ['beyond-fov', 'front-left', 'front', 'front-right', 'beyond-fov']
-
-#     def bin(self, degree: float):
-#         v = float(degree)
-#         for i, (lo, hi) in enumerate(self.BINS):
-#             if lo < v < hi:
-#                 return i, self.LABELS[i]
-#         return len(self.LABELS) - 1, self.LABELS[-1]
-
-#     @classmethod
-#     def prompt(cls) -> str:
-#         parts = [
-#             "[-45°,-22.5°)→front-left",
-#             "[-22.5°,22.5°]→front",
-#             "(22.5°,45°]→front-right",
-#             "other → beyond-fov",
-#         ]
-#         return "Bearing bins (egocentric): " + ", ".join(parts) + "."
-
 class EgoFrontBins:
     """Ego-centric front-focused bins (front is (-1e-3, 1e-3); nodes at ±22.5°, ±45°)."""
     EPS: ClassVar[float] = 1e-3
