@@ -146,13 +146,27 @@ __all__ = ["ChangedObject", "RoomModifier", "ObjectModifier"]
 
 
 if __name__ == "__main__":
+    import argparse
+    from .room_utils import RoomPlotter, initialize_room_from_json
+    from .image_handler import ImageHandler
     from .eval_utilities import create_and_plot_room
-    from .room_utils import RoomPlotter
 
-    seed = 0
-    room, agent, _ = create_and_plot_room(seed=seed, plot=True)
-    modified_room, changes = ObjectModifier(seed=seed, n_changes=4).modify(room)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_dir", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=0)
+    args = parser.parse_args()
+
+    if args.data_dir:
+        _, json_data = ImageHandler.load_data(args.data_dir, args.seed)
+        room, agent = initialize_room_from_json(json_data)
+    else:
+        room, agent, _ = create_and_plot_room(seed=args.seed, plot=True)
+    RoomPlotter.plot(room, agent, mode="img", save_path=f"room_{args.seed}_original.png")
+
+
+    modified_room, changes = ObjectModifier(seed=args.seed, n_changes=4, agent_pos=agent.pos).modify(room)
     assert all((c.pos ^ c.ori) for c in changes), "Each object must change position OR orientation (not both)."
     print("Changes:", [c.to_dict() for c in changes])
-    RoomPlotter.plot(modified_room, agent, mode="img", save_path=f"room_{seed}_modified.png")
+    print("Modified room:", modified_room.to_dict())
+    RoomPlotter.plot(modified_room, agent, mode="img", save_path=f"room_{args.seed}_modified.png")
 

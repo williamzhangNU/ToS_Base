@@ -40,8 +40,12 @@ class ImageHandler:
             self.base_dir = base_dir
             self.image_dir, self.json_data = ImageHandler.load_data(base_dir, seed)
         
-        self.objects = {obj['object_id']: obj for obj in self.json_data.get('objects', [])}
+        self._update_mappings()
         self._image_map, self._image_path_map = self._load_images()
+    
+    def _update_mappings(self):
+        """Update internal mappings from json_data."""
+        self.objects = {obj['object_id']: obj for obj in self.json_data.get('objects', [])}
         tmp = {obj['name']: obj['object_id'] for obj in self.objects.values()}
         tmp.update({k.replace('_', ' '): v for k, v in tmp.items()})
         tmp['agent'] = 'agent'
@@ -182,4 +186,9 @@ class ImageHandler:
     
     def transition_to_false_belief(self):
         """Transition the image handler to use false belief images."""
+        fb_path = os.path.join(self.image_dir, "falsebelief_exp.json")
+        if os.path.exists(fb_path):
+            with open(fb_path, 'r') as f:
+                self.json_data = json.load(f)
+            self._update_mappings()
         self._image_map, self._image_path_map = self._load_images(false_belief=True)
