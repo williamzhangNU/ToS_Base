@@ -93,12 +93,7 @@ class EvaluationManager:
         """Get current evaluation task."""
         assert self.current_index < len(self.tasks), "No more tasks"
         return self.tasks[self.current_index]
-    
-    def get_current_question(self) -> Optional[str]:
-        """Get question for current task."""
-        task = self._get_current_eval_task()
-        return None if task is None else task.question if task.question else task.generate_question()
-    
+
     # ---------------- Aggregations ----------------
     @staticmethod
     def aggregate_per_sample(env_data: Dict[str, Any]) -> Dict[str, Any]:

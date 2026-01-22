@@ -441,7 +441,6 @@ class HistoryManager:
         """Load data from a single sample's combination directory"""
         exploration_file = os.path.join(combo_path, EXPLORATION_LOG_BASENAME)
         false_belief_file = os.path.join(combo_path, FALSE_BELIEF_LOG_BASENAME)
-        evaluation_file = os.path.join(combo_path, EVALUATION_LOG_BASENAME)
         config_file = os.path.join(combo_path, STATE_BASENAME)
         metrics_file = os.path.join(combo_path, METRICS_BASENAME)
 
